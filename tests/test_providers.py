@@ -1,0 +1,249 @@
+from unittest.mock import AsyncMock, MagicMock
+
+from subagents.providers.gemini import Gemini
+from subagents.providers.openai import OpenAI
+
+
+def make_client(json_body):
+    response = AsyncMock()
+    response.raise_for_status = lambda: None
+    response.json = lambda: json_body
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=response)
+    return client
+
+
+def make_sync_client(json_body):
+    response = MagicMock()
+    response.raise_for_status = lambda: None
+    response.json = lambda: json_body
+    client = MagicMock()
+    client.post = MagicMock(return_value=response)
+    return client
+
+
+def make_async_stream_client(lines):
+    async def aiter_lines():
+        for line in lines:
+            yield line
+
+    response = MagicMock()
+    response.raise_for_status = lambda: None
+    response.aiter_lines = aiter_lines
+
+    class _StreamContext:
+        async def __aenter__(self):
+            return response
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+    client = MagicMock()
+    client.stream = MagicMock(return_value=_StreamContext())
+    return client
+
+
+def make_sync_stream_client(lines):
+    response = MagicMock()
+    response.raise_for_status = lambda: None
+    response.iter_lines = lambda: iter(lines)
+
+    class _StreamContext:
+        def __enter__(self):
+            return response
+
+        def __exit__(self, *exc_info):
+            return False
+
+    client = MagicMock()
+    client.stream = MagicMock(return_value=_StreamContext())
+    return client
+
+
+async def test_openai_complete_returns_content():
+    client = make_client(
+        {"choices": [{"message": {"content": "hello", "tool_calls": None}}]}
+    )
+    provider = OpenAI(model="gpt-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.content == "hello"
+    assert result.tool_calls == []
+    client.post.assert_awaited_once_with(
+        "/chat/completions",
+        json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+
+async def test_openai_complete_passes_tools_and_parses_tool_calls():
+    client = make_client(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {"function": {"name": "search", "arguments": '{"query": "cats"}'}}
+                        ],
+                    }
+                }
+            ]
+        }
+    )
+    provider = OpenAI(model="gpt-test", client=client)
+    tools = [{"name": "search", "description": "Search the web", "parameters": {"type": "object", "properties": {}}}]
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}], tools=tools)
+
+    assert result.tool_calls[0].name == "search"
+    assert result.tool_calls[0].arguments == {"query": "cats"}
+    sent_kwargs = client.post.await_args.kwargs
+    assert sent_kwargs["json"]["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "search",
+                "description": "Search the web",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+
+async def test_gemini_complete_returns_content():
+    client = make_client(
+        {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.content == "hello"
+    assert result.tool_calls == []
+    client.post.assert_awaited_once_with(
+        "/models/gemini-test:generateContent",
+        params={"key": None},
+        json={"contents": [{"role": "user", "parts": [{"text": "hi"}]}]},
+    )
+
+
+def test_openai_generate_returns_content_sync():
+    sync_client = make_sync_client(
+        {"choices": [{"message": {"content": "hello", "tool_calls": None}}]}
+    )
+    provider = OpenAI(model="gpt-test", client=AsyncMock(), sync_client=sync_client)
+
+    result = provider.generate([{"role": "user", "content": "hi"}])
+
+    assert result.content == "hello"
+    sync_client.post.assert_called_once_with(
+        "/chat/completions",
+        json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+
+def test_gemini_generate_returns_content_sync():
+    sync_client = make_sync_client(
+        {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}
+    )
+    provider = Gemini(model="gemini-test", client=AsyncMock(), sync_client=sync_client)
+
+    result = provider.generate([{"role": "user", "content": "hi"}])
+
+    assert result.content == "hello"
+    sync_client.post.assert_called_once_with(
+        "/models/gemini-test:generateContent",
+        params={"key": None},
+        json={"contents": [{"role": "user", "parts": [{"text": "hi"}]}]},
+    )
+
+
+async def test_openai_astream_yields_content_deltas():
+    client = make_async_stream_client(
+        [
+            'data: {"choices":[{"delta":{"content":"Hel"}}]}',
+            'data: {"choices":[{"delta":{"content":"lo"}}]}',
+            "data: [DONE]",
+        ]
+    )
+    provider = OpenAI(model="gpt-test", client=client)
+
+    chunks = [chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])]
+
+    assert chunks == ["Hel", "lo"]
+    sent_args = client.stream.call_args.args
+    sent_kwargs = client.stream.call_args.kwargs
+    assert sent_args == ("POST", "/chat/completions")
+    assert sent_kwargs["json"]["stream"] is True
+
+
+def test_openai_stream_yields_content_deltas_sync():
+    sync_client = make_sync_stream_client(
+        [
+            'data: {"choices":[{"delta":{"content":"Hel"}}]}',
+            'data: {"choices":[{"delta":{"content":"lo"}}]}',
+            "data: [DONE]",
+        ]
+    )
+    provider = OpenAI(model="gpt-test", client=AsyncMock(), sync_client=sync_client)
+
+    chunks = list(provider.stream([{"role": "user", "content": "hi"}]))
+
+    assert chunks == ["Hel", "lo"]
+
+
+async def test_gemini_astream_yields_content_deltas():
+    client = make_async_stream_client(
+        [
+            'data: {"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}',
+            'data: {"candidates":[{"content":{"parts":[{"text":"lo"}]}}]}',
+        ]
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    chunks = [chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])]
+
+    assert chunks == ["Hel", "lo"]
+    sent_args = client.stream.call_args.args
+    sent_kwargs = client.stream.call_args.kwargs
+    assert sent_args == ("POST", "/models/gemini-test:streamGenerateContent")
+    assert sent_kwargs["params"] == {"key": None, "alt": "sse"}
+
+
+def test_gemini_stream_yields_content_deltas_sync():
+    sync_client = make_sync_stream_client(
+        [
+            'data: {"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}',
+            'data: {"candidates":[{"content":{"parts":[{"text":"lo"}]}}]}',
+        ]
+    )
+    provider = Gemini(model="gemini-test", client=AsyncMock(), sync_client=sync_client)
+
+    chunks = list(provider.stream([{"role": "user", "content": "hi"}]))
+
+    assert chunks == ["Hel", "lo"]
+
+
+async def test_gemini_complete_passes_tools_and_parses_tool_calls():
+    client = make_client(
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"functionCall": {"name": "search", "args": {"query": "cats"}}}]
+                    }
+                }
+            ]
+        }
+    )
+    provider = Gemini(model="gemini-test", client=client)
+    tools = [{"name": "search", "description": "Search the web", "parameters": {"type": "object", "properties": {}}}]
+
+    result = await provider.agenerate([{"role": "assistant", "content": "hi"}], tools=tools)
+
+    assert result.tool_calls[0].name == "search"
+    assert result.tool_calls[0].arguments == {"query": "cats"}
+    sent_kwargs = client.post.await_args.kwargs
+    assert sent_kwargs["json"]["contents"] == [{"role": "model", "parts": [{"text": "hi"}]}]
+    assert sent_kwargs["json"]["tools"] is not None
