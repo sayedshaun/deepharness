@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+import json
+from collections.abc import AsyncIterator, Iterator
+from typing import Any
+
+import httpx
+
+from .base import CompletionResponse, LLM, ToolCall
+from .client import HTTPClient
+from .types import GeminiGenerateContentResponse
+
+_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+_ROLE_MAP = {"assistant": "model", "system": "user", "user": "user"}
+
+
+class Gemini(LLM):
+    """Provider backed by Google's Gemini REST API."""
+
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        client: httpx.AsyncClient | None = None,
+        sync_client: httpx.Client | None = None,
+    ):
+        self._http = HTTPClient(_BASE_URL, client=client, sync_client=sync_client)
+        self._api_key = api_key
+        self._model = model
+
+    async def agenerate(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> CompletionResponse:
+        payload = _build_payload(messages, tools)
+        response = await self._http.post(
+            f"/models/{self._model}:generateContent",
+            params={"key": self._api_key},
+            json=payload,
+        )
+        return _from_gemini_response(
+            GeminiGenerateContentResponse.model_validate(response.json())
+        )
+
+    def generate(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> CompletionResponse:
+        payload = _build_payload(messages, tools)
+        response = self._http.post_sync(
+            f"/models/{self._model}:generateContent",
+            params={"key": self._api_key},
+            json=payload,
+        )
+        return _from_gemini_response(
+            GeminiGenerateContentResponse.model_validate(response.json())
+        )
+
+    async def astream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[str]:
+        payload = _build_payload(messages, tools)
+        async with self._http.stream(
+            "POST",
+            f"/models/{self._model}:streamGenerateContent",
+            params={"key": self._api_key, "alt": "sse"},
+            json=payload,
+        ) as response:
+            async for line in response.aiter_lines():
+                data = _parse_sse_line(line)
+                if data is None:
+                    continue
+                delta = _extract_delta(data)
+                if delta:
+                    yield delta
+
+    def stream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Iterator[str]:
+        payload = _build_payload(messages, tools)
+        with self._http.stream_sync(
+            "POST",
+            f"/models/{self._model}:streamGenerateContent",
+            params={"key": self._api_key, "alt": "sse"},
+            json=payload,
+        ) as response:
+            for line in response.iter_lines():
+                data = _parse_sse_line(line)
+                if data is None:
+                    continue
+                delta = _extract_delta(data)
+                if delta:
+                    yield delta
+
+
+def _parse_sse_line(line: str) -> str | None:
+    if not line or not line.startswith("data:"):
+        return None
+    return line[len("data:") :].strip()
+
+
+def _extract_delta(data: str) -> str:
+    chunk = GeminiGenerateContentResponse.model_validate(json.loads(data))
+    parts = (
+        chunk.candidates[0].content.parts
+        if chunk.candidates and chunk.candidates[0].content
+        else []
+    )
+    return "".join(part.text for part in parts if part.text)
+
+
+def _build_payload(
+    messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"contents": [_to_gemini_content(m) for m in messages]}
+    if tools:
+        payload["tools"] = [_to_gemini_tool(t) for t in tools]
+    return payload
+
+
+def _to_gemini_content(message: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "role": _ROLE_MAP.get(message["role"], "user"),
+        "parts": [{"text": message["content"]}],
+    }
+
+
+def _to_gemini_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "functionDeclarations": [
+            {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": tool.get(
+                    "parameters", {"type": "object", "properties": {}}
+                ),
+            }
+        ]
+    }
+
+
+def _from_gemini_response(
+    response: GeminiGenerateContentResponse,
+) -> CompletionResponse:
+    parts = (
+        response.candidates[0].content.parts
+        if response.candidates and response.candidates[0].content
+        else []
+    )
+    text = "".join(part.text for part in parts if part.text)
+    tool_calls = [
+        ToolCall(name=part.functionCall.name, arguments=dict(part.functionCall.args))
+        for part in parts
+        if part.functionCall
+    ]
+    return CompletionResponse(content=text, tool_calls=tool_calls)
