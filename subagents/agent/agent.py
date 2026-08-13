@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from subagents.providers.base import LLM
-from subagents.toolbox import Toolbox
+
+from .toolbox import Toolbox
 
 
 class Agent:

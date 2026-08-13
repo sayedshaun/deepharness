@@ -1,6 +1,6 @@
 import pytest
 
-from subagents.toolbox import Toolbox, tool
+from subagents.agent import Toolbox, tool
 
 
 def test_bare_decorator_builds_spec_from_signature_and_docstring():

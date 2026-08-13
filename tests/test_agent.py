@@ -1,6 +1,5 @@
-from subagents.agent import Agent
+from subagents.agent import Agent, Toolbox, tool
 from subagents.providers.base import CompletionResponse, LLM, ToolCall
-from subagents.toolbox import Toolbox, tool
 
 
 class ScriptedProvider(LLM):
