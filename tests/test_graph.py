@@ -1,68 +1,158 @@
+from dataclasses import dataclass
+
 import pytest
 
-from subagents.agent import Agent
-from subagents.graph import Graph, Node
+from subagents.graph import Graph
 
 
-def make_node(name: str) -> Node:
-    return Node(Agent(name))
+@dataclass
+class State:
+    trace: list = None
+
+    def __post_init__(self):
+        if self.trace is None:
+            self.trace = []
 
 
-def test_add_node():
-    graph = Graph()
-    node = make_node("researcher")
+def test_add_registers_node_by_function_name():
+    graph = Graph(State)
 
-    graph.add_node(node)
+    @graph.add(start=True)
+    def func1(state: State) -> State:
+        return state
 
-    assert graph.nodes["researcher"] is node
+    assert "func1" in graph.nodes
+    assert graph.nodes["func1"].func is func1
+    assert graph.nodes["func1"].start is True
 
 
-def test_add_duplicate_node_raises():
-    graph = Graph()
-    graph.add_node(make_node("researcher"))
+def test_add_registers_node_by_explicit_name():
+    graph = Graph(State)
+
+    @graph.add(start=True, name="custom")
+    def func1(state: State) -> State:
+        return state
+
+    assert "custom" in graph.nodes
+    assert "func1" not in graph.nodes
+
+
+def test_add_duplicate_name_raises():
+    graph = Graph(State)
+
+    @graph.add(start=True, name="dup")
+    def func1(state: State) -> State:
+        return state
 
     with pytest.raises(ValueError):
-        graph.add_node(make_node("researcher"))
+
+        @graph.add(name="dup")
+        def func2(state: State) -> State:
+            return state
 
 
-def test_connect_nodes():
-    graph = Graph()
-    source = make_node("router")
-    target = make_node("researcher")
-    graph.add_node(source)
-    graph.add_node(target)
+def test_connect_by_function_reference():
+    graph = Graph(State)
 
-    graph.connect(source, target)
+    @graph.add(start=True)
+    def func1(state: State) -> State:
+        return state
 
-    assert source.edges == [(target, None)]
+    @graph.add(end=True)
+    def func2(state: State) -> State:
+        return state
+
+    graph.connect(func1, func2)
+
+    assert graph.edges["func1"] == [("func2", None)]
+
+
+def test_connect_by_name():
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def func1(state: State) -> State:
+        return state
+
+    @graph.add(end=True)
+    def func2(state: State) -> State:
+        return state
+
+    graph.connect("func1", "func2")
+
+    assert graph.edges["func1"] == [("func2", None)]
 
 
 def test_connect_with_condition():
-    graph = Graph()
-    source = make_node("router")
-    target = make_node("researcher")
-    graph.add_node(source)
-    graph.add_node(target)
-    condition = lambda state: state["task_type"] == "research"
+    graph = Graph(State)
 
-    graph.connect(source, target, condition=condition)
+    @graph.add(start=True)
+    def func1(state: State) -> State:
+        return state
 
-    assert source.edges == [(target, condition)]
+    @graph.add(end=True)
+    def func2(state: State) -> State:
+        return state
+
+    condition = lambda state: True
+    graph.connect(func1, func2, condition=condition)
+
+    assert graph.edges["func1"] == [("func2", condition)]
 
 
-def test_connect_unknown_source_raises():
-    graph = Graph()
-    target = make_node("researcher")
-    graph.add_node(target)
+def test_connect_unregistered_function_raises():
+    graph = Graph(State)
+
+    @graph.add(start=True, end=True)
+    def func1(state: State) -> State:
+        return state
+
+    def not_registered(state: State) -> State:
+        return state
 
     with pytest.raises(ValueError):
-        graph.connect(make_node("router"), target)
+        graph.connect(func1, not_registered)
 
 
-def test_connect_unknown_target_raises():
-    graph = Graph()
-    source = make_node("router")
-    graph.add_node(source)
+def test_build_without_start_node_raises():
+    graph = Graph(State)
+
+    @graph.add(end=True)
+    def func1(state: State) -> State:
+        return state
 
     with pytest.raises(ValueError):
-        graph.connect(source, make_node("researcher"))
+        graph.build()
+
+
+def test_build_with_unreachable_node_raises():
+    graph = Graph(State)
+
+    @graph.add(start=True, end=True)
+    def func1(state: State) -> State:
+        return state
+
+    @graph.add()
+    def orphan(state: State) -> State:
+        return state
+
+    with pytest.raises(ValueError):
+        graph.build()
+
+
+def test_build_with_cycle_raises():
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def func1(state: State) -> State:
+        return state
+
+    @graph.add()
+    def func2(state: State) -> State:
+        return state
+
+    graph.connect(func1, func2)
+    graph.connect(func2, func1)
+
+    with pytest.raises(ValueError):
+        graph.build()

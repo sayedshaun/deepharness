@@ -1,14 +1,12 @@
-from subagents.agent import Agent
-from subagents.executor import ExecutionError, Executor
-from subagents.graph import Graph, Node
-from subagents.toolbox import Toolbox, ToolSpec, tool
+from subagents.agent import Agent, Toolbox, ToolSpec, tool
+from subagents.graph import ExecutionError, Executor, Graph, NodeSpec
 
 __all__ = [
     "Agent",
     "ExecutionError",
     "Executor",
     "Graph",
-    "Node",
+    "NodeSpec",
     "Toolbox",
     "ToolSpec",
     "tool",

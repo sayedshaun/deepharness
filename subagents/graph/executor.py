@@ -1,52 +1,88 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import dataclasses
+import inspect
 from typing import Any
 
-from subagents.graph import Graph, Node
+from .graph import Condition, NodeSpec
 
 
 class ExecutionError(Exception):
-    """Raised when a node's agent fails after exhausting its retries."""
+    """Raised when a node function raises during graph execution."""
 
-    def __init__(self, node: Node, attempts: int, original: Exception):
-        self.node = node
-        self.agent_name = node.agent.name
-        self.attempts = attempts
+    def __init__(self, node_name: str, original: Exception):
+        self.node_name = node_name
         self.original = original
-        super().__init__(
-            f"Agent '{self.agent_name}' failed after {attempts} attempt(s): {original!r}"
-        )
+        super().__init__(f"Node '{node_name}' failed: {original!r}")
 
 
 class Executor:
-    """Runs a Graph starting from a given Node, threading state between agents."""
+    """Runs a built Graph to completion, merging concurrent branches' state.
 
-    async def run(self, graph: Graph, start: Node, state: dict[str, Any]) -> dict[str, Any]:
-        if start not in graph.nodes.values():
-            raise ValueError("Start node is not part of the graph")
+    Nodes with no unmet dependencies run concurrently in each wave. After a
+    wave completes, each branch's resulting state is merged back by field:
+    a field is applied only if it changed relative to the state the wave
+    started from, and later branches (in registration order) win ties.
+    """
 
-        current: Node | None = start
-        while current is not None:
-            state = await self._execute_node(current, state)
-            current = self._next_node(current, state)
+    def __init__(
+        self,
+        nodes: dict[str, NodeSpec],
+        predecessors: dict[str, list[tuple[str, Condition | None]]],
+    ):
+        self._nodes = nodes
+        self._predecessors = predecessors
 
-        return state
+    async def run(self, state: Any) -> Any:
+        current = copy.deepcopy(state)
+        finished: set[str] = set()
+        ready = [name for name, spec in self._nodes.items() if spec.start]
 
-    async def _execute_node(self, node: Node, state: dict[str, Any]) -> dict[str, Any]:
-        attempts = 0
-        while True:
-            attempts += 1
-            try:
-                if node.timeout is not None:
-                    return await asyncio.wait_for(node.agent.run(state), timeout=node.timeout)
-                return await node.agent.run(state)
-            except Exception as exc:
-                if attempts > node.retry:
-                    raise ExecutionError(node, attempts, exc) from exc
+        while ready:
+            snapshot = copy.deepcopy(current)
+            results = await asyncio.gather(
+                *(_run_node(name, self._nodes[name].func, copy.deepcopy(snapshot)) for name in ready)
+            )
 
-    def _next_node(self, node: Node, state: dict[str, Any]) -> Node | None:
-        for target, condition in node.edges:
-            if condition is None or condition(state):
-                return target
-        return None
+            for result in results:
+                _merge(current, snapshot, result)
+            finished.update(ready)
+
+            ready = self._next_ready(finished, current)
+
+        return current
+
+    def _next_ready(self, finished: set[str], state: Any) -> list[str]:
+        ready: list[str] = []
+        for name in self._nodes:
+            if name in finished:
+                continue
+
+            preds = self._predecessors[name]
+            if not preds or not all(source in finished for source, _ in preds):
+                continue
+
+            if any(condition is None or condition(state) for _, condition in preds):
+                ready.append(name)
+            else:
+                finished.add(name)  # all predecessors done, but no active edge: skip
+
+        return ready
+
+
+async def _run_node(name: str, func: Any, state: Any) -> Any:
+    try:
+        if inspect.iscoroutinefunction(func):
+            return await func(state)
+        return await asyncio.to_thread(func, state)
+    except Exception as exc:
+        raise ExecutionError(name, exc) from exc
+
+
+def _merge(current: Any, before: Any, branch_result: Any) -> None:
+    for field in dataclasses.fields(current):
+        new_value = getattr(branch_result, field.name)
+        if new_value != getattr(before, field.name):
+            setattr(current, field.name, new_value)

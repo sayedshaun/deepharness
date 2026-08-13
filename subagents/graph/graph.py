@@ -1,54 +1,119 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from subagents.agent import Agent
+if TYPE_CHECKING:
+    from .executor import Executor
 
-Condition = Callable[[dict[str, Any]], bool]
+StateT = TypeVar("StateT")
+Condition = Callable[[Any], bool]
+NodeFunc = Callable[[Any], Any]
 
 
-class Node:
+@dataclass(slots=True)
+class NodeSpec:
+    """A registered graph node: a plain function that transforms the state."""
 
-    def __init__(
-        self,
-        agent: Agent,
-        *,
-        retry: int = 0,
-        timeout: float | None = None,
-    ):
-        self.agent = agent
-        self.edges: list[tuple[Node, Condition | None]] = []
-        self.retry = retry
-        self.timeout = timeout
-
-    def connect(self, node: Node, *, condition: Condition | None = None) -> None:
-        self.edges.append((node, condition))
+    name: str
+    func: NodeFunc
+    start: bool = False
+    end: bool = False
 
 
 class Graph:
-    def __init__(self):
-        self.nodes: dict[str, Node] = {}
+    """A DAG of plain functions that transform a shared, typed state object.
 
-    def add_node(self, node: Node) -> None:
-        name = node.agent.name
+    Nodes are registered with @graph.add(...) and wired together with
+    graph.connect(source, target). graph.build() validates the graph
+    (reachability, cycles) and returns an Executor that runs it.
+    """
 
-        if name in self.nodes:
-            raise ValueError(f"Node already exists: {name}")
+    def __init__(self, state_type: type[StateT]):
+        self.state_type = state_type
+        self.nodes: dict[str, NodeSpec] = {}
+        self.edges: dict[str, list[tuple[str, Condition | None]]] = {}
 
-        self.nodes[name] = node
+    def add(
+        self,
+        *,
+        name: str | None = None,
+        start: bool = False,
+        end: bool = False,
+    ) -> Callable[[NodeFunc], NodeFunc]:
+        def decorator(func: NodeFunc) -> NodeFunc:
+            node_name = name or func.__name__
+            if node_name in self.nodes:
+                raise ValueError(f"Node already exists: {node_name}")
+            self.nodes[node_name] = NodeSpec(node_name, func, start=start, end=end)
+            self.edges[node_name] = []
+            return func
+
+        return decorator
 
     def connect(
         self,
-        source: Node,
-        target: Node,
+        source: NodeFunc | str,
+        target: NodeFunc | str,
         *,
         condition: Condition | None = None,
     ) -> None:
-        if source not in self.nodes.values():
-            raise ValueError("Source node is not part of the graph")
+        self.edges[self._name_of(source)].append((self._name_of(target), condition))
 
-        if target not in self.nodes.values():
-            raise ValueError("Target node is not part of the graph")
+    def _name_of(self, ref: NodeFunc | str) -> str:
+        if isinstance(ref, str):
+            if ref not in self.nodes:
+                raise ValueError(f"Unknown node: {ref}")
+            return ref
 
-        source.connect(target, condition=condition)
+        for name, spec in self.nodes.items():
+            if spec.func is ref:
+                return name
+        raise ValueError(f"Function is not registered as a node: {ref!r}")
+
+    def build(self) -> Executor:
+        from .executor import Executor
+
+        if not any(spec.start for spec in self.nodes.values()):
+            raise ValueError("Graph has no start node")
+
+        predecessors: dict[str, list[tuple[str, Condition | None]]] = {
+            name: [] for name in self.nodes
+        }
+        for source_name, edges in self.edges.items():
+            for target_name, condition in edges:
+                predecessors[target_name].append((source_name, condition))
+
+        for name, spec in self.nodes.items():
+            if not spec.start and not predecessors[name]:
+                raise ValueError(
+                    f"Node '{name}' is unreachable: no start flag and no incoming edges"
+                )
+
+        _check_acyclic(self.nodes, self.edges)
+
+        return Executor(self.nodes, predecessors)
+
+
+def _check_acyclic(
+    nodes: dict[str, NodeSpec],
+    edges: dict[str, list[tuple[str, Condition | None]]],
+) -> None:
+    in_degree = dict.fromkeys(nodes, 0)
+    for source_edges in edges.values():
+        for target_name, _ in source_edges:
+            in_degree[target_name] += 1
+
+    queue = [name for name, degree in in_degree.items() if degree == 0]
+    visited = 0
+    while queue:
+        name = queue.pop()
+        visited += 1
+        for target_name, _ in edges[name]:
+            in_degree[target_name] -= 1
+            if in_degree[target_name] == 0:
+                queue.append(target_name)
+
+    if visited != len(nodes):
+        raise ValueError("Graph contains a cycle")

@@ -1,163 +1,173 @@
 import asyncio
+from dataclasses import dataclass, field
 
 import pytest
 
-from subagents.agent import Agent
-from subagents.executor import ExecutionError, Executor
-from subagents.graph import Graph, Node
+from subagents.graph import ExecutionError, Graph
 
 
-class RecordingAgent(Agent):
-    """Appends its name to state['trace'] and returns state unchanged."""
+@dataclass
+class State:
+    trace: list = field(default_factory=list)
+    result_a: str = ""
+    result_b: str = ""
+    combined: str = ""
 
-    async def run(self, state):
-        state.setdefault("trace", []).append(self.name)
+
+async def test_executes_single_start_end_node():
+    graph = Graph(State)
+
+    @graph.add(start=True, end=True)
+    def only(state: State) -> State:
+        state.trace.append("only")
         return state
 
+    executor = graph.build()
+    result = await executor.run(State())
 
-class RoutingAgent(Agent):
-    """Sets state['task_type'] to a fixed value so a router can branch on it."""
-
-    def __init__(self, name: str, task_type: str):
-        super().__init__(name)
-        self.task_type = task_type
-
-    async def run(self, state):
-        state["task_type"] = self.task_type
-        state.setdefault("trace", []).append(self.name)
-        return state
-
-
-class FlakyAgent(Agent):
-    """Fails a fixed number of times before succeeding."""
-
-    def __init__(self, name: str, failures: int):
-        super().__init__(name)
-        self.failures = failures
-        self.calls = 0
-
-    async def run(self, state):
-        self.calls += 1
-        if self.calls <= self.failures:
-            raise RuntimeError(f"attempt {self.calls} failed")
-        state.setdefault("trace", []).append(self.name)
-        return state
-
-
-class SlowAgent(Agent):
-    async def run(self, state):
-        await asyncio.sleep(10)
-        return state
-
-
-def build_graph(*nodes: Node) -> Graph:
-    graph = Graph()
-    for node in nodes:
-        graph.add_node(node)
-    return graph
-
-
-async def test_executes_single_node():
-    node = Node(RecordingAgent("only"))
-    graph = build_graph(node)
-    executor = Executor()
-
-    result = await executor.run(graph, node, {})
-
-    assert result["trace"] == ["only"]
+    assert result.trace == ["only"]
 
 
 async def test_executes_sequential_chain():
-    first = Node(RecordingAgent("first"))
-    second = Node(RecordingAgent("second"))
-    graph = build_graph(first, second)
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def first(state: State) -> State:
+        state.trace.append("first")
+        return state
+
+    @graph.add(end=True)
+    def second(state: State) -> State:
+        state.trace.append("second")
+        return state
+
     graph.connect(first, second)
-    executor = Executor()
+    executor = graph.build()
 
-    result = await executor.run(graph, first, {})
+    result = await executor.run(State())
 
-    assert result["trace"] == ["first", "second"]
+    assert result.trace == ["first", "second"]
+
+
+async def test_parallel_start_nodes_merge_before_join_node():
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def func1(state: State) -> State:
+        state.result_a = "a"
+        return state
+
+    @graph.add(start=True)
+    def func2(state: State) -> State:
+        state.result_b = "b"
+        return state
+
+    @graph.add(end=True)
+    def func3(state: State) -> State:
+        state.combined = state.result_a + state.result_b
+        return state
+
+    graph.connect(func1, func3)
+    graph.connect(func2, func3)
+    executor = graph.build()
+
+    result = await executor.run(State())
+
+    assert result.result_a == "a"
+    assert result.result_b == "b"
+    assert result.combined == "ab"
 
 
 async def test_conditional_routing_follows_matching_edge():
-    router = Node(RoutingAgent("router", task_type="research"))
-    researcher = Node(RecordingAgent("researcher"))
-    writer = Node(RecordingAgent("writer"))
-    graph = build_graph(router, researcher, writer)
-    graph.connect(router, researcher, condition=lambda state: state["task_type"] == "research")
-    graph.connect(router, writer, condition=lambda state: state["task_type"] == "write")
-    executor = Executor()
+    graph = Graph(State)
 
-    result = await executor.run(graph, router, {})
+    @graph.add(start=True)
+    def router(state: State) -> State:
+        state.result_a = "research"
+        return state
 
-    assert result["trace"] == ["router", "researcher"]
+    @graph.add()
+    def researcher(state: State) -> State:
+        state.trace.append("researcher")
+        return state
+
+    @graph.add()
+    def writer(state: State) -> State:
+        state.trace.append("writer")
+        return state
+
+    graph.connect(router, researcher, condition=lambda state: state.result_a == "research")
+    graph.connect(router, writer, condition=lambda state: state.result_a == "write")
+    executor = graph.build()
+
+    result = await executor.run(State())
+
+    assert result.trace == ["researcher"]
 
 
 async def test_conditional_routing_stops_when_no_edge_matches():
-    router = Node(RoutingAgent("router", task_type="unknown"))
-    researcher = Node(RecordingAgent("researcher"))
-    graph = build_graph(router, researcher)
-    graph.connect(router, researcher, condition=lambda state: state["task_type"] == "research")
-    executor = Executor()
+    graph = Graph(State)
 
-    result = await executor.run(graph, router, {})
+    @graph.add(start=True)
+    def router(state: State) -> State:
+        state.result_a = "unknown"
+        return state
 
-    assert result["trace"] == ["router"]
+    @graph.add()
+    def researcher(state: State) -> State:
+        state.trace.append("researcher")
+        return state
 
+    graph.connect(router, researcher, condition=lambda state: state.result_a == "research")
+    executor = graph.build()
 
-async def test_retries_until_success():
-    node = Node(FlakyAgent("flaky", failures=2), retry=2)
-    graph = build_graph(node)
-    executor = Executor()
+    result = await executor.run(State())
 
-    result = await executor.run(graph, node, {})
-
-    assert result["trace"] == ["flaky"]
-    assert node.agent.calls == 3
+    assert result.trace == []
 
 
-async def test_raises_execution_error_after_exhausting_retries():
-    node = Node(FlakyAgent("flaky", failures=5), retry=2)
-    graph = build_graph(node)
-    executor = Executor()
+async def test_node_failure_raises_execution_error():
+    graph = Graph(State)
+
+    @graph.add(start=True, end=True)
+    def flaky(state: State) -> State:
+        raise RuntimeError("boom")
+
+    executor = graph.build()
 
     with pytest.raises(ExecutionError) as exc_info:
-        await executor.run(graph, node, {})
+        await executor.run(State())
 
-    assert exc_info.value.node is node
-    assert exc_info.value.agent_name == "flaky"
-    assert exc_info.value.attempts == 3
+    assert exc_info.value.node_name == "flaky"
     assert isinstance(exc_info.value.original, RuntimeError)
 
 
-async def test_timeout_raises_execution_error():
-    node = Node(SlowAgent("slow"), timeout=0.01)
-    graph = build_graph(node)
-    executor = Executor()
+async def test_supports_async_node_functions():
+    graph = Graph(State)
 
-    with pytest.raises(ExecutionError) as exc_info:
-        await executor.run(graph, node, {})
+    @graph.add(start=True, end=True)
+    async def async_node(state: State) -> State:
+        await asyncio.sleep(0)
+        state.trace.append("async_node")
+        return state
 
-    assert isinstance(exc_info.value.original, asyncio.TimeoutError)
+    executor = graph.build()
+    result = await executor.run(State())
 
-
-async def test_start_node_must_belong_to_graph():
-    graph = Graph()
-    outside_node = Node(RecordingAgent("outsider"))
-    executor = Executor()
-
-    with pytest.raises(ValueError):
-        await executor.run(graph, outside_node, {})
+    assert result.trace == ["async_node"]
 
 
-async def test_state_propagates_across_nodes():
-    first = Node(RecordingAgent("first"))
-    second = Node(RecordingAgent("second"))
-    graph = build_graph(first, second)
-    graph.connect(first, second)
-    executor = Executor()
+async def test_run_does_not_mutate_the_input_state():
+    graph = Graph(State)
 
-    result = await executor.run(graph, first, {"input": "topic"})
+    @graph.add(start=True, end=True)
+    def only(state: State) -> State:
+        state.trace.append("only")
+        return state
 
-    assert result["input"] == "topic"
-    assert result["trace"] == ["first", "second"]
+    executor = graph.build()
+    original = State()
+
+    await executor.run(original)
+
+    assert original.trace == []
