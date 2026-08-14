@@ -20,7 +20,9 @@ class Message(dict):
         return cls(role="user", content=content)
 
     @classmethod
-    def ai(cls, content: str, *, tool_calls: list[dict[str, Any]] | None = None) -> Message:
+    def ai(
+        cls, content: str, *, tool_calls: list[dict[str, Any]] | None = None
+    ) -> Message:
         message = cls(role="assistant", content=content)
         if tool_calls:
             message["tool_calls"] = tool_calls

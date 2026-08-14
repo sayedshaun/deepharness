@@ -14,7 +14,11 @@ def test_ai_message():
 
 
 def test_tool_message():
-    assert Message.tool("3", name="add") == {"role": "tool", "name": "add", "content": "3"}
+    assert Message.tool("3", name="add") == {
+        "role": "tool",
+        "name": "add",
+        "content": "3",
+    }
 
 
 def test_message_is_a_dict():
