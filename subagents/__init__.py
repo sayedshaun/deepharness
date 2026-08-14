@@ -1,4 +1,13 @@
-from subagents.agent import Agent, Message, Toolbox, ToolSpec, load_session, save_session, tool
+from subagents.agent import (
+    Agent,
+    Message,
+    TokenBudgetExceeded,
+    Toolbox,
+    ToolSpec,
+    load_session,
+    save_session,
+    tool,
+)
 from subagents.graph import ExecutionError, Executor, Graph, NodeSpec
 from subagents.providers import (
     VLLM,
@@ -15,6 +24,7 @@ from subagents.providers import (
     OpenAI,
     OpenRouter,
     Together,
+    TokenUsage,
 )
 
 __all__ = [
@@ -38,8 +48,10 @@ __all__ = [
     "OpenAI",
     "OpenRouter",
     "Together",
-    "Toolbox",
+    "TokenBudgetExceeded",
+    "TokenUsage",
     "ToolSpec",
+    "Toolbox",
     "load_session",
     "save_session",
     "tool",
