@@ -7,7 +7,7 @@ from typing import Any
 from subagents.providers.base import LLM, TokenUsage
 
 from ..errors import ConfigurationError, TokenBudgetExceeded
-from ..tools.toolbox import Toolbox
+from ..tools.toolbox import Toolbox, ToolSpec
 from .message import Message
 
 
@@ -59,6 +59,37 @@ class Agent:
         self.max_steps = max_steps
         self.token_budget = token_budget
         self.total_usage = TokenUsage(0, 0, 0)
+
+    def as_tool(
+        self, *, name: str | None = None, description: str | None = None
+    ) -> Callable[..., Any]:
+        """Wrap this Agent as a tool callable from another Agent's toolbox.
+
+        The wrapped tool takes a single `input` string, runs it through
+        arun() as a user message, and returns the resulting output text.
+        It's async, so register it with an Agent that calls arun() -
+        call_sync() raises ConfigurationError for async tools, same as any
+        other async tool.
+        """
+
+        async def call(input: str) -> str:
+            result = await self.arun({"messages": [Message.human(input)]})
+            return result["output"]
+
+        call.__name__ = name or self.name
+        call._tool_spec = ToolSpec(  # type: ignore[attr-defined]
+            name=name or self.name,
+            description=description
+            or self.system_prompt
+            or f"Delegate a task to the '{self.name}' agent.",
+            parameters={
+                "type": "object",
+                "properties": {"input": {"type": "string"}},
+                "required": ["input"],
+            },
+            func=call,
+        )
+        return call
 
     def _prepare_messages(self, state: dict[str, Any]) -> list[dict[str, Any]]:
         messages = list(state.get("messages", []))
