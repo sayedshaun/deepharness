@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/logo.svg" width="120" alt="">
+<img src="docs/assets/logo.svg" width="160" alt="">
 
 # Subagents
 
@@ -14,7 +14,7 @@ A small framework for wiring plain Python functions — and the agents inside th
 <img src="https://img.shields.io/badge/async-native-0EA5E9" alt="Async native">
 </p>
 
-**[Read the docs →](https://your-org.github.io/subagents/)**
+**[Read the docs →](https://sayedshaun.github.io/subagents/)**
 
 </div>
 
@@ -79,7 +79,7 @@ print(result.summary)  # Sales up 12% QoQ. Churn down to 4%.
 `fetch_sales` and `fetch_churn` both run in the first wave, concurrently. `summarize` waits
 for both before running.
 
-See the **[full documentation](https://your-org.github.io/subagents/)** for graphs, agents,
+See the **[full documentation](https://sayedshaun.github.io/subagents/)** for graphs, agents,
 tools, providers, and the API reference.
 
 ## Development
