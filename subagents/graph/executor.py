@@ -43,7 +43,10 @@ class Executor:
         while ready:
             snapshot = copy.deepcopy(current)
             results = await asyncio.gather(
-                *(_run_node(name, self._nodes[name].func, copy.deepcopy(snapshot)) for name in ready)
+                *(
+                    _run_node(name, self._nodes[name].func, copy.deepcopy(snapshot))
+                    for name in ready
+                )
             )
 
             for result in results:

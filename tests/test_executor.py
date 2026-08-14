@@ -96,7 +96,9 @@ async def test_conditional_routing_follows_matching_edge():
         state.trace.append("writer")
         return state
 
-    graph.connect(router, researcher, condition=lambda state: state.result_a == "research")
+    graph.connect(
+        router, researcher, condition=lambda state: state.result_a == "research"
+    )
     graph.connect(router, writer, condition=lambda state: state.result_a == "write")
     executor = graph.build()
 
@@ -118,7 +120,9 @@ async def test_conditional_routing_stops_when_no_edge_matches():
         state.trace.append("researcher")
         return state
 
-    graph.connect(router, researcher, condition=lambda state: state.result_a == "research")
+    graph.connect(
+        router, researcher, condition=lambda state: state.result_a == "research"
+    )
     executor = graph.build()
 
     result = await executor.run(State())

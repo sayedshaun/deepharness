@@ -9,8 +9,12 @@ def test_groq_uses_its_own_base_url_and_env_key(monkeypatch):
 
     provider = Groq("llama-3.3-70b-versatile")
 
-    assert str(provider._http.async_client.base_url) == "https://api.groq.com/openai/v1/"
-    assert provider._http.async_client.headers["authorization"] == "Bearer test-groq-key"
+    assert (
+        str(provider._http.async_client.base_url) == "https://api.groq.com/openai/v1/"
+    )
+    assert (
+        provider._http.async_client.headers["authorization"] == "Bearer test-groq-key"
+    )
 
 
 def test_explicit_api_key_overrides_env(monkeypatch):
@@ -40,9 +44,16 @@ def test_base_url_param_overrides_default(monkeypatch):
 
 def test_temperature_is_forwarded_to_the_request():
     client = AsyncMock()
-    provider = Groq("llama-3.3-70b-versatile", api_key="x", temperature=0.2, client=client)
+    provider = Groq(
+        "llama-3.3-70b-versatile", api_key="x", temperature=0.2, client=client
+    )
 
-    payload = _build_payload(provider._model, [{"role": "user", "content": "hi"}], None, provider._temperature)
+    payload = _build_payload(
+        provider._model,
+        [{"role": "user", "content": "hi"}],
+        None,
+        provider._temperature,
+    )
 
     assert payload["temperature"] == 0.2
 

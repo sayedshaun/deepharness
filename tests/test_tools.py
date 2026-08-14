@@ -1,7 +1,7 @@
 import pytest
 
 from subagents.agent import Toolbox
-from subagents.tools.coding import (
+from subagents.tools.prebuilt.coding import (
     CodingToolbox,
     apply_patch,
     grep,
