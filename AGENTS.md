@@ -99,6 +99,7 @@ Do not scatter raw HTTP calls throughout the application. Reuse clients where ap
 - Write concise, one-line commit messages, prefixed with a Conventional Commits type: `feat:`, `fix:`, `refactor:`, `style:`, `docs:`, `test:`, `chore:`.
 - After the prefix, use the imperative mood (e.g., "add", "fix", "update", "refactor").
 - Keep each commit focused on a single logical change.
+- When multiple files are staged for commit, commit one file at a time rather than bundling them into a single commit, unless the files together form one indivisible change (e.g., an implementation and its own test file).
 - Do not include AI-generated signatures or co-author lines.
 - Only commit when explicitly asked.
 
