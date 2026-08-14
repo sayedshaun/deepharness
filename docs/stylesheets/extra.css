@@ -1,0 +1,157 @@
+:root {
+  --sa-brand: #6e63f5;
+  --sa-brand-dark: #3b2fcb;
+  --sa-brand-light: #a29cf8;
+}
+
+/* ---------- Typography & layout polish ---------- */
+
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 2em;
+}
+
+.md-typeset {
+  line-height: 1.65;
+}
+
+.md-typeset table:not([class]) {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--sa-brand);
+  color: white;
+}
+
+.md-typeset code {
+  border-radius: 4px;
+}
+
+.md-typeset pre > code {
+  border-radius: 8px;
+}
+
+.md-typeset .highlight {
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* ---------- Hero ---------- */
+
+.sa-hero {
+  text-align: center;
+  padding: 3rem 1rem 2.5rem;
+  margin: -0.8rem -0.8rem 2rem;
+  border-radius: 0 0 20px 20px;
+  background: radial-gradient(
+    circle at 50% -20%,
+    rgba(110, 99, 245, 0.18),
+    rgba(110, 99, 245, 0) 60%
+  );
+}
+
+.sa-hero img {
+  width: 132px;
+  filter: drop-shadow(0 8px 20px rgba(110, 99, 245, 0.35));
+}
+
+.sa-hero h1 {
+  margin: 1.2rem 0 0.4rem;
+  font-size: 2.2rem;
+}
+
+.sa-hero p.sa-tagline {
+  font-size: 1.2rem;
+  font-weight: 600;
+  background: linear-gradient(120deg, var(--sa-brand-dark), var(--sa-brand));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin: 0;
+}
+
+.sa-hero p.sa-subtitle {
+  max-width: 640px;
+  margin: 0.9rem auto 1.6rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.sa-hero .md-button {
+  margin: 0.25rem;
+  border-radius: 8px;
+}
+
+.sa-hero .md-button--primary {
+  background-color: var(--sa-brand);
+  border-color: var(--sa-brand);
+}
+
+.sa-hero .md-button--primary:hover {
+  background-color: var(--sa-brand-dark);
+  border-color: var(--sa-brand-dark);
+}
+
+.sa-badges img {
+  margin: 0.15rem;
+}
+
+/* ---------- Grid cards ---------- */
+
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > ol > li {
+  border-radius: 12px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid.cards > ol > li:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(110, 99, 245, 0.18);
+  border-color: var(--sa-brand-light);
+}
+
+.md-typeset .grid.cards > ul > li:first-child,
+.md-typeset .grid.cards > ol > li:first-child {
+  --md-typeset-color: inherit;
+}
+
+.md-typeset .grid.cards svg,
+.md-typeset .grid.cards .twemoji {
+  color: var(--sa-brand);
+}
+
+/* ---------- Admonitions ---------- */
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 10px;
+}
+
+/* ---------- Header / nav accent ---------- */
+
+.md-header {
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
+.md-nav__link--active,
+.md-nav__link:focus,
+.md-nav__link:hover {
+  color: var(--sa-brand);
+}
+
+.md-typeset a {
+  text-decoration-thickness: 1px;
+}
