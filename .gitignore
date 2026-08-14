@@ -7,3 +7,5 @@ __pycache__/
 .env
 .DS_Store
 experiment.py
+test.py
+temp.py
