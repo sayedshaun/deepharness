@@ -35,8 +35,12 @@ run **concurrently**. `run()` is a real synchronous path rather than a wrapper, 
 if a registered tool turns out to be `async def` — there's no event loop here to await it:
 
 ```python
-result = agent.run({"messages": [Message.human("Weather in Oslo?")]})       # sync, sync tools only
-result = await agent.arun({"messages": [Message.human("Weather in Oslo?")]})  # async, concurrent tool calls
+result = agent.run(
+    {"messages": [Message.human("Weather in Oslo?")]}
+)  # sync, sync tools only
+result = await agent.arun(
+    {"messages": [Message.human("Weather in Oslo?")]}
+)  # async, concurrent tool calls
 ```
 
 ## Token usage and budgets
@@ -49,7 +53,9 @@ completion_tokens, total_tokens)`. `Agent` accumulates it across every model cal
 agent = Agent("assistant", model=llm, token_budget=50_000)
 
 state = await agent.arun({"messages": [Message.human("...")]})
-print(state["usage"])    # TokenUsage(prompt_tokens=..., completion_tokens=..., total_tokens=...)
+print(
+    state["usage"]
+)  # TokenUsage(prompt_tokens=..., completion_tokens=..., total_tokens=...)
 print(agent.total_usage)  # same object — persists across multiple arun()/run() calls
 ```
 
@@ -80,10 +86,12 @@ save_session("session.json", state["messages"])
 ```python
 from subagents import Message
 
-Message.system("You are a concise assistant.")   # {"role": "system", "content": "..."}
-Message.human("What's the weather in Oslo?")     # {"role": "user", "content": "..."}
-Message.ai("It's 22°C and sunny.")                # {"role": "assistant", "content": "..."}
-Message.tool("22°C, sunny", name="get_weather")   # {"role": "tool", "name": "...", "content": "..."}
+Message.system("You are a concise assistant.")  # {"role": "system", "content": "..."}
+Message.human("What's the weather in Oslo?")  # {"role": "user", "content": "..."}
+Message.ai("It's 22°C and sunny.")  # {"role": "assistant", "content": "..."}
+Message.tool(
+    "22°C, sunny", name="get_weather"
+)  # {"role": "tool", "name": "...", "content": "..."}
 ```
 
 You only need the `tool_calls=`/`call_id=` forms yourself if you're building messages by hand

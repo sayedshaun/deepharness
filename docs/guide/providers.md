@@ -13,8 +13,10 @@ Every provider implements the same interface, so swapping vendors is a one-line 
 from subagents import Anthropic, Gemini, OpenAI
 
 llm = OpenAI(model="gpt-4o-mini", api_key="sk-...")
-llm = Gemini(model="gemini-2.0-flash", api_key="...")           # same interface
-llm = Anthropic(model="claude-3-5-sonnet-20241022", api_key="sk-ant-...")  # same interface
+llm = Gemini(model="gemini-2.0-flash", api_key="...")  # same interface
+llm = Anthropic(
+    model="claude-3-5-sonnet-20241022", api_key="sk-ant-..."
+)  # same interface
 
 response = await llm.agenerate([{"role": "user", "content": "Hi"}])
 print(response.content, response.tool_calls)
@@ -45,7 +47,9 @@ API key from the environment automatically:
 ```python
 from subagents import Groq
 
-model = Groq("llama-3.3-70b-versatile", temperature=0)  # reads GROQ_API_KEY automatically
+model = Groq(
+    "llama-3.3-70b-versatile", temperature=0
+)  # reads GROQ_API_KEY automatically
 ```
 
 For a gateway that isn't listed, construct `OpenAI` directly with an explicit `base_url`:
