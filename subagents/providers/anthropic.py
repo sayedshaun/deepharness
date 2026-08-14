@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from subagents.providers.base import CompletionResponse, LLM, ToolCall
+from subagents.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 from subagents.providers.client import HTTPClient
 from subagents.providers.types import AnthropicMessage, AnthropicStreamEvent
 
@@ -166,7 +166,12 @@ def _to_anthropic_messages(
             if message.get("content"):
                 blocks.append({"type": "text", "text": message["content"]})
             blocks.extend(
-                {"type": "tool_use", "id": call["id"], "name": call["name"], "input": call["arguments"]}
+                {
+                    "type": "tool_use",
+                    "id": call["id"],
+                    "name": call["name"],
+                    "input": call["arguments"],
+                }
                 for call in message["tool_calls"]
             )
             converted.append({"role": "assistant", "content": blocks})
@@ -193,4 +198,13 @@ def _from_anthropic_response(message: AnthropicMessage) -> CompletionResponse:
         for block in message.content
         if block.type == "tool_use" and block.name
     ]
-    return CompletionResponse(content=text, tool_calls=tool_calls)
+    usage = (
+        TokenUsage(
+            prompt_tokens=message.usage.input_tokens,
+            completion_tokens=message.usage.output_tokens,
+            total_tokens=message.usage.input_tokens + message.usage.output_tokens,
+        )
+        if message.usage
+        else None
+    )
+    return CompletionResponse(content=text, tool_calls=tool_calls, usage=usage)
