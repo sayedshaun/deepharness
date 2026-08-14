@@ -12,6 +12,7 @@ dependencies = ["httpx", "pydantic"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "ruff"]
+docs = ["mkdocs", "mkdocs-material"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
