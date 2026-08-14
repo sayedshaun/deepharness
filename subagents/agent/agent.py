@@ -6,20 +6,9 @@ from typing import Any
 
 from subagents.providers.base import LLM, TokenUsage
 
+from ..errors import ConfigurationError, TokenBudgetExceeded
 from ..tools.toolbox import Toolbox
 from .message import Message
-
-
-class TokenBudgetExceeded(Exception):
-    """Raised when an Agent's cumulative token usage exceeds its token_budget."""
-
-    def __init__(self, agent_name: str, usage: TokenUsage, budget: int):
-        self.agent_name = agent_name
-        self.usage = usage
-        self.budget = budget
-        super().__init__(
-            f"{agent_name} used {usage.total_tokens} tokens, exceeding its budget of {budget}"
-        )
 
 
 class Agent:
@@ -121,7 +110,7 @@ class Agent:
                 break
 
             if self.toolbox is None:
-                raise RuntimeError(
+                raise ConfigurationError(
                     f"{self.name} received tool calls but has no toolbox configured"
                 )
 
@@ -162,7 +151,7 @@ class Agent:
                 break
 
             if self.toolbox is None:
-                raise RuntimeError(
+                raise ConfigurationError(
                     f"{self.name} received tool calls but has no toolbox configured"
                 )
 

@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, get_type_hints
 
+from ..errors import ConfigurationError, ToolNotFoundError
+
 _JSON_TYPES: dict[type, str] = {
     str: "string",
     int: "integer",
@@ -100,7 +102,7 @@ class Toolbox:
 
     def get(self, name: str) -> ToolSpec:
         if name not in self._tools:
-            raise KeyError(f"Unknown tool: {name}")
+            raise ToolNotFoundError(f"Unknown tool: {name}")
         return self._tools[name]
 
     def schemas(self) -> list[dict[str, Any]]:
@@ -118,7 +120,7 @@ class Toolbox:
             close = getattr(result, "close", None)
             if close is not None:
                 close()
-            raise RuntimeError(
+            raise ConfigurationError(
                 f"Tool '{name}' is async; use Agent.arun() instead of Agent.run()"
             )
         return result

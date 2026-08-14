@@ -8,9 +8,18 @@ from typing import Any
 
 import httpx
 
+from ..errors import ProviderError
+
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 3
 _BASE_DELAY_SECONDS = 1.0
+
+
+def _raise_for_status(response: httpx.Response) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise ProviderError(str(exc)) from exc
 
 
 def _retry_delay(attempt: int, response: httpx.Response) -> float:
@@ -53,7 +62,7 @@ class HTTPClient:
                 response.status_code not in _RETRYABLE_STATUS_CODES
                 or attempt == _MAX_RETRIES
             ):
-                response.raise_for_status()
+                _raise_for_status(response)
                 return response
             await asyncio.sleep(_retry_delay(attempt, response))
 
@@ -64,7 +73,7 @@ class HTTPClient:
                 response.status_code not in _RETRYABLE_STATUS_CODES
                 or attempt == _MAX_RETRIES
             ):
-                response.raise_for_status()
+                _raise_for_status(response)
                 return response
             time.sleep(_retry_delay(attempt, response))
 
@@ -81,7 +90,7 @@ class HTTPClient:
                 ):
                     delay = _retry_delay(attempt, response)
                 else:
-                    response.raise_for_status()
+                    _raise_for_status(response)
                     yield response
                     return
 
@@ -100,7 +109,7 @@ class HTTPClient:
                 ):
                     delay = _retry_delay(attempt, response)
                 else:
-                    response.raise_for_status()
+                    _raise_for_status(response)
                     yield response
                     return
 

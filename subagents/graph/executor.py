@@ -6,16 +6,8 @@ import dataclasses
 import inspect
 from typing import Any
 
+from ..errors import ExecutionError
 from .graph import Condition, NodeSpec
-
-
-class ExecutionError(Exception):
-    """Raised when a node function raises during graph execution."""
-
-    def __init__(self, node_name: str, original: Exception):
-        self.node_name = node_name
-        self.original = original
-        super().__init__(f"Node '{node_name}' failed: {original!r}")
 
 
 class Executor:

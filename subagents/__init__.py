@@ -8,6 +8,12 @@ from subagents.agent import (
     save_session,
     tool,
 )
+from subagents.errors import (
+    ConfigurationError,
+    ProviderError,
+    SubagentsError,
+    ToolNotFoundError,
+)
 from subagents.graph import ExecutionError, Executor, Graph, NodeSpec
 from subagents.providers import (
     VLLM,
@@ -33,6 +39,7 @@ __all__ = [
     "Agent",
     "Anthropic",
     "Cerebras",
+    "ConfigurationError",
     "DeepSeek",
     "ExecutionError",
     "Executor",
@@ -47,9 +54,12 @@ __all__ = [
     "Ollama",
     "OpenAI",
     "OpenRouter",
+    "ProviderError",
+    "SubagentsError",
     "Together",
     "TokenBudgetExceeded",
     "TokenUsage",
+    "ToolNotFoundError",
     "ToolSpec",
     "Toolbox",
     "load_session",
