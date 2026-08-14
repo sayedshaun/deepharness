@@ -1,4 +1,4 @@
-.PHONY: fmt test
+.PHONY: fmt test docs
 
 fmt:
 	python -m ruff format .
@@ -6,3 +6,6 @@ fmt:
 
 test:
 	python -m pytest -q
+
+docs:
+	python -m mkdocs serve
