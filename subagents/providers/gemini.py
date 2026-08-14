@@ -129,8 +129,33 @@ def _build_payload(
 
 
 def _to_gemini_content(message: dict[str, Any]) -> dict[str, Any]:
+    role = message["role"]
+
+    if role == "tool":
+        return {
+            "role": "user",
+            "parts": [
+                {
+                    "functionResponse": {
+                        "name": message.get("name", ""),
+                        "response": {"result": message["content"]},
+                    }
+                }
+            ],
+        }
+
+    if role == "assistant" and message.get("tool_calls"):
+        parts: list[dict[str, Any]] = []
+        if message.get("content"):
+            parts.append({"text": message["content"]})
+        parts.extend(
+            {"functionCall": {"name": call["name"], "args": call["arguments"]}}
+            for call in message["tool_calls"]
+        )
+        return {"role": "model", "parts": parts}
+
     return {
-        "role": _ROLE_MAP.get(message["role"], "user"),
+        "role": _ROLE_MAP.get(role, "user"),
         "parts": [{"text": message["content"]}],
     }
 
