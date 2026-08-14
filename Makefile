@@ -1,8 +1,8 @@
 .PHONY: fmt test
 
 fmt:
-	ruff format .
-	ruff check .
+	python -m ruff format .
+	python -m ruff check .
 
 test:
-	pytest -q
+	python -m pytest -q
