@@ -1,6 +1,15 @@
-from .agent import Agent
+from .agent import Agent, TokenBudgetExceeded
 from .message import Message
 from .session import load_session, save_session
-from .toolbox import Toolbox, ToolSpec, tool
+from ..tools.toolbox import Toolbox, ToolSpec, tool
 
-__all__ = ["Agent", "Message", "Toolbox", "ToolSpec", "load_session", "save_session", "tool"]
+__all__ = [
+    "Agent",
+    "Message",
+    "TokenBudgetExceeded",
+    "ToolSpec",
+    "Toolbox",
+    "load_session",
+    "save_session",
+    "tool",
+]
