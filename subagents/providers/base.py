@@ -22,11 +22,28 @@ class ToolCall:
 
 
 @dataclass(slots=True)
+class TokenUsage:
+    """Token counts for one completion, normalized across vendors."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+    def __add__(self, other: TokenUsage) -> TokenUsage:
+        return TokenUsage(
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+        )
+
+
+@dataclass(slots=True)
 class CompletionResponse:
     """Normalized result of a provider completion, independent of vendor format."""
 
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: TokenUsage | None = None
 
 
 class LLM(ABC):
