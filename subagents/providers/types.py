@@ -11,6 +11,7 @@ class OpenAIFunctionCall(BaseModel):
 
 
 class OpenAIToolCall(BaseModel):
+    id: str
     function: OpenAIFunctionCall
 
 
@@ -59,3 +60,25 @@ class GeminiCandidate(BaseModel):
 
 class GeminiGenerateContentResponse(BaseModel):
     candidates: list[GeminiCandidate] = []
+
+
+class AnthropicContentBlock(BaseModel):
+    type: str
+    text: str | None = None
+    id: str | None = None
+    name: str | None = None
+    input: dict[str, Any] = {}
+
+
+class AnthropicMessage(BaseModel):
+    content: list[AnthropicContentBlock] = []
+
+
+class AnthropicStreamDelta(BaseModel):
+    type: str
+    text: str | None = None
+
+
+class AnthropicStreamEvent(BaseModel):
+    type: str
+    delta: AnthropicStreamDelta | None = None
