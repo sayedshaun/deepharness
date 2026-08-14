@@ -5,13 +5,33 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import httpx
+from pydantic import BaseModel
 
-from .base import LLM, CompletionResponse, TokenUsage, ToolCall
+from .base import (
+    LLM,
+    REASONING_EFFORT_BUDGET_TOKENS,
+    CompletionResponse,
+    ReasoningEffort,
+    TokenUsage,
+    ToolCall,
+)
 from .client import HTTPClient
 from .types import GeminiGenerateContentResponse
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _ROLE_MAP = {"assistant": "model", "system": "user", "user": "user"}
+
+
+class GeminiPayload(BaseModel):
+    """Request body for :generateContent / :streamGenerateContent, serialized
+    with exclude_none so unset optional fields never hit the wire."""
+
+    contents: list[dict[str, Any]]
+    tools: list[dict[str, Any]] | None = None
+    generationConfig: dict[str, Any] | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return self.model_dump(exclude_none=True)
 
 
 class Gemini(LLM):
@@ -21,12 +41,25 @@ class Gemini(LLM):
         self,
         model: str,
         api_key: str | None = None,
+        *,
+        reasoning_effort: ReasoningEffort | None = None,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
         self._http = HTTPClient(_BASE_URL, client=client, sync_client=sync_client)
         self._api_key = api_key
         self._model = model
+        self._reasoning_effort = reasoning_effort
+
+    def _payload(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> GeminiPayload:
+        return _build_payload(messages, tools, self._reasoning_effort)
+
+    def _parse_response(self, response: httpx.Response) -> CompletionResponse:
+        return _from_gemini_response(
+            GeminiGenerateContentResponse.model_validate(response.json())
+        )
 
     async def agenerate(
         self,
@@ -34,15 +67,13 @@ class Gemini(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = _build_payload(messages, tools)
+        payload = self._payload(messages, tools)
         response = await self._http.post(
             f"/models/{self._model}:generateContent",
             params={"key": self._api_key},
-            json=payload,
+            json=payload.to_json(),
         )
-        return _from_gemini_response(
-            GeminiGenerateContentResponse.model_validate(response.json())
-        )
+        return self._parse_response(response)
 
     def generate(
         self,
@@ -50,15 +81,13 @@ class Gemini(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = _build_payload(messages, tools)
+        payload = self._payload(messages, tools)
         response = self._http.post_sync(
             f"/models/{self._model}:generateContent",
             params={"key": self._api_key},
-            json=payload,
+            json=payload.to_json(),
         )
-        return _from_gemini_response(
-            GeminiGenerateContentResponse.model_validate(response.json())
-        )
+        return self._parse_response(response)
 
     async def astream(
         self,
@@ -66,12 +95,12 @@ class Gemini(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
-        payload = _build_payload(messages, tools)
+        payload = self._payload(messages, tools)
         async with self._http.stream(
             "POST",
             f"/models/{self._model}:streamGenerateContent",
             params={"key": self._api_key, "alt": "sse"},
-            json=payload,
+            json=payload.to_json(),
         ) as response:
             async for line in response.aiter_lines():
                 data = _parse_sse_line(line)
@@ -87,12 +116,12 @@ class Gemini(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
-        payload = _build_payload(messages, tools)
+        payload = self._payload(messages, tools)
         with self._http.stream_sync(
             "POST",
             f"/models/{self._model}:streamGenerateContent",
             params={"key": self._api_key, "alt": "sse"},
-            json=payload,
+            json=payload.to_json(),
         ) as response:
             for line in response.iter_lines():
                 data = _parse_sse_line(line)
@@ -109,23 +138,31 @@ def _parse_sse_line(line: str) -> str | None:
     return line[len("data:") :].strip()
 
 
-def _extract_delta(data: str) -> str:
+def _extract_delta(data: str) -> str | None:
     chunk = GeminiGenerateContentResponse.model_validate(json.loads(data))
     parts = (
         chunk.candidates[0].content.parts
         if chunk.candidates and chunk.candidates[0].content
         else []
     )
-    return "".join(part.text for part in parts if part.text)
+    text = "".join(part.text for part in parts if part.text)
+    return text or None
 
 
 def _build_payload(
-    messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {"contents": [_to_gemini_content(m) for m in messages]}
-    if tools:
-        payload["tools"] = [_to_gemini_tool(t) for t in tools]
-    return payload
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    reasoning_effort: ReasoningEffort | None = None,
+) -> GeminiPayload:
+    generation_config: dict[str, Any] | None = None
+    if reasoning_effort:
+        budget = REASONING_EFFORT_BUDGET_TOKENS[reasoning_effort]
+        generation_config = {"thinkingConfig": {"thinkingBudget": budget}}
+    return GeminiPayload(
+        contents=[_to_gemini_content(m) for m in messages],
+        tools=[_to_gemini_tool(t) for t in tools] if tools else None,
+        generationConfig=generation_config,
+    )
 
 
 def _to_gemini_content(message: dict[str, Any]) -> dict[str, Any]:

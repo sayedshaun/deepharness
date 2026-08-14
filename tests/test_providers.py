@@ -560,6 +560,40 @@ async def test_gemini_complete_passes_tools_and_parses_tool_calls():
     assert sent_kwargs["json"]["tools"] is not None
 
 
+async def test_openai_sends_reasoning_effort():
+    client = make_client(
+        {"choices": [{"message": {"content": "hello", "tool_calls": None}}]}
+    )
+    provider = OpenAI(model="gpt-test", client=client, reasoning_effort="high")
+
+    await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert client.post.await_args.kwargs["json"]["reasoning_effort"] == "high"
+
+
+async def test_anthropic_sends_thinking_budget_and_raises_max_tokens():
+    client = make_client({"content": [{"type": "text", "text": "hello"}]})
+    provider = Anthropic(
+        model="claude-test", api_key="x", client=client, reasoning_effort="low"
+    )
+
+    await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    sent_json = client.post.await_args.kwargs["json"]
+    assert sent_json["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+    assert sent_json["max_tokens"] > 1024
+
+
+async def test_gemini_sends_thinking_budget():
+    client = make_client({"candidates": [{"content": {"parts": [{"text": "hello"}]}}]})
+    provider = Gemini(model="gemini-test", client=client, reasoning_effort="medium")
+
+    await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    sent_json = client.post.await_args.kwargs["json"]
+    assert sent_json["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 4096
+
+
 async def test_gemini_reconstructs_assistant_function_call_turn_and_result():
     client = make_client({"candidates": [{"content": {"parts": [{"text": "hello"}]}}]})
     provider = Gemini(model="gemini-test", client=client)

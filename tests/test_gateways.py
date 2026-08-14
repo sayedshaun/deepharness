@@ -55,10 +55,10 @@ def test_temperature_is_forwarded_to_the_request():
         provider._temperature,
     )
 
-    assert payload["temperature"] == 0.2
+    assert payload.temperature == 0.2
 
 
 def test_temperature_omitted_by_default():
     payload = _build_payload("model", [{"role": "user", "content": "hi"}], None, None)
 
-    assert "temperature" not in payload
+    assert "temperature" not in payload.to_json()

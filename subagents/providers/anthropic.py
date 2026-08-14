@@ -5,14 +5,38 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import httpx
+from pydantic import BaseModel
 
-from subagents.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
+from subagents.providers.base import (
+    LLM,
+    REASONING_EFFORT_BUDGET_TOKENS,
+    CompletionResponse,
+    ReasoningEffort,
+    TokenUsage,
+    ToolCall,
+)
 from subagents.providers.client import HTTPClient
 from subagents.providers.types import AnthropicMessage, AnthropicStreamEvent
 
 _BASE_URL = "https://api.anthropic.com/v1"
 _ANTHROPIC_VERSION = "2023-06-01"
 _DEFAULT_MAX_TOKENS = 4096
+
+
+class AnthropicPayload(BaseModel):
+    """Request body for POST /messages, serialized with exclude_none so unset
+    optional fields (system, tools, thinking, stream) never hit the wire."""
+
+    model: str
+    max_tokens: int
+    messages: list[dict[str, Any]]
+    system: str | None = None
+    tools: list[dict[str, Any]] | None = None
+    thinking: dict[str, Any] | None = None
+    stream: bool | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return self.model_dump(exclude_none=True)
 
 
 class Anthropic(LLM):
@@ -33,6 +57,8 @@ class Anthropic(LLM):
         model: str,
         api_key: str | None = None,
         max_tokens: int = _DEFAULT_MAX_TOKENS,
+        *,
+        reasoning_effort: ReasoningEffort | None = None,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
@@ -42,6 +68,19 @@ class Anthropic(LLM):
         )
         self._model = model
         self._max_tokens = max_tokens
+        self._reasoning_effort = reasoning_effort
+
+    def _payload(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> AnthropicPayload:
+        return _build_payload(
+            self._model, self._max_tokens, messages, tools, self._reasoning_effort
+        )
+
+    def _parse_response(self, response: httpx.Response) -> CompletionResponse:
+        return _from_anthropic_response(
+            AnthropicMessage.model_validate(response.json())
+        )
 
     async def agenerate(
         self,
@@ -49,11 +88,9 @@ class Anthropic(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = _build_payload(self._model, self._max_tokens, messages, tools)
-        response = await self._http.post("/messages", json=payload)
-        return _from_anthropic_response(
-            AnthropicMessage.model_validate(response.json())
-        )
+        payload = self._payload(messages, tools)
+        response = await self._http.post("/messages", json=payload.to_json())
+        return self._parse_response(response)
 
     def generate(
         self,
@@ -61,11 +98,9 @@ class Anthropic(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = _build_payload(self._model, self._max_tokens, messages, tools)
-        response = self._http.post_sync("/messages", json=payload)
-        return _from_anthropic_response(
-            AnthropicMessage.model_validate(response.json())
-        )
+        payload = self._payload(messages, tools)
+        response = self._http.post_sync("/messages", json=payload.to_json())
+        return self._parse_response(response)
 
     async def astream(
         self,
@@ -73,9 +108,11 @@ class Anthropic(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
-        payload = _build_payload(self._model, self._max_tokens, messages, tools)
-        payload["stream"] = True
-        async with self._http.stream("POST", "/messages", json=payload) as response:
+        payload = self._payload(messages, tools)
+        payload.stream = True
+        async with self._http.stream(
+            "POST", "/messages", json=payload.to_json()
+        ) as response:
             async for line in response.aiter_lines():
                 data = _parse_sse_line(line)
                 if data is None:
@@ -90,9 +127,11 @@ class Anthropic(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
-        payload = _build_payload(self._model, self._max_tokens, messages, tools)
-        payload["stream"] = True
-        with self._http.stream_sync("POST", "/messages", json=payload) as response:
+        payload = self._payload(messages, tools)
+        payload.stream = True
+        with self._http.stream_sync(
+            "POST", "/messages", json=payload.to_json()
+        ) as response:
             for line in response.iter_lines():
                 data = _parse_sse_line(line)
                 if data is None:
@@ -124,18 +163,23 @@ def _build_payload(
     max_tokens: int,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
-) -> dict[str, Any]:
+    reasoning_effort: ReasoningEffort | None = None,
+) -> AnthropicPayload:
     system, converted = _to_anthropic_messages(messages)
-    payload: dict[str, Any] = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": converted,
-    }
-    if system:
-        payload["system"] = system
-    if tools:
-        payload["tools"] = [_to_anthropic_tool(tool) for tool in tools]
-    return payload
+    thinking: dict[str, Any] | None = None
+    if reasoning_effort:
+        budget = REASONING_EFFORT_BUDGET_TOKENS[reasoning_effort]
+        thinking = {"type": "enabled", "budget_tokens": budget}
+        # Anthropic requires max_tokens to exceed the thinking budget.
+        max_tokens = max(max_tokens, budget + 1024)
+    return AnthropicPayload(
+        model=model,
+        max_tokens=max_tokens,
+        messages=converted,
+        system=system,
+        tools=[_to_anthropic_tool(tool) for tool in tools] if tools else None,
+        thinking=thinking,
+    )
 
 
 def _to_anthropic_messages(

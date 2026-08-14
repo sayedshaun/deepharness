@@ -3,7 +3,17 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+ReasoningEffort = Literal["low", "medium", "high"]
+
+# Anthropic and Gemini take a raw thinking-token budget, not an effort label.
+# These are the token counts each effort level maps to for those providers.
+REASONING_EFFORT_BUDGET_TOKENS: dict[ReasoningEffort, int] = {
+    "low": 1024,
+    "medium": 4096,
+    "high": 16000,
+}
 
 
 @dataclass(slots=True)
