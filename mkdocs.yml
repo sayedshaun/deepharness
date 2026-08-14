@@ -1,7 +1,8 @@
 site_name: Subagents
 site_description: Compose LLM agents into typed, concurrent workflows.
+site_url: https://sayedshaun.github.io/subagents/
 repo_name: subagents
-repo_url: https://github.com/your-org/subagents
+repo_url: https://github.com/sayedshaun/subagents
 edit_uri: edit/main/docs/
 
 theme:
@@ -30,18 +31,25 @@ theme:
     code: JetBrains Mono
   features:
     - navigation.instant
+    - navigation.instant.progress
     - navigation.tracking
     - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
+    - navigation.indexes
+    - navigation.path
     - navigation.top
     - navigation.footer
     - toc.follow
     - content.code.copy
     - content.action.edit
+    - content.tooltips
     - search.suggest
     - search.highlight
 
 markdown_extensions:
+  - attr_list
+  - md_in_html
   - admonition
   - pymdownx.details
   - pymdownx.superfences
@@ -50,6 +58,9 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - tables
   - toc:
       permalink: true
@@ -58,6 +69,7 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Guide:
+      - guide/index.md
       - Graphs: guide/graph.md
       - Agents: guide/agents.md
       - Tools: guide/tools.md
@@ -65,7 +77,10 @@ nav:
   - Examples: examples.md
   - API reference: reference/api.md
 
+extra_css:
+  - stylesheets/extra.css
+
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/your-org/subagents
+      link: https://github.com/sayedshaun/subagents
