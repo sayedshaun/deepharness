@@ -1,5 +1,5 @@
 from subagents.providers.anthropic import Anthropic
-from subagents.providers.base import CompletionResponse, LLM, ToolCall
+from subagents.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 from subagents.providers.gateways import (
     VLLM,
     XAI,
@@ -17,6 +17,7 @@ from subagents.providers.gemini import Gemini
 from subagents.providers.openai import OpenAI
 
 __all__ = [
+    "LLM",
     "VLLM",
     "XAI",
     "Anthropic",
@@ -26,12 +27,12 @@ __all__ = [
     "Fireworks",
     "Gemini",
     "Groq",
-    "LLM",
     "LMStudio",
     "Mistral",
     "Ollama",
     "OpenAI",
     "OpenRouter",
     "Together",
+    "TokenUsage",
     "ToolCall",
 ]

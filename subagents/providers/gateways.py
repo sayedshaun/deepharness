@@ -19,7 +19,6 @@ from __future__ import annotations
 from .openai import OpenAI
 
 
-
 class Groq(OpenAI):
     provider = "groq"
     default_base_url = "https://api.groq.com/openai/v1"
