@@ -4,7 +4,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from subagents.agent import Toolbox, tool
+from ..toolbox import Toolbox, tool
 
 _SKIP_DIRS = {
     ".git",
@@ -82,6 +82,7 @@ def run_shell(command: str, timeout: float = 30.0) -> str:
         capture_output=True,
         text=True,
         timeout=timeout,
+        check=False,
     )
     output = result.stdout + result.stderr
     if result.returncode != 0:
@@ -134,3 +135,7 @@ class CodingToolbox(Toolbox):
         super().__init__()
         for fn in (read_file, write_file, apply_patch, run_shell, grep):
             self.register(fn)
+
+    @staticmethod
+    def as_list():
+        return [read_file, write_file, apply_patch, run_shell, grep]
