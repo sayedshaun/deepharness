@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from subagents.agent import Agent, tool
-from subagents.providers.base import CompletionResponse, LLM, ToolCall
+from subagents.agent import Agent, TokenBudgetExceeded, tool
+from subagents.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 
 
 class ScriptedProvider(LLM):
@@ -71,13 +71,18 @@ async def test_dispatches_tool_calls_and_continues_loop():
 
     provider = ScriptedProvider(
         [
-            CompletionResponse(content="", tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})]),
+            CompletionResponse(
+                content="",
+                tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})],
+            ),
             CompletionResponse(content="the answer is 3"),
         ]
     )
     agent = Agent("assistant", provider, tools=[add])
 
-    state = await agent.arun({"messages": [{"role": "user", "content": "what is 1+2?"}]})
+    state = await agent.arun(
+        {"messages": [{"role": "user", "content": "what is 1+2?"}]}
+    )
 
     assert state["output"] == "the answer is 3"
     tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
@@ -139,7 +144,10 @@ def test_sync_run_dispatches_tool_calls():
 
     provider = ScriptedProvider(
         [
-            CompletionResponse(content="", tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})]),
+            CompletionResponse(
+                content="",
+                tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})],
+            ),
             CompletionResponse(content="the answer is 3"),
         ]
     )
@@ -159,12 +167,91 @@ def test_sync_run_raises_for_async_tool():
         return "never gets here"
 
     provider = ScriptedProvider(
-        [CompletionResponse(content="", tool_calls=[ToolCall(name="slow", arguments={"ms": 1})])]
+        [
+            CompletionResponse(
+                content="", tool_calls=[ToolCall(name="slow", arguments={"ms": 1})]
+            )
+        ]
     )
     agent = Agent("assistant", provider, tools=[slow])
 
     with pytest.raises(RuntimeError, match="async"):
         agent.run({"messages": [{"role": "user", "content": "go"}]})
+
+
+async def test_accumulates_usage_across_turns():
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[ToolCall(name="noop", arguments={})],
+                usage=TokenUsage(
+                    prompt_tokens=10, completion_tokens=5, total_tokens=15
+                ),
+            ),
+            CompletionResponse(
+                content="done",
+                usage=TokenUsage(
+                    prompt_tokens=20, completion_tokens=8, total_tokens=28
+                ),
+            ),
+        ]
+    )
+
+    @tool
+    def noop() -> str:
+        """Do nothing."""
+        return "noop"
+
+    agent = Agent("assistant", provider, tools=[noop])
+
+    state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
+
+    assert state["usage"] == TokenUsage(
+        prompt_tokens=30, completion_tokens=13, total_tokens=43
+    )
+    assert agent.total_usage == TokenUsage(
+        prompt_tokens=30, completion_tokens=13, total_tokens=43
+    )
+
+
+async def test_raises_when_token_budget_exceeded():
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="hi",
+                usage=TokenUsage(
+                    prompt_tokens=50, completion_tokens=60, total_tokens=110
+                ),
+            )
+        ]
+    )
+    agent = Agent("assistant", provider, token_budget=100)
+
+    with pytest.raises(TokenBudgetExceeded) as exc_info:
+        await agent.arun({"messages": [{"role": "user", "content": "go"}]})
+
+    assert exc_info.value.agent_name == "assistant"
+    assert exc_info.value.budget == 100
+    assert exc_info.value.usage.total_tokens == 110
+
+
+def test_sync_run_also_accumulates_usage():
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="hi",
+                usage=TokenUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+            )
+        ]
+    )
+    agent = Agent("assistant", provider)
+
+    state = agent.run({"messages": [{"role": "user", "content": "hi"}]})
+
+    assert state["usage"] == TokenUsage(
+        prompt_tokens=3, completion_tokens=2, total_tokens=5
+    )
 
 
 async def test_stops_after_max_steps():
@@ -175,8 +262,12 @@ async def test_stops_after_max_steps():
 
     provider = ScriptedProvider(
         [
-            CompletionResponse(content="", tool_calls=[ToolCall(name="noop", arguments={})]),
-            CompletionResponse(content="", tool_calls=[ToolCall(name="noop", arguments={})]),
+            CompletionResponse(
+                content="", tool_calls=[ToolCall(name="noop", arguments={})]
+            ),
+            CompletionResponse(
+                content="", tool_calls=[ToolCall(name="noop", arguments={})]
+            ),
         ]
     )
     agent = Agent("assistant", provider, tools=[noop], max_steps=2)
