@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from .base import CompletionResponse, LLM, ToolCall
+from .base import LLM, CompletionResponse, TokenUsage, ToolCall
 from .client import HTTPClient
 from .types import GeminiGenerateContentResponse
 
@@ -188,4 +188,13 @@ def _from_gemini_response(
         for part in parts
         if part.functionCall
     ]
-    return CompletionResponse(content=text, tool_calls=tool_calls)
+    usage = (
+        TokenUsage(
+            prompt_tokens=response.usageMetadata.promptTokenCount,
+            completion_tokens=response.usageMetadata.candidatesTokenCount,
+            total_tokens=response.usageMetadata.totalTokenCount,
+        )
+        if response.usageMetadata
+        else None
+    )
+    return CompletionResponse(content=text, tool_calls=tool_calls, usage=usage)
