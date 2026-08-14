@@ -10,8 +10,9 @@ import httpx
 
 from ..errors import ProviderError
 
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _MAX_RETRIES = 3
+_MAX_ATTEMPTS = _MAX_RETRIES + 1
 _BASE_DELAY_SECONDS = 1.0
 
 
@@ -56,7 +57,7 @@ class HTTPClient:
         )
 
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
-        for attempt in range(_MAX_RETRIES + 1):
+        for attempt in range(_MAX_ATTEMPTS):
             response = await self.async_client.post(url, **kwargs)
             if (
                 response.status_code not in _RETRYABLE_STATUS_CODES
@@ -67,7 +68,7 @@ class HTTPClient:
             await asyncio.sleep(_retry_delay(attempt, response))
 
     def post_sync(self, url: str, **kwargs: Any) -> httpx.Response:
-        for attempt in range(_MAX_RETRIES + 1):
+        for attempt in range(_MAX_ATTEMPTS):
             response = self.sync_client.post(url, **kwargs)
             if (
                 response.status_code not in _RETRYABLE_STATUS_CODES
@@ -81,7 +82,7 @@ class HTTPClient:
     async def stream(
         self, method: str, url: str, **kwargs: Any
     ) -> AsyncGenerator[httpx.Response]:
-        for attempt in range(_MAX_RETRIES + 1):
+        for attempt in range(_MAX_ATTEMPTS):
             delay = None
             async with self.async_client.stream(method, url, **kwargs) as response:
                 if (
@@ -100,7 +101,7 @@ class HTTPClient:
     def stream_sync(
         self, method: str, url: str, **kwargs: Any
     ) -> Generator[httpx.Response]:
-        for attempt in range(_MAX_RETRIES + 1):
+        for attempt in range(_MAX_ATTEMPTS):
             delay = None
             with self.sync_client.stream(method, url, **kwargs) as response:
                 if (
