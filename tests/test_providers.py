@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock
 
+from subagents.providers.anthropic import Anthropic
 from subagents.providers.gemini import Gemini
 from subagents.providers.openai import OpenAI
 
@@ -84,7 +85,10 @@ async def test_openai_complete_passes_tools_and_parses_tool_calls():
                     "message": {
                         "content": None,
                         "tool_calls": [
-                            {"function": {"name": "search", "arguments": '{"query": "cats"}'}}
+                            {
+                                "id": "call_1",
+                                "function": {"name": "search", "arguments": '{"query": "cats"}'},
+                            }
                         ],
                     }
                 }
@@ -96,6 +100,7 @@ async def test_openai_complete_passes_tools_and_parses_tool_calls():
 
     result = await provider.agenerate([{"role": "user", "content": "hi"}], tools=tools)
 
+    assert result.tool_calls[0].id == "call_1"
     assert result.tool_calls[0].name == "search"
     assert result.tool_calls[0].arguments == {"query": "cats"}
     sent_kwargs = client.post.await_args.kwargs
@@ -109,6 +114,33 @@ async def test_openai_complete_passes_tools_and_parses_tool_calls():
             },
         }
     ]
+
+
+async def test_openai_reconstructs_assistant_tool_call_turn_and_links_result():
+    client = make_client({"choices": [{"message": {"content": "done", "tool_calls": None}}]})
+    provider = OpenAI(model="gpt-test", client=client)
+
+    await provider.agenerate(
+        [
+            {"role": "user", "content": "search cats"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1", "name": "search", "arguments": {"query": "cats"}}],
+            },
+            {"role": "tool", "name": "search", "content": "found 3 cats", "tool_call_id": "call_1"},
+        ]
+    )
+
+    sent_messages = client.post.await_args.kwargs["json"]["messages"]
+    assert sent_messages[1] == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": "call_1", "type": "function", "function": {"name": "search", "arguments": '{"query": "cats"}'}}
+        ],
+    }
+    assert sent_messages[2] == {"role": "tool", "tool_call_id": "call_1", "content": "found 3 cats"}
 
 
 async def test_gemini_complete_returns_content():
@@ -225,6 +257,136 @@ def test_gemini_stream_yields_content_deltas_sync():
     assert chunks == ["Hel", "lo"]
 
 
+async def test_anthropic_complete_returns_content():
+    client = make_client({"content": [{"type": "text", "text": "hello"}]})
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.content == "hello"
+    assert result.tool_calls == []
+    client.post.assert_awaited_once_with(
+        "/messages",
+        json={"model": "claude-test", "max_tokens": 4096, "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+
+async def test_anthropic_moves_system_message_to_top_level_field():
+    client = make_client({"content": [{"type": "text", "text": "hello"}]})
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+
+    await provider.agenerate(
+        [
+            {"role": "system", "content": "be helpful"},
+            {"role": "user", "content": "hi"},
+        ]
+    )
+
+    sent_kwargs = client.post.await_args.kwargs
+    assert sent_kwargs["json"]["system"] == "be helpful"
+    assert sent_kwargs["json"]["messages"] == [{"role": "user", "content": "hi"}]
+
+
+async def test_anthropic_reconstructs_assistant_tool_use_turn_and_links_result():
+    client = make_client({"content": [{"type": "text", "text": "hello"}]})
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+
+    await provider.agenerate(
+        [
+            {"role": "user", "content": "search for cats"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "toolu_1", "name": "search", "arguments": {"query": "cats"}}],
+            },
+            {"role": "tool", "name": "search", "content": "found 3 cats", "tool_call_id": "toolu_1"},
+        ]
+    )
+
+    sent_messages = client.post.await_args.kwargs["json"]["messages"]
+    assert sent_messages[1] == {
+        "role": "assistant",
+        "content": [{"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"query": "cats"}}],
+    }
+    assert sent_messages[2] == {
+        "role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "found 3 cats"}],
+    }
+
+
+async def test_anthropic_complete_passes_tools_and_parses_tool_calls():
+    client = make_client(
+        {
+            "content": [
+                {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"query": "cats"}},
+            ]
+        }
+    )
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+    tools = [{"name": "search", "description": "Search the web", "parameters": {"type": "object", "properties": {}}}]
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}], tools=tools)
+
+    assert result.tool_calls[0].id == "toolu_1"
+    assert result.tool_calls[0].name == "search"
+    assert result.tool_calls[0].arguments == {"query": "cats"}
+    sent_kwargs = client.post.await_args.kwargs
+    assert sent_kwargs["json"]["tools"] == [
+        {
+            "name": "search",
+            "description": "Search the web",
+            "input_schema": {"type": "object", "properties": {}},
+        }
+    ]
+
+
+def test_anthropic_generate_returns_content_sync():
+    sync_client = make_sync_client({"content": [{"type": "text", "text": "hello"}]})
+    provider = Anthropic(model="claude-test", api_key="x", client=AsyncMock(), sync_client=sync_client)
+
+    result = provider.generate([{"role": "user", "content": "hi"}])
+
+    assert result.content == "hello"
+    sync_client.post.assert_called_once_with(
+        "/messages",
+        json={"model": "claude-test", "max_tokens": 4096, "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+
+async def test_anthropic_astream_yields_content_deltas():
+    client = make_async_stream_client(
+        [
+            'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}',
+            'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}',
+            'data: {"type":"message_stop"}',
+        ]
+    )
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+
+    chunks = [chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])]
+
+    assert chunks == ["Hel", "lo"]
+    sent_args = client.stream.call_args.args
+    sent_kwargs = client.stream.call_args.kwargs
+    assert sent_args == ("POST", "/messages")
+    assert sent_kwargs["json"]["stream"] is True
+
+
+def test_anthropic_stream_yields_content_deltas_sync():
+    sync_client = make_sync_stream_client(
+        [
+            'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}',
+            'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}',
+            'data: {"type":"message_stop"}',
+        ]
+    )
+    provider = Anthropic(model="claude-test", api_key="x", client=AsyncMock(), sync_client=sync_client)
+
+    chunks = list(provider.stream([{"role": "user", "content": "hi"}]))
+
+    assert chunks == ["Hel", "lo"]
+
+
 async def test_gemini_complete_passes_tools_and_parses_tool_calls():
     client = make_client(
         {
@@ -247,3 +409,30 @@ async def test_gemini_complete_passes_tools_and_parses_tool_calls():
     sent_kwargs = client.post.await_args.kwargs
     assert sent_kwargs["json"]["contents"] == [{"role": "model", "parts": [{"text": "hi"}]}]
     assert sent_kwargs["json"]["tools"] is not None
+
+
+async def test_gemini_reconstructs_assistant_function_call_turn_and_result():
+    client = make_client({"candidates": [{"content": {"parts": [{"text": "hello"}]}}]})
+    provider = Gemini(model="gemini-test", client=client)
+
+    await provider.agenerate(
+        [
+            {"role": "user", "content": "search for cats"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": None, "name": "search", "arguments": {"query": "cats"}}],
+            },
+            {"role": "tool", "name": "search", "content": "found 3 cats"},
+        ]
+    )
+
+    sent_contents = client.post.await_args.kwargs["json"]["contents"]
+    assert sent_contents[1] == {
+        "role": "model",
+        "parts": [{"functionCall": {"name": "search", "args": {"query": "cats"}}}],
+    }
+    assert sent_contents[2] == {
+        "role": "user",
+        "parts": [{"functionResponse": {"name": "search", "response": {"result": "found 3 cats"}}}],
+    }
