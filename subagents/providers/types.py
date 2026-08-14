@@ -24,8 +24,15 @@ class OpenAIChoice(BaseModel):
     message: OpenAIMessage
 
 
+class OpenAIUsage(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 class OpenAIChatCompletion(BaseModel):
     choices: list[OpenAIChoice]
+    usage: OpenAIUsage | None = None
 
 
 class OpenAIStreamDelta(BaseModel):
@@ -58,8 +65,15 @@ class GeminiCandidate(BaseModel):
     content: GeminiContent | None = None
 
 
+class GeminiUsageMetadata(BaseModel):
+    promptTokenCount: int = 0
+    candidatesTokenCount: int = 0
+    totalTokenCount: int = 0
+
+
 class GeminiGenerateContentResponse(BaseModel):
     candidates: list[GeminiCandidate] = []
+    usageMetadata: GeminiUsageMetadata | None = None
 
 
 class AnthropicContentBlock(BaseModel):
@@ -70,8 +84,14 @@ class AnthropicContentBlock(BaseModel):
     input: dict[str, Any] = {}
 
 
+class AnthropicUsage(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 class AnthropicMessage(BaseModel):
     content: list[AnthropicContentBlock] = []
+    usage: AnthropicUsage | None = None
 
 
 class AnthropicStreamDelta(BaseModel):
