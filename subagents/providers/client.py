@@ -66,6 +66,7 @@ class HTTPClient:
                 _raise_for_status(response)
                 return response
             await asyncio.sleep(_retry_delay(attempt, response))
+        raise AssertionError("unreachable: last attempt always returns or raises")
 
     def post_sync(self, url: str, **kwargs: Any) -> httpx.Response:
         for attempt in range(_MAX_ATTEMPTS):
@@ -77,6 +78,7 @@ class HTTPClient:
                 _raise_for_status(response)
                 return response
             time.sleep(_retry_delay(attempt, response))
+        raise AssertionError("unreachable: last attempt always returns or raises")
 
     @asynccontextmanager
     async def stream(
