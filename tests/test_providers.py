@@ -77,6 +77,33 @@ async def test_openai_complete_returns_content():
     )
 
 
+async def test_openai_parses_usage():
+    client = make_client(
+        {
+            "choices": [{"message": {"content": "hello", "tool_calls": None}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+    )
+    provider = OpenAI(model="gpt-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.usage.prompt_tokens == 10
+    assert result.usage.completion_tokens == 5
+    assert result.usage.total_tokens == 15
+
+
+async def test_openai_usage_is_none_when_absent():
+    client = make_client(
+        {"choices": [{"message": {"content": "hello", "tool_calls": None}}]}
+    )
+    provider = OpenAI(model="gpt-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.usage is None
+
+
 async def test_openai_complete_passes_tools_and_parses_tool_calls():
     client = make_client(
         {
@@ -87,7 +114,10 @@ async def test_openai_complete_passes_tools_and_parses_tool_calls():
                         "tool_calls": [
                             {
                                 "id": "call_1",
-                                "function": {"name": "search", "arguments": '{"query": "cats"}'},
+                                "function": {
+                                    "name": "search",
+                                    "arguments": '{"query": "cats"}',
+                                },
                             }
                         ],
                     }
@@ -96,7 +126,13 @@ async def test_openai_complete_passes_tools_and_parses_tool_calls():
         }
     )
     provider = OpenAI(model="gpt-test", client=client)
-    tools = [{"name": "search", "description": "Search the web", "parameters": {"type": "object", "properties": {}}}]
+    tools = [
+        {
+            "name": "search",
+            "description": "Search the web",
+            "parameters": {"type": "object", "properties": {}},
+        }
+    ]
 
     result = await provider.agenerate([{"role": "user", "content": "hi"}], tools=tools)
 
@@ -117,7 +153,9 @@ async def test_openai_complete_passes_tools_and_parses_tool_calls():
 
 
 async def test_openai_reconstructs_assistant_tool_call_turn_and_links_result():
-    client = make_client({"choices": [{"message": {"content": "done", "tool_calls": None}}]})
+    client = make_client(
+        {"choices": [{"message": {"content": "done", "tool_calls": None}}]}
+    )
     provider = OpenAI(model="gpt-test", client=client)
 
     await provider.agenerate(
@@ -126,9 +164,16 @@ async def test_openai_reconstructs_assistant_tool_call_turn_and_links_result():
             {
                 "role": "assistant",
                 "content": "",
-                "tool_calls": [{"id": "call_1", "name": "search", "arguments": {"query": "cats"}}],
+                "tool_calls": [
+                    {"id": "call_1", "name": "search", "arguments": {"query": "cats"}}
+                ],
             },
-            {"role": "tool", "name": "search", "content": "found 3 cats", "tool_call_id": "call_1"},
+            {
+                "role": "tool",
+                "name": "search",
+                "content": "found 3 cats",
+                "tool_call_id": "call_1",
+            },
         ]
     )
 
@@ -137,16 +182,22 @@ async def test_openai_reconstructs_assistant_tool_call_turn_and_links_result():
         "role": "assistant",
         "content": None,
         "tool_calls": [
-            {"id": "call_1", "type": "function", "function": {"name": "search", "arguments": '{"query": "cats"}'}}
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "search", "arguments": '{"query": "cats"}'},
+            }
         ],
     }
-    assert sent_messages[2] == {"role": "tool", "tool_call_id": "call_1", "content": "found 3 cats"}
+    assert sent_messages[2] == {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": "found 3 cats",
+    }
 
 
 async def test_gemini_complete_returns_content():
-    client = make_client(
-        {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}
-    )
+    client = make_client({"candidates": [{"content": {"parts": [{"text": "hello"}]}}]})
     provider = Gemini(model="gemini-test", client=client)
 
     result = await provider.agenerate([{"role": "user", "content": "hi"}])
@@ -158,6 +209,26 @@ async def test_gemini_complete_returns_content():
         params={"key": None},
         json={"contents": [{"role": "user", "parts": [{"text": "hi"}]}]},
     )
+
+
+async def test_gemini_parses_usage():
+    client = make_client(
+        {
+            "candidates": [{"content": {"parts": [{"text": "hello"}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 8,
+                "candidatesTokenCount": 4,
+                "totalTokenCount": 12,
+            },
+        }
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.usage.prompt_tokens == 8
+    assert result.usage.completion_tokens == 4
+    assert result.usage.total_tokens == 12
 
 
 def test_openai_generate_returns_content_sync():
@@ -201,7 +272,9 @@ async def test_openai_astream_yields_content_deltas():
     )
     provider = OpenAI(model="gpt-test", client=client)
 
-    chunks = [chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])]
+    chunks = [
+        chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])
+    ]
 
     assert chunks == ["Hel", "lo"]
     sent_args = client.stream.call_args.args
@@ -234,7 +307,9 @@ async def test_gemini_astream_yields_content_deltas():
     )
     provider = Gemini(model="gemini-test", client=client)
 
-    chunks = [chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])]
+    chunks = [
+        chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])
+    ]
 
     assert chunks == ["Hel", "lo"]
     sent_args = client.stream.call_args.args
@@ -267,8 +342,28 @@ async def test_anthropic_complete_returns_content():
     assert result.tool_calls == []
     client.post.assert_awaited_once_with(
         "/messages",
-        json={"model": "claude-test", "max_tokens": 4096, "messages": [{"role": "user", "content": "hi"}]},
+        json={
+            "model": "claude-test",
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
     )
+
+
+async def test_anthropic_parses_usage():
+    client = make_client(
+        {
+            "content": [{"type": "text", "text": "hello"}],
+            "usage": {"input_tokens": 12, "output_tokens": 6},
+        }
+    )
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.usage.prompt_tokens == 12
+    assert result.usage.completion_tokens == 6
+    assert result.usage.total_tokens == 18
 
 
 async def test_anthropic_moves_system_message_to_top_level_field():
@@ -297,20 +392,36 @@ async def test_anthropic_reconstructs_assistant_tool_use_turn_and_links_result()
             {
                 "role": "assistant",
                 "content": "",
-                "tool_calls": [{"id": "toolu_1", "name": "search", "arguments": {"query": "cats"}}],
+                "tool_calls": [
+                    {"id": "toolu_1", "name": "search", "arguments": {"query": "cats"}}
+                ],
             },
-            {"role": "tool", "name": "search", "content": "found 3 cats", "tool_call_id": "toolu_1"},
+            {
+                "role": "tool",
+                "name": "search",
+                "content": "found 3 cats",
+                "tool_call_id": "toolu_1",
+            },
         ]
     )
 
     sent_messages = client.post.await_args.kwargs["json"]["messages"]
     assert sent_messages[1] == {
         "role": "assistant",
-        "content": [{"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"query": "cats"}}],
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "search",
+                "input": {"query": "cats"},
+            }
+        ],
     }
     assert sent_messages[2] == {
         "role": "user",
-        "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "found 3 cats"}],
+        "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": "found 3 cats"}
+        ],
     }
 
 
@@ -318,12 +429,23 @@ async def test_anthropic_complete_passes_tools_and_parses_tool_calls():
     client = make_client(
         {
             "content": [
-                {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"query": "cats"}},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "search",
+                    "input": {"query": "cats"},
+                },
             ]
         }
     )
     provider = Anthropic(model="claude-test", api_key="x", client=client)
-    tools = [{"name": "search", "description": "Search the web", "parameters": {"type": "object", "properties": {}}}]
+    tools = [
+        {
+            "name": "search",
+            "description": "Search the web",
+            "parameters": {"type": "object", "properties": {}},
+        }
+    ]
 
     result = await provider.agenerate([{"role": "user", "content": "hi"}], tools=tools)
 
@@ -342,14 +464,20 @@ async def test_anthropic_complete_passes_tools_and_parses_tool_calls():
 
 def test_anthropic_generate_returns_content_sync():
     sync_client = make_sync_client({"content": [{"type": "text", "text": "hello"}]})
-    provider = Anthropic(model="claude-test", api_key="x", client=AsyncMock(), sync_client=sync_client)
+    provider = Anthropic(
+        model="claude-test", api_key="x", client=AsyncMock(), sync_client=sync_client
+    )
 
     result = provider.generate([{"role": "user", "content": "hi"}])
 
     assert result.content == "hello"
     sync_client.post.assert_called_once_with(
         "/messages",
-        json={"model": "claude-test", "max_tokens": 4096, "messages": [{"role": "user", "content": "hi"}]},
+        json={
+            "model": "claude-test",
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
     )
 
 
@@ -363,7 +491,9 @@ async def test_anthropic_astream_yields_content_deltas():
     )
     provider = Anthropic(model="claude-test", api_key="x", client=client)
 
-    chunks = [chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])]
+    chunks = [
+        chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])
+    ]
 
     assert chunks == ["Hel", "lo"]
     sent_args = client.stream.call_args.args
@@ -380,7 +510,9 @@ def test_anthropic_stream_yields_content_deltas_sync():
             'data: {"type":"message_stop"}',
         ]
     )
-    provider = Anthropic(model="claude-test", api_key="x", client=AsyncMock(), sync_client=sync_client)
+    provider = Anthropic(
+        model="claude-test", api_key="x", client=AsyncMock(), sync_client=sync_client
+    )
 
     chunks = list(provider.stream([{"role": "user", "content": "hi"}]))
 
@@ -393,21 +525,38 @@ async def test_gemini_complete_passes_tools_and_parses_tool_calls():
             "candidates": [
                 {
                     "content": {
-                        "parts": [{"functionCall": {"name": "search", "args": {"query": "cats"}}}]
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "search",
+                                    "args": {"query": "cats"},
+                                }
+                            }
+                        ]
                     }
                 }
             ]
         }
     )
     provider = Gemini(model="gemini-test", client=client)
-    tools = [{"name": "search", "description": "Search the web", "parameters": {"type": "object", "properties": {}}}]
+    tools = [
+        {
+            "name": "search",
+            "description": "Search the web",
+            "parameters": {"type": "object", "properties": {}},
+        }
+    ]
 
-    result = await provider.agenerate([{"role": "assistant", "content": "hi"}], tools=tools)
+    result = await provider.agenerate(
+        [{"role": "assistant", "content": "hi"}], tools=tools
+    )
 
     assert result.tool_calls[0].name == "search"
     assert result.tool_calls[0].arguments == {"query": "cats"}
     sent_kwargs = client.post.await_args.kwargs
-    assert sent_kwargs["json"]["contents"] == [{"role": "model", "parts": [{"text": "hi"}]}]
+    assert sent_kwargs["json"]["contents"] == [
+        {"role": "model", "parts": [{"text": "hi"}]}
+    ]
     assert sent_kwargs["json"]["tools"] is not None
 
 
@@ -421,7 +570,9 @@ async def test_gemini_reconstructs_assistant_function_call_turn_and_result():
             {
                 "role": "assistant",
                 "content": "",
-                "tool_calls": [{"id": None, "name": "search", "arguments": {"query": "cats"}}],
+                "tool_calls": [
+                    {"id": None, "name": "search", "arguments": {"query": "cats"}}
+                ],
             },
             {"role": "tool", "name": "search", "content": "found 3 cats"},
         ]
@@ -434,5 +585,12 @@ async def test_gemini_reconstructs_assistant_function_call_turn_and_result():
     }
     assert sent_contents[2] == {
         "role": "user",
-        "parts": [{"functionResponse": {"name": "search", "response": {"result": "found 3 cats"}}}],
+        "parts": [
+            {
+                "functionResponse": {
+                    "name": "search",
+                    "response": {"result": "found 3 cats"},
+                }
+            }
+        ],
     }
