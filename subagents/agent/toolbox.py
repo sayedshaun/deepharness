@@ -111,3 +111,14 @@ class Toolbox:
         if inspect.isawaitable(result):
             result = await result
         return result
+
+    def call_sync(self, name: str, **kwargs: Any) -> Any:
+        result = self.get(name).func(**kwargs)
+        if inspect.isawaitable(result):
+            close = getattr(result, "close", None)
+            if close is not None:
+                close()
+            raise RuntimeError(
+                f"Tool '{name}' is async; use Agent.arun() instead of Agent.run()"
+            )
+        return result
