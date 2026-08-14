@@ -8,10 +8,17 @@ from typing import Any
 
 @dataclass(slots=True)
 class ToolCall:
-    """A tool invocation requested by the model."""
+    """A tool invocation requested by the model.
+
+    id is the vendor's identifier for this specific call (OpenAI's
+    tool_calls[].id, Anthropic's tool_use block id) - carried through so the
+    result can be linked back to it on the next turn. None for vendors with
+    no such concept (Gemini correlates by name/position instead).
+    """
 
     name: str
     arguments: dict[str, Any]
+    id: str | None = None
 
 
 @dataclass(slots=True)
@@ -49,13 +56,15 @@ class LLM(ABC):
         """Synchronous counterpart to agenerate(), for use outside an event loop."""
 
     @abstractmethod
-    def astream(
+    async def astream(
         self,
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream the model's text response as it arrives, one content delta at a time."""
+        raise NotImplementedError
+        yield  # pragma: no cover - marks this as an async generator for type checkers
 
     @abstractmethod
     def stream(
@@ -65,3 +74,5 @@ class LLM(ABC):
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
         """Synchronous counterpart to astream(), for use outside an event loop."""
+        raise NotImplementedError
+        yield  # pragma: no cover - marks this as a generator for type checkers
