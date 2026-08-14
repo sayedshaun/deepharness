@@ -1,13 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "subagents"
 version = "0.1.0"
+description = "Compose LLM agents into typed, concurrent workflows."
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["httpx", "pydantic"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "ruff"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py311"
 
