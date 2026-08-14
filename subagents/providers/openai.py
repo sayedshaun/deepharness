@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from subagents.providers.base import CompletionResponse, LLM, ToolCall
+from subagents.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 from subagents.providers.client import HTTPClient
 from subagents.providers.types import OpenAIChatCompletion, OpenAIStreamChunk
 
@@ -199,4 +199,15 @@ def _from_openai_response(completion: OpenAIChatCompletion) -> CompletionRespons
         )
         for call in (message.tool_calls or [])
     ]
-    return CompletionResponse(content=message.content or "", tool_calls=tool_calls)
+    usage = (
+        TokenUsage(
+            prompt_tokens=completion.usage.prompt_tokens,
+            completion_tokens=completion.usage.completion_tokens,
+            total_tokens=completion.usage.total_tokens,
+        )
+        if completion.usage
+        else None
+    )
+    return CompletionResponse(
+        content=message.content or "", tool_calls=tool_calls, usage=usage
+    )
