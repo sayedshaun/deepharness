@@ -2,21 +2,30 @@
 title: Subagents
 ---
 
-<div align="center" markdown>
+<div class="sa-hero" markdown>
 
-<img src="assets/logo.svg" width="120" alt="Subagents logo">
+![Subagents logo](assets/logo.svg)
 
 # Subagents
 
-**Compose LLM agents into typed, concurrent workflows.**
+<p class="sa-tagline">Compose LLM agents into typed, concurrent workflows.</p>
 
+<p class="sa-subtitle">
 A small framework for wiring plain Python functions — and the agents inside them — into a
 graph that runs branches in parallel, routes on conditions, and threads one typed state
 object through the whole thing.
+</p>
+
+[Get started :octicons-arrow-right-24:](getting-started.md){ .md-button .md-button--primary }
+[View on GitHub](https://github.com/sayedshaun/subagents){ .md-button }
+
+<p class="sa-badges">
+<img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
+<img src="https://img.shields.io/badge/dependencies-httpx%20%2B%20pydantic-6E63F5" alt="Dependencies: httpx + pydantic">
+<img src="https://img.shields.io/badge/async-native-0EA5E9" alt="Async native">
+</p>
 
 </div>
-
----
 
 ## Why Subagents
 
