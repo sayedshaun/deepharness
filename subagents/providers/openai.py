@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -14,18 +15,37 @@ _BASE_URL = "https://api.openai.com/v1"
 
 
 class OpenAI(LLM):
-    """Provider backed by OpenAI's Chat Completions REST API."""
+    """Provider backed by OpenAI's Chat Completions REST API.
+
+    Also the base for any OpenAI-compatible gateway (see providers/gateways.py):
+    a subclass overriding default_base_url/env_key gets that endpoint and
+    reads its API key from that environment variable with no other code.
+    """
+
+    provider: str = "openai"
+    default_base_url: str = _BASE_URL
+    env_key: str = "OPENAI_API_KEY"
 
     def __init__(
         self,
         model: str,
         api_key: str | None = None,
+        *,
+        base_url: str | None = None,
+        temperature: float | None = None,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
-        headers = {"Authorization": f"Bearer {api_key}"}
-        self._http = HTTPClient(_BASE_URL, headers=headers, client=client, sync_client=sync_client)
+        if api_key is None and self.env_key:
+            api_key = os.environ.get(self.env_key)
+
+        headers = {"Authorization": f"Bearer {api_key or ''}"}
+        resolved_base_url = base_url or self.default_base_url
+        self._http = HTTPClient(
+            resolved_base_url, headers=headers, client=client, sync_client=sync_client
+        )
         self._model = model
+        self._temperature = temperature
 
     async def agenerate(
         self,
@@ -33,9 +53,11 @@ class OpenAI(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = _build_payload(self._model, messages, tools)
+        payload = _build_payload(self._model, messages, tools, self._temperature)
         response = await self._http.post("/chat/completions", json=payload)
-        return _from_openai_response(OpenAIChatCompletion.model_validate(response.json()))
+        return _from_openai_response(
+            OpenAIChatCompletion.model_validate(response.json())
+        )
 
     def generate(
         self,
@@ -43,9 +65,11 @@ class OpenAI(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = _build_payload(self._model, messages, tools)
+        payload = _build_payload(self._model, messages, tools, self._temperature)
         response = self._http.post_sync("/chat/completions", json=payload)
-        return _from_openai_response(OpenAIChatCompletion.model_validate(response.json()))
+        return _from_openai_response(
+            OpenAIChatCompletion.model_validate(response.json())
+        )
 
     async def astream(
         self,
@@ -53,9 +77,11 @@ class OpenAI(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
-        payload = _build_payload(self._model, messages, tools)
+        payload = _build_payload(self._model, messages, tools, self._temperature)
         payload["stream"] = True
-        async with self._http.stream("POST", "/chat/completions", json=payload) as response:
+        async with self._http.stream(
+            "POST", "/chat/completions", json=payload
+        ) as response:
             async for line in response.aiter_lines():
                 data = _parse_sse_line(line)
                 if data is None:
@@ -72,9 +98,11 @@ class OpenAI(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
-        payload = _build_payload(self._model, messages, tools)
+        payload = _build_payload(self._model, messages, tools, self._temperature)
         payload["stream"] = True
-        with self._http.stream_sync("POST", "/chat/completions", json=payload) as response:
+        with self._http.stream_sync(
+            "POST", "/chat/completions", json=payload
+        ) as response:
             for line in response.iter_lines():
                 data = _parse_sse_line(line)
                 if data is None:
@@ -98,12 +126,56 @@ def _extract_delta(data: str) -> str | None:
 
 
 def _build_payload(
-    model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    temperature: float | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"model": model, "messages": messages}
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": _to_openai_messages(messages),
+    }
     if tools:
         payload["tools"] = [_to_openai_tool(tool) for tool in tools]
+    if temperature is not None:
+        payload["temperature"] = temperature
     return payload
+
+
+def _to_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    converted: list[dict[str, Any]] = []
+
+    for message in messages:
+        if message["role"] == "assistant" and message.get("tool_calls"):
+            converted.append(
+                {
+                    "role": "assistant",
+                    "content": message.get("content") or None,
+                    "tool_calls": [
+                        {
+                            "id": call["id"],
+                            "type": "function",
+                            "function": {
+                                "name": call["name"],
+                                "arguments": json.dumps(call["arguments"]),
+                            },
+                        }
+                        for call in message["tool_calls"]
+                    ],
+                }
+            )
+        elif message["role"] == "tool":
+            converted.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": message.get("tool_call_id", ""),
+                    "content": message["content"],
+                }
+            )
+        else:
+            converted.append(dict(message))
+
+    return converted
 
 
 def _to_openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
@@ -120,7 +192,11 @@ def _to_openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
 def _from_openai_response(completion: OpenAIChatCompletion) -> CompletionResponse:
     message = completion.choices[0].message
     tool_calls = [
-        ToolCall(name=call.function.name, arguments=json.loads(call.function.arguments))
+        ToolCall(
+            id=call.id,
+            name=call.function.name,
+            arguments=json.loads(call.function.arguments),
+        )
         for call in (message.tool_calls or [])
     ]
     return CompletionResponse(content=message.content or "", tool_calls=tool_calls)
