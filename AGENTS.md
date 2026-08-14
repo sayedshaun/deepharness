@@ -16,29 +16,15 @@ Runtime dependencies are strictly limited to:
 
 **Do not add other dependencies.** Use the Python standard library whenever possible.
 
-## Data Models
-
-Use the right tool for the job:
-
-- **`dataclass`** → internal/domain data, configuration, state, nodes, agent metadata.
-- **Pydantic** → structured LLM output, external input/output, validation, serialization.
-
-Prefer:
-
-```python
-@dataclass(slots=True)
-class AgentConfig:
-    name: str
-```
-
 ## Architecture
 
 Keep modules focused and responsibilities separate.
 
 ```text
-agent/      → agent logic
-graph/      → graph/node execution
-...
+agent/      → agent think/act loop, Toolbox, @tool
+graph/      → graph/node/edge definitions, executor (waves + merging)
+providers/  → LLM interface, HTTPClient, wire types, per-vendor clients
+tools/      → built-in tool implementations
 ```
 
 Avoid large files, circular dependencies, and tightly coupled components.
@@ -50,19 +36,37 @@ Avoid large files, circular dependencies, and tightly coupled components.
 - Prefer composition over complex inheritance.
 - Keep public APIs small and explicit.
 
+## Code Style
+
+- Target **Python 3.11+** and set `requires-python = ">=3.11"` in `pyproject.toml`.
+- Follow **PEP 8**.
+- Format and lint with **Ruff** (`make fmt`) before committing. Do not use Black.
+- Add **type hints** to all new public functions and methods.
+- Write docstrings that explain **why** something exists or behaves a certain way, rather than restating what the code already makes clear.
+- Keep inline comments to a minimum. Add comments only for **non-obvious constraints, workarounds, or design decisions**.
+- Prefer modern Python features and standard-library tools where appropriate:
+  - `pathlib` for filesystem operations.
+  - `dataclasses` for structured data and simple value objects.
+  - Modern type-hinting syntax.
+- Use `@dataclass` when an object primarily represents **data rather than behavior**.
+- Use `@dataclass(slots=True)` when there is a clear benefit, such as creating many instances, reducing memory usage, or preventing accidental attributes. Do not use `slots=True` by default.
+- Use regular classes when an object primarily represents **behavior, lifecycle, or complex state management**.
+- Keep implementations **simple, readable, and maintainable**. Prefer straightforward solutions over unnecessary abstractions or clever patterns.
+- Avoid premature optimization and abstractions for hypothetical future requirements. Optimize for **clarity and maintainability today**.
+
+Prefer:
+
+```python
+@dataclass(slots=True)
+class AgentConfig:
+    name: str
+```
+
 ## HTTP
 
 Use `httpx` for all HTTP communication.
 
 Do not scatter raw HTTP calls throughout the application. Reuse clients where appropriate and handle timeouts/errors explicitly.
-
-## Python
-
-- Target **Python 3.10+**.
-- Follow PEP 8.
-- Add type hints to all new public functions and methods.
-- Use `ruff format` and `ruff check`.
-- Prefer standard-library solutions.
 
 ## Error Handling
 
@@ -72,7 +76,9 @@ Do not scatter raw HTTP calls throughout the application. Reuse clients where ap
 
 ## Testing
 
-Test behavior and important edge cases. Keep tests deterministic and avoid unnecessary external dependencies.
+- Test behavior and important edge cases, not implementation details.
+- Keep tests deterministic; no real network calls — inject an `httpx` client/transport instead.
+- Run with `make test`.
 
 ## Avoid
 
@@ -87,7 +93,6 @@ Test behavior and important edge cases. Keep tests deterministic and avoid unnec
 ## Golden Rule
 
 > **Simple, modular, typed, dependency-light code.**
-
 
 ## Commit Rules
 
@@ -107,7 +112,7 @@ Test behavior and important edge cases. Keep tests deterministic and avoid unnec
 
 ## Before Finishing
 
-- Code is formatted (`make fmt`)
+- Code is formatted and linted (`make fmt`)
 - No unused imports or debug code
 - Type hints added where appropriate
 - Tests pass (`make test`)
