@@ -1,6 +1,6 @@
 # Examples
 
-Runnable scripts live in [`examples/`](https://github.com/your-org/subagents/tree/main/examples)
+Runnable scripts live in [`examples/`](https://github.com/sayedshaun/subagents/tree/main/examples)
 in the repository.
 
 ## Parallel agents
@@ -32,7 +32,9 @@ directly:
 ```python
 import asyncio
 
-results = await asyncio.gather(*(agent.arun(state) for agent, state in zip(agents, states)))
+results = await asyncio.gather(
+    *(agent.arun(state) for agent, state in zip(agents, states))
+)
 ```
 
 Reach for `Graph` when branches write to *different* fields and need to be sequenced or

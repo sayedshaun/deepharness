@@ -9,7 +9,7 @@ pip install subagents
 Or from a clone, for local development:
 
 ```bash
-git clone https://github.com/your-org/subagents.git
+git clone https://github.com/sayedshaun/subagents.git
 cd subagents
 pip install -e .
 ```
