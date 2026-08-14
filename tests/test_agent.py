@@ -276,3 +276,58 @@ async def test_stops_after_max_steps():
 
     assert len(provider.calls) == 2
     assert state["output"] == "noop"
+
+
+def test_as_tool_builds_schema_from_agent_name_and_prompt():
+    agent = Agent("researcher", system_prompt="Finds facts.")
+
+    researcher_tool = agent.as_tool()
+
+    spec = researcher_tool._tool_spec
+    assert spec.name == "researcher"
+    assert spec.description == "Finds facts."
+    assert spec.parameters == {
+        "type": "object",
+        "properties": {"input": {"type": "string"}},
+        "required": ["input"],
+    }
+
+
+def test_as_tool_overrides_name_and_description():
+    agent = Agent("researcher", system_prompt="Finds facts.")
+
+    researcher_tool = agent.as_tool(name="lookup", description="Look things up.")
+
+    spec = researcher_tool._tool_spec
+    assert spec.name == "lookup"
+    assert spec.description == "Look things up."
+
+
+async def test_as_tool_delegates_to_sub_agent():
+    sub_provider = ScriptedProvider([CompletionResponse(content="Paris")])
+    sub_agent = Agent("geo", sub_provider)
+
+    main_provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(name="geo", arguments={"input": "capital of France?"})
+                ],
+            ),
+            CompletionResponse(content="It's Paris."),
+        ]
+    )
+    main_agent = Agent("assistant", main_provider, tools=[sub_agent.as_tool()])
+
+    state = await main_agent.arun(
+        {"messages": [{"role": "user", "content": "what's the capital of France?"}]}
+    )
+
+    assert state["output"] == "It's Paris."
+    assert sub_provider.calls[0][-1] == {
+        "role": "user",
+        "content": "capital of France?",
+    }
+    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    assert tool_messages == [{"role": "tool", "name": "geo", "content": "Paris"}]
