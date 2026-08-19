@@ -34,6 +34,8 @@ class Graph:
     (reachability, no undeclared cycles) and returns an Executor.
     """
 
+    __slots__ = ("edges", "nodes", "state_type")
+
     def __init__(self, state_type: type[StateT]):
         self.state_type = state_type
         self.nodes: dict[str, NodeSpec] = {}
