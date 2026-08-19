@@ -2,18 +2,55 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from dataclasses import dataclass, field, fields
+from enum import Enum
+from typing import Any
 
-ReasoningEffort = Literal["low", "medium", "high"]
 
-# Anthropic and Gemini take a raw thinking-token budget, not an effort label.
-# These are the token counts each effort level maps to for those providers.
-REASONING_EFFORT_BUDGET_TOKENS: dict[ReasoningEffort, int] = {
-    "low": 1024,
-    "medium": 4096,
-    "high": 16000,
-}
+def token_usage(usage: Any) -> TokenUsage | None:
+    """Normalize a vendor's parsed Usage into TokenUsage, if it sent one."""
+    if usage is None:
+        return None
+    return TokenUsage(
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+    )
+
+
+def without_none(payload: Any) -> dict[str, Any]:
+    """A request payload as a dict, minus fields that were never set.
+
+    Vendors do not treat an explicit null the same as an absent key - sending
+    "tools": null where the API expects a list is an error at several of them -
+    so unset optionals are dropped rather than serialized.
+    """
+    return {
+        f.name: value
+        for f in fields(payload)
+        if (value := getattr(payload, f.name)) is not None
+    }
+
+
+class ReasoningLevel(str, Enum):
+    """Str subclass so members serialize as plain strings (JSON payloads,
+    dict keys) without extra conversion at the call sites."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+    @property
+    def budget(self) -> int:
+        """Anthropic and Gemini take a raw thinking-token budget, not an
+        effort label; this is the token count each level maps to for them."""
+        match self:
+            case ReasoningLevel.LOW:
+                return 1024
+            case ReasoningLevel.MEDIUM:
+                return 4096
+            case ReasoningLevel.HIGH:
+                return 16000
 
 
 @dataclass(slots=True)
