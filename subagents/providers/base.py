@@ -93,6 +93,29 @@ class CompletionResponse:
     usage: TokenUsage | None = None
 
 
+@dataclass(slots=True)
+class TextDelta:
+    """A chunk of the model's prose, as it arrives."""
+
+    text: str
+
+
+@dataclass(slots=True)
+class Completed:
+    """The whole turn, once the stream ends: text, tool calls and usage."""
+
+    response: CompletionResponse
+
+
+StreamEvent = TextDelta | Completed
+"""What a streaming call emits.
+
+Text alone is not enough to drive an agent: a turn may ask for tools instead of
+answering, and the vendor sends those in the same stream, fragmented. So a
+stream yields deltas as they arrive and finishes with the assembled response.
+"""
+
+
 class LLM(ABC):
     """The interface agent/ and graph/ depend on: send messages, get a reply.
 
@@ -127,20 +150,41 @@ class LLM(ABC):
     ) -> CompletionResponse:
         """Synchronous counterpart to agenerate(), for use outside an event loop."""
 
+    async def astream_events(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream a turn as TextDeltas, ending with a Completed.
+
+        Optional, unlike agenerate/generate: not every backend can stream, and a
+        provider that cannot should not be forced to write a stub. Callers get a
+        clear error rather than an empty iterator.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming")
+        yield  # pragma: no cover - marks this as an async generator for type checkers
+
+    def stream_events(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Iterator[StreamEvent]:
+        """Synchronous counterpart to astream_events()."""
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming")
+        yield  # pragma: no cover - marks this as a generator for type checkers
+
     async def astream(
         self,
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
-        """Stream the model's text response as it arrives, one content delta at a time.
-
-        Optional, unlike agenerate/generate: not every backend can stream, and a
-        provider that cannot should not be forced to write a stub. Callers that
-        need streaming get a clear error instead of an empty iterator.
-        """
-        raise NotImplementedError(f"{type(self).__name__} does not support streaming")
-        yield  # pragma: no cover - marks this as an async generator for type checkers
+        """Just the text, for the common "print as it types" case."""
+        async for event in self.astream_events(messages, tools=tools):
+            if isinstance(event, TextDelta):
+                yield event.text
 
     def stream(
         self,
@@ -148,6 +192,7 @@ class LLM(ABC):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
-        """Synchronous counterpart to astream(), for use outside an event loop."""
-        raise NotImplementedError(f"{type(self).__name__} does not support streaming")
-        yield  # pragma: no cover - marks this as a generator for type checkers
+        """Synchronous counterpart to astream()."""
+        for event in self.stream_events(messages, tools=tools):
+            if isinstance(event, TextDelta):
+                yield event.text
