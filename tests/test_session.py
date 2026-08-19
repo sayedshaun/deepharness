@@ -3,7 +3,11 @@ from subagents.agent import Message, load_session, save_session
 
 def test_save_and_load_round_trip(tmp_path):
     path = tmp_path / "session.json"
-    messages = [Message.system("be helpful"), Message.human("hi"), Message.ai("hello!")]
+    messages = [
+        Message.system("be helpful").to_dict(),
+        Message.human("hi").to_dict(),
+        Message.ai("hello!").to_dict(),
+    ]
 
     save_session(str(path), messages)
     loaded = load_session(str(path))
