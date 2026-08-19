@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Compose LLM agents into typed, concurrent workflows."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["httpx", "pydantic"]
+dependencies = ["httpx"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "ruff"]
@@ -20,4 +20,3 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-
