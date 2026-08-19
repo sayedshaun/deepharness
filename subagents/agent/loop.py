@@ -242,7 +242,7 @@ class Agent:
         the exception - that's a wiring mistake no amount of retrying fixes.
         """
         pending: list[PendingHumanInput] = []
-        for call, result in zip(calls, results):
+        for call, result in zip(calls, results, strict=True):
             if isinstance(result, HumanInputRequired):
                 pending.append(PendingHumanInput(call.id, call.name, result.question))
                 continue
@@ -302,10 +302,11 @@ class Agent:
                 )
 
             self._record_tool_call_request(messages, response)
-            results = yield _Dispatch(
-                [call for call in response.tool_calls if call.name != FINAL_TOOL]
-            )
-            pending = self._record_tool_results(messages, response.tool_calls, results)
+            dispatched = [
+                call for call in response.tool_calls if call.name != FINAL_TOOL
+            ]
+            results = yield _Dispatch(dispatched)
+            pending = self._record_tool_results(messages, dispatched, results)
             if pending:
                 return self._result(state, messages, "", "paused", paused=pending)
 
