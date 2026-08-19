@@ -121,18 +121,21 @@ class LLM(ABC):
     ) -> CompletionResponse:
         """Synchronous counterpart to agenerate(), for use outside an event loop."""
 
-    @abstractmethod
     async def astream(
         self,
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
-        """Stream the model's text response as it arrives, one content delta at a time."""
-        raise NotImplementedError
+        """Stream the model's text response as it arrives, one content delta at a time.
+
+        Optional, unlike agenerate/generate: not every backend can stream, and a
+        provider that cannot should not be forced to write a stub. Callers that
+        need streaming get a clear error instead of an empty iterator.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming")
         yield  # pragma: no cover - marks this as an async generator for type checkers
 
-    @abstractmethod
     def stream(
         self,
         messages: list[dict[str, Any]],
@@ -140,5 +143,5 @@ class LLM(ABC):
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
         """Synchronous counterpart to astream(), for use outside an event loop."""
-        raise NotImplementedError
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming")
         yield  # pragma: no cover - marks this as a generator for type checkers
