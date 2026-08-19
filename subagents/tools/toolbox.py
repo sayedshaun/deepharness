@@ -20,6 +20,23 @@ _PRIMITIVES: dict[Any, str] = {
 }
 
 
+@dataclass(slots=True)
+class Ctx:
+    """What a tool can see of the run it is part of.
+
+    A tool asks for one by annotating a parameter `ctx: Ctx`; the runtime fills
+    it in and hides the parameter from the model, which is how a tool reaches
+    run state or injected dependencies without a module-level global.
+
+    state is typed Any rather than AgentState so that tools/ stays independent
+    of agent/ - the agent passes its AgentState, another caller may pass
+    whatever it runs tools with.
+    """
+
+    state: Any = None
+    deps: Any = None
+
+
 @dataclass
 class ToolSpec:
     """Provider-agnostic description of a callable exposed to an LLM."""
@@ -28,6 +45,8 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     func: Callable[..., Any]
+    ctx_params: tuple[str, ...] = ()
+    """Parameters the runtime fills with a Ctx, hidden from the model."""
 
     def to_schema(self) -> dict[str, Any]:
         return {
@@ -62,15 +81,35 @@ def _build_spec(
     name: str | None,
     description: str | None,
 ) -> ToolSpec:
+    ctx_params = _ctx_params(fn)
     return ToolSpec(
         name=name or fn.__name__,
         description=description or inspect.getdoc(fn) or "",
-        parameters=_parameters(fn),
+        parameters=_parameters(fn, skip=ctx_params),
         func=fn,
+        ctx_params=ctx_params,
     )
 
 
-def _parameters(fn: Callable[..., Any]) -> dict[str, Any]:
+def _ctx_params(fn: Callable[..., Any]) -> tuple[str, ...]:
+    """Which parameters asked for a Ctx, by annotation."""
+    hints = typing.get_type_hints(fn, include_extras=True)
+    return tuple(
+        name for name, hint in hints.items() if name != "return" and _wants_ctx(hint)
+    )
+
+
+def _wants_ctx(annotation: Any) -> bool:
+    if annotation is Ctx:
+        return True
+    if get_origin(annotation) is Annotated:
+        return any(arg is Ctx for arg in get_args(annotation))
+    return False
+
+
+def _parameters(
+    fn: Callable[..., Any], *, skip: tuple[str, ...] = ()
+) -> dict[str, Any]:
     """The JSON Schema object describing what the model may pass to fn."""
     signature = inspect.signature(fn)
     hints = typing.get_type_hints(fn, include_extras=True)
@@ -78,7 +117,9 @@ def _parameters(fn: Callable[..., Any]) -> dict[str, Any]:
     properties: dict[str, Any] = {}
     required: list[str] = []
     for name, param in signature.parameters.items():
-        if name == "self" or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+        if name == "self" or name in skip:
+            continue
+        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             continue
         properties[name] = json_type(hints.get(name, param.annotation))
         if param.default is inspect.Parameter.empty:
@@ -137,6 +178,22 @@ class Toolbox:
         self._tools[spec.name] = spec
         return func
 
+    @staticmethod
+    def _with_ctx(
+        spec: ToolSpec, kwargs: dict[str, Any], ctx: Ctx | None
+    ) -> dict[str, Any]:
+        """Fill the tool's Ctx parameters, defaulting to an empty context.
+
+        An empty Ctx rather than None so a tool can always read ctx.deps
+        without guarding, even when called outside a run.
+        """
+        if not spec.ctx_params:
+            return kwargs
+        filled = dict(kwargs)
+        for param in spec.ctx_params:
+            filled[param] = ctx if ctx is not None else Ctx()
+        return filled
+
     def get(self, name: str) -> ToolSpec:
         if name not in self._tools:
             raise ToolNotFoundError(f"Unknown tool: {name}")
@@ -145,7 +202,7 @@ class Toolbox:
     def schemas(self) -> list[dict[str, Any]]:
         return [spec.to_schema() for spec in self._tools.values()]
 
-    async def call(self, name: str, **kwargs: Any) -> Any:
+    async def call(self, name: str, *, ctx: Ctx | None = None, **kwargs: Any) -> Any:
         """Invoke a tool, running a sync one off the event loop.
 
         The concurrency arun() promises comes from gathering a turn's tool calls,
@@ -153,7 +210,8 @@ class Toolbox:
         plain def tool goes to a thread rather than stalling every other tool
         waiting alongside it.
         """
-        func = self.get(name).func
+        spec = self.get(name)
+        func, kwargs = spec.func, self._with_ctx(spec, kwargs, ctx)
         if inspect.iscoroutinefunction(inspect.unwrap(func)):
             return await func(**kwargs)
         result = await asyncio.to_thread(func, **kwargs)
@@ -161,8 +219,9 @@ class Toolbox:
             return await result
         return result
 
-    def call_sync(self, name: str, **kwargs: Any) -> Any:
-        result = self.get(name).func(**kwargs)
+    def call_sync(self, name: str, *, ctx: Ctx | None = None, **kwargs: Any) -> Any:
+        spec = self.get(name)
+        result = spec.func(**self._with_ctx(spec, kwargs, ctx))
         if inspect.isawaitable(result):
             close = getattr(result, "close", None)
             if close is not None:
