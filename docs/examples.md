@@ -1,31 +1,92 @@
 # Examples
 
-Runnable scripts live in [`examples/`](https://github.com/sayedshaun/subagents/tree/main/examples),
-grouped by how much you need to know already. They share a scripted stand-in for
-a provider, so every one runs offline with no API keys:
+Short, self-contained pieces, in the order they get harder. Each one is the smallest code that
+shows the thing it is about — copy it, swap the model for a real provider, and it runs.
 
-```bash
-python examples/beginner/01_hello_agent.py   # one of them
-make examples                                # all of them
+## An agent with one tool
+
+The think/act loop at its smallest: one model, one tool, one answer.
+
+```python
+import asyncio
+
+from subagents import Agent, OpenAI, tool
+
+
+@tool
+def get_weather(city: str) -> str:
+    """Look up the current weather for a city."""
+    return f"It is 22°C and sunny in {city}."
+
+
+agent = Agent(OpenAI("gpt-4o-mini"), tools=[get_weather])
+
+state = asyncio.run(agent.arun("Weather in Oslo?"))
+print(state.answered, state.output)
 ```
 
-## Beginner
+`answered` is the check worth making: it is `True` only when the model actually replied. Every
+other `stop_reason` leaves `output` empty or partial.
 
-`beginner/01_hello_agent.py` — the think/act loop at its smallest: one model,
-one tool, one answer. `beginner/02_sequential_graph.py` — the graph with no LLM
-involved at all, which is the clearest way to see what nodes, state, and edges
-actually are.
+## A graph with no model at all
 
-## Medium
+The clearest way to see what nodes, state, and edges are — no LLM involved.
 
-`medium/01_tools_and_errors.py` covers the parts that matter in production:
-tool calls in one turn run concurrently, a tool that raises is reported back to
-the model instead of ending the run, and `stop_reason` is what distinguishes a
-real answer from a truncated one.
+```python
+import asyncio
+from dataclasses import dataclass
 
-`medium/02_parallel_agents.py` — three specialist agents (`sales`, `churn`,
-`support`) run as concurrent `start=True` nodes, then a `synthesize` node joins
-their output:
+from subagents import Graph
+
+
+@dataclass
+class State:
+    total: int = 0
+
+
+graph = Graph(State)
+
+
+@graph.add(start=True)
+def double(state: State) -> State:
+    state.total = 21
+    return state
+
+
+@graph.add()
+def add_one(state: State) -> State:
+    state.total += 1
+    return state
+
+
+graph.connect(double, add_one)
+
+print(asyncio.run(graph.build().run(State())))  # State(total=22)
+```
+
+## Tools that fail, and tools that run together
+
+Two tool calls in one turn run concurrently, and a tool that raises is reported back to the
+model rather than ending the run:
+
+```python
+@tool
+def check_flights(city: str) -> str:
+    """Look up flights. Fails when the airline API is down."""
+    raise RuntimeError("airline API timed out")
+
+
+agent = Agent(model, tools=[check_flights])
+state = await agent.arun("Any flights to Paris?")
+```
+
+The failing call becomes `Error: RuntimeError('airline API timed out')` in the transcript, so
+the model gets a turn to apologize or try something else. Sync tools run in a thread, so a
+blocking one does not stall the others in the same turn.
+
+## Specialists in parallel
+
+Three agents run as concurrent `start=True` nodes, then a fourth node joins their output:
 
 ```python
 graph.connect(sales, synthesize)
@@ -33,23 +94,13 @@ graph.connect(churn, synthesize)
 graph.connect(support, synthesize)
 ```
 
-Wall-clock time is close to the slowest branch, not the sum of all three — the
-whole point of marking independent work `start=True`. Each branch writes its
-own field, so no reducer is needed.
+Wall-clock time is close to the slowest branch, not the sum of the three — the point of marking
+independent work `start=True`. Each branch writes its own field, so no reducer is needed.
 
-`medium/03_conditional_routing.py` — branching with `condition=`, including the
-detail that a branch skipped by a falsy condition does not wedge a downstream
-join.
+## Many branches into one field
 
-## Advanced
-
-`advanced/01_human_in_the_loop.py` — gating a risky tool by raising
-`HumanInputRequired`, then resuming from the returned state.
-
-`advanced/02_many_parallel_agents.py` — many homogeneous agents collecting into
-**one** shared field. Declare a reducer so the branches combine instead of
-overwriting each other (see
-[state merging](guide/graph.md#parallel-execution-and-state-merging)):
+When branches write the **same** field, declare a reducer so they combine instead of
+overwriting (see [state merging](guide/graph.md#parallel-execution-and-state-merging)):
 
 ```python
 from dataclasses import dataclass, field
@@ -62,15 +113,14 @@ class State:
     findings: list[str] = field(default_factory=list, metadata={"reducer": concat})
 ```
 
-Without a reducer the merge raises `ConcurrentUpdateError`, so this is a loud
-mistake rather than a silent one. The same script also shows the case the graph
-can't help with — a fan-out whose width is only known at runtime, where nodes
-are registered up front — and uses `asyncio.gather` inside a single node
-instead.
+Without one, the merge raises `ConcurrentUpdateError` — a loud mistake rather than a silent lost
+write. For a fan-out whose width is only known at runtime, the graph cannot help: nodes are
+registered up front, so use `asyncio.gather` inside a single node instead.
 
-`advanced/03_refinement_loop.py` — a back-edge marked `loop=True` turns a chain
-into a refinement loop. `draft` and `critique` re-run until the score clears the
-bar, while `load_rubric` sits upstream of the head and runs once:
+## A refinement loop
+
+A back-edge marked `loop=True` turns a chain into a loop. `draft` and `critique` re-run until
+the score clears the bar, while `load_rubric` sits upstream of the head and runs once:
 
 ```python
 graph.connect(load_rubric, critique)
@@ -80,6 +130,71 @@ graph.connect(critique, draft, loop=True, condition=lambda s: s.score < 0.8)
 
 See [loops](guide/graph.md#loops) for the re-entry rules and `max_steps`.
 
-`advanced/04_agent_loop_as_graph.py` — the think/act loop rebuilt out of graph
-nodes rather than `Agent`'s internal Python loop, which is how you get a place
-to insert an approval gate, a budget check, or a re-planning step mid-cycle.
+## Pausing for a human
+
+Raise `HumanInputRequired` from inside a tool and the run stops with `stop_reason == "paused"`.
+The gate lives in the tool, so a model that decides not to ask still cannot move the money:
+
+```python
+from subagents import HumanInputRequired, Message, tool
+
+
+@tool
+def wire_transfer(amount_usd: int, to: str) -> str:
+    """Send money. Anything over $10k needs a human to sign off."""
+    if amount_usd > 10_000:
+        raise HumanInputRequired(f"Approve ${amount_usd:,} transfer to {to}?")
+    return f"sent ${amount_usd:,} to {to}"
+
+
+state = await agent.arun("Pay the Acme invoice")
+pending = state.paused[0]
+print(pending.question)  # Approve $50,000 transfer to Acme Corp?
+
+state.messages.append(
+    Message.tool("approved by CFO", name=pending.name, call_id=pending.call_id)
+)
+state = await agent.arun(state)
+```
+
+The pause is an ordinary returned state, not an exception, so it can be persisted with
+`save_session` and resumed in another process.
+
+## Streaming, with tools still working
+
+```python
+async for chunk in agent.astream("What is 17 * 23?"):
+    print(chunk, end="", flush=True)
+```
+
+Every turn is streamed, tool turns included — those simply yield no text. Use
+`astream_events()` when you also need the final state; see
+[streaming](guide/agents.md#streaming).
+
+## Dependencies a tool can reach
+
+A parameter annotated `Ctx` is filled by the runtime and hidden from the model, so a tool reads
+per-request dependencies without a global:
+
+```python
+from subagents import Ctx, tool
+
+
+@tool
+def lookup_plan(customer: str, ctx: Ctx) -> str:
+    """Look up a customer's plan."""
+    return ctx.deps.db.plan_for(customer, tenant=ctx.deps.tenant)
+
+
+state = await agent.arun("What plan is Acme on?", deps=Deps(db=db, tenant="acme"))
+```
+
+## The agent loop, as a graph
+
+`Agent` runs think/act as an internal Python loop. Rebuilding it out of graph nodes gives you a
+place to insert an approval gate, a budget check, or a re-planning step mid-cycle:
+
+```python
+graph.connect(think, act, condition=lambda s: bool(s.pending_calls))
+graph.connect(act, think, loop=True)
+```
