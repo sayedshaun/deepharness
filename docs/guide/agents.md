@@ -157,6 +157,57 @@ involved. Two consequences worth knowing:
   nested dataclasses all validate, an `int` is accepted where a `float` is declared, and `true`
   is rejected for an `int` field even though Python calls a bool an int.
 
+## Human in the loop
+
+Two different things a human can be needed for, and they resolve differently.
+
+**Approval — the call has not run yet.** Mark the tool and the agent pauses *before* running it:
+
+```python
+@tool(requires_approval=True)
+def wire_transfer(amount_usd: int, to: str) -> str:
+    """Send money."""
+    return f"sent ${amount_usd:,} to {to}"
+
+
+state = await agent.arun("Pay the Acme invoice")
+print(state.stop_reason)  # "paused"
+print(state.paused[0].question)  # Run wire_transfer with {'amount_usd': 50000, ...}?
+
+state = await agent.arun(state.approve())  # runs it now, with the model's arguments
+# or
+state = await agent.arun(state.reject())  # records "Denied by the user." instead
+```
+
+`approve()`/`reject()` return the state, so a resume is one line. With no `call_id` they resolve
+every pending call; pass one to rule on a single call. Resuming a paused run without deciding
+raises `ConfigurationError` rather than silently continuing.
+
+The gate lives on the tool, not in the prompt, so a model cannot route around it by declining to
+ask. And if a turn requests a gated call alongside ordinary ones, **nothing** in that turn runs
+until the ruling — a half-applied turn the human is about to refuse would be worse than waiting.
+
+**A question — the tool wants to ask you something.** Raise `HumanInputRequired` and the human's
+answer becomes that call's result:
+
+```python
+@tool
+def confirm(question: str) -> str:
+    """Ask the operator something."""
+    raise HumanInputRequired(question)
+
+
+state = await agent.arun("...")
+pending = state.paused[0]
+state.messages.append(
+    Message.tool("yes, proceed", name=pending.name, call_id=pending.call_id)
+)
+state = await agent.arun(state)
+```
+
+The difference matters: an approval defers execution, a question substitutes a result. Use
+`pending.needs_approval` to tell them apart.
+
 ## Session persistence
 
 `state.messages` is a list of wire-form dicts, so `save_session`/`load_session` round-trip it
