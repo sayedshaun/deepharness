@@ -42,6 +42,8 @@ class HTTPClient:
     errors), honoring a Retry-After header when the server sends one.
     """
 
+    __slots__ = ("_async_client", "_sync_client")
+
     def __init__(
         self,
         base_url: str,
