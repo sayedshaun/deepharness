@@ -50,13 +50,20 @@ def test_agent_stores_name():
     assert agent.name == "researcher"
 
 
-async def test_agent_run_returns_state():
+async def test_a_model_less_agent_passes_its_state_through():
     agent = Agent(name="researcher")
-    state = {"input": "topic"}
 
-    result = await agent.arun(state)
+    result = await agent.arun("topic")
 
-    assert result == state
+    assert result.messages == [{"role": "user", "content": "topic"}]
+    assert result.stop_reason is None
+
+
+async def test_state_keys_an_agent_does_not_own_are_rejected():
+    agent = Agent(name="researcher")
+
+    with pytest.raises(ConfigurationError, match="unknown state keys: input"):
+        await agent.arun({"input": "topic"})
 
 
 async def test_returns_content_when_no_tool_call_needed():
@@ -65,8 +72,8 @@ async def test_returns_content_when_no_tool_call_needed():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "hi"}]})
 
-    assert state["output"] == "hello there"
-    assert state["messages"][-1] == {"role": "assistant", "content": "hello there"}
+    assert state.output == "hello there"
+    assert state.messages[-1] == {"role": "assistant", "content": "hello there"}
 
 
 async def test_prepends_system_prompt_once():
@@ -75,7 +82,7 @@ async def test_prepends_system_prompt_once():
 
     state = await agent.arun({"messages": []})
 
-    assert state["messages"][0] == {"role": "system", "content": "be helpful"}
+    assert state.messages[0] == {"role": "system", "content": "be helpful"}
 
 
 async def test_dispatches_tool_calls_and_continues_loop():
@@ -99,8 +106,8 @@ async def test_dispatches_tool_calls_and_continues_loop():
         {"messages": [{"role": "user", "content": "what is 1+2?"}]}
     )
 
-    assert state["output"] == "the answer is 3"
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    assert state.output == "the answer is 3"
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert tool_messages == [{"role": "tool", "name": "add", "content": "3"}]
     assert len(provider.calls) == 2
 
@@ -134,7 +141,7 @@ async def test_multiple_tool_calls_in_one_turn_run_concurrently():
     # the shorter sleep finishes first if they ran concurrently
     assert order == ["slow-10", "slow-50"]
     # but result messages stay in call order, not completion order
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert tool_messages == [
         {"role": "tool", "name": "slow", "content": "slept 50ms"},
         {"role": "tool", "name": "slow", "content": "slept 10ms"},
@@ -147,8 +154,8 @@ def test_sync_run_returns_content_when_no_tool_call_needed():
 
     state = agent.run({"messages": [{"role": "user", "content": "hi"}]})
 
-    assert state["output"] == "hello there"
-    assert state["messages"][-1] == {"role": "assistant", "content": "hello there"}
+    assert state.output == "hello there"
+    assert state.messages[-1] == {"role": "assistant", "content": "hello there"}
 
 
 def test_sync_run_dispatches_tool_calls():
@@ -170,8 +177,8 @@ def test_sync_run_dispatches_tool_calls():
 
     state = agent.run({"messages": [{"role": "user", "content": "what is 1+2?"}]})
 
-    assert state["output"] == "the answer is 3"
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    assert state.output == "the answer is 3"
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert tool_messages == [{"role": "tool", "name": "add", "content": "3"}]
 
 
@@ -222,7 +229,7 @@ async def test_accumulates_usage_across_turns():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
 
-    assert state["usage"] == TokenUsage(
+    assert state.usage == TokenUsage(
         prompt_tokens=30, completion_tokens=13, total_tokens=43
     )
     assert agent.total_usage == TokenUsage(
@@ -269,10 +276,10 @@ async def test_token_budget_error_carries_partial_state():
 
     # the tokens were paid for, so the work must survive the exception
     state = exc_info.value.state
-    assert state["stop_reason"] == "token_budget"
-    assert state["output"] == "partial answer"
-    assert state["messages"] == [{"role": "user", "content": "go"}]
-    assert state["usage"].total_tokens == 110
+    assert state.stop_reason == "token_budget"
+    assert state.output == "partial answer"
+    assert state.messages == [{"role": "user", "content": "go"}]
+    assert state.usage.total_tokens == 110
 
 
 def test_sync_run_also_accumulates_usage():
@@ -288,7 +295,7 @@ def test_sync_run_also_accumulates_usage():
 
     state = agent.run({"messages": [{"role": "user", "content": "hi"}]})
 
-    assert state["usage"] == TokenUsage(
+    assert state.usage == TokenUsage(
         prompt_tokens=3, completion_tokens=2, total_tokens=5
     )
 
@@ -314,9 +321,9 @@ async def test_stops_when_step_budget_is_spent():
     state = await agent.arun({"messages": [{"role": "user", "content": "loop"}]})
 
     assert len(provider.calls) == 2
-    assert state["stop_reason"] == "step_budget"
+    assert state.stop_reason == "step_budget"
     # not the last tool's return value - the agent never actually answered
-    assert state["output"] == ""
+    assert state.output == ""
 
 
 def test_as_tool_builds_schema_from_agent_name_and_prompt():
@@ -365,12 +372,12 @@ async def test_as_tool_delegates_to_sub_agent():
         {"messages": [{"role": "user", "content": "what's the capital of France?"}]}
     )
 
-    assert state["output"] == "It's Paris."
+    assert state.output == "It's Paris."
     assert sub_provider.calls[0][-1] == {
         "role": "user",
         "content": "capital of France?",
     }
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert tool_messages == [{"role": "tool", "name": "geo", "content": "Paris"}]
 
 
@@ -395,8 +402,8 @@ async def test_pauses_when_a_tool_asks_for_a_human():
         {"messages": [{"role": "user", "content": "delete the logs"}]}
     )
 
-    assert state["stop_reason"] == "paused"
-    assert state["paused"] == [
+    assert state.stop_reason == "paused"
+    assert state.paused == [
         PendingHumanInput(call_id="call_1", name="confirm", question="ok to proceed?")
     ]
     assert len(provider.calls) == 1
@@ -423,15 +430,15 @@ async def test_resumes_after_human_answer():
     state = await agent.arun(
         {"messages": [{"role": "user", "content": "delete the logs"}]}
     )
-    pending = state["paused"][0]
-    state["messages"].append(
+    pending = state.paused[0]
+    state.messages.append(
         Message.tool("yes", name=pending.name, call_id=pending.call_id)
     )
     state = await agent.arun(state)
 
-    assert state["output"] == "done, proceeded"
-    assert state["stop_reason"] == "answer"
-    assert state["paused"] is None
+    assert state.output == "done, proceeded"
+    assert state.stop_reason == "answer"
+    assert state.paused == []
 
 
 async def test_other_tool_calls_still_run_when_one_asks_for_a_human():
@@ -457,11 +464,11 @@ async def test_other_tool_calls_still_run_when_one_asks_for_a_human():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
 
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert tool_messages == [
         {"role": "tool", "name": "add", "content": "3", "tool_call_id": "call_1"}
     ]
-    assert state["paused"] == [
+    assert state.paused == [
         PendingHumanInput(call_id="call_2", name="confirm", question="ok?")
     ]
 
@@ -484,11 +491,11 @@ async def test_failing_tool_is_reported_to_model_and_loop_continues():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
 
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert "upstream is down" in tool_messages[0]["content"]
     # the run survived and the model got a turn to recover
-    assert state["output"] == "I couldn't reach it, sorry"
-    assert state["stop_reason"] == "answer"
+    assert state.output == "I couldn't reach it, sorry"
+    assert state.stop_reason == "answer"
     assert len(provider.calls) == 2
 
 
@@ -519,10 +526,10 @@ async def test_one_failing_tool_does_not_discard_its_siblings_results():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
 
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert tool_messages[0]["content"] == "fine"
     assert "nope" in tool_messages[1]["content"]
-    assert state["stop_reason"] == "answer"
+    assert state.stop_reason == "answer"
 
 
 async def test_unknown_tool_name_is_reported_to_model():
@@ -543,9 +550,9 @@ async def test_unknown_tool_name_is_reported_to_model():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
 
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert "imaginary" in tool_messages[0]["content"]
-    assert state["output"] == "my mistake"
+    assert state.output == "my mistake"
 
 
 def test_sync_run_reports_failing_tool_to_model():
@@ -566,9 +573,9 @@ def test_sync_run_reports_failing_tool_to_model():
 
     state = agent.run({"messages": [{"role": "user", "content": "go"}]})
 
-    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    tool_messages = [m for m in state.messages if m["role"] == "tool"]
     assert "upstream is down" in tool_messages[0]["content"]
-    assert state["output"] == "recovered"
+    assert state.output == "recovered"
 
 
 def test_sync_run_pauses_when_tool_asks_human():
@@ -586,7 +593,7 @@ def test_sync_run_pauses_when_tool_asks_human():
 
     state = agent.run({"messages": [{"role": "user", "content": "delete the logs"}]})
 
-    assert state["paused"] == [
+    assert state.paused == [
         PendingHumanInput(call_id="call_1", name="confirm", question="ok?")
     ]
     assert len(provider.calls) == 1
