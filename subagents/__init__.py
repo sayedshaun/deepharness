@@ -1,6 +1,7 @@
 from subagents.agent import (
     FINAL_TOOL,
     Agent,
+    AgentState,
     Budget,
     Message,
     PendingHumanInput,
@@ -52,6 +53,7 @@ __all__ = [
     "VLLM",
     "XAI",
     "Agent",
+    "AgentState",
     "Anthropic",
     "Budget",
     "Cerebras",
