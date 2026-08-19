@@ -12,7 +12,6 @@
 Runtime dependencies are strictly limited to:
 
 - `httpx` — HTTP requests
-- `pydantic` — validation and structured output
 
 **Do not add other dependencies.** Use the Python standard library whenever possible.
 
@@ -143,7 +142,7 @@ Do not scatter raw HTTP calls throughout the application. Reuse clients where ap
 - Stringly-typed dicts on public APIs
 - Global mutable state
 - Premature abstractions
-- Pydantic for simple internal data
+- Third-party validation libraries; dataclasses plus explicit parsing instead
 
 ## Golden Rule
 
