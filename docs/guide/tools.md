@@ -21,7 +21,8 @@ def get_weather(city: str) -> str:
   and your docstring.
 - The description is the function's docstring, used as written.
 - `required` is whichever parameters lack defaults.
-- Tool functions may be sync or async.
+- Tool functions may be sync or async. A sync tool runs in a thread during `arun()`, so a
+  blocking one does not stall the other tools gathered alongside it.
 
 `@tool(name=..., description=...)` overrides the inferred name or description if you need
 something different from the function's own.
