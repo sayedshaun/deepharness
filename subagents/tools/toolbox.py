@@ -37,7 +37,7 @@ class Ctx:
     deps: Any = None
 
 
-@dataclass
+@dataclass(slots=True)
 class ToolSpec:
     """Provider-agnostic description of a callable exposed to an LLM."""
 
@@ -164,6 +164,8 @@ def json_type(annotation: Any) -> dict[str, Any]:
 
 class Toolbox:
     """Registry of tools that can be listed as schemas and invoked by name."""
+
+    __slots__ = ("_tools",)
 
     def __init__(self, tools: Iterable[Callable[..., Any]] = ()) -> None:
         self._tools: dict[str, ToolSpec] = {}
