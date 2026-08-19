@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from subagents.providers.base import LLM, TokenUsage
 
@@ -17,11 +17,7 @@ from ..tools.toolbox import Toolbox, ToolSpec
 from .budget import Budget
 from .message import Message, as_dict
 from .output import FINAL_TOOL, coerce, final_tool_schema
-
-StopReason = Literal["answer", "step_budget", "paused", "token_budget"]
-"""Why the think/act loop stopped. Only "answer" means the model actually
-replied - the rest are early exits, so a caller that ignores this can't tell
-a real answer from a truncated run."""
+from .state import AgentState, PendingHumanInput, StopReason
 
 
 @dataclass(slots=True)
@@ -36,15 +32,6 @@ class _Dispatch:
     """One turn's tool calls, for the driver to run however it runs them."""
 
     calls: list[Any]
-
-
-@dataclass(slots=True)
-class PendingHumanInput:
-    """One tool call that's waiting on a human answer."""
-
-    call_id: str | None
-    name: str
-    question: str
 
 
 class Agent:
@@ -123,8 +110,8 @@ class Agent:
         """
 
         async def call(input: str) -> str:
-            result = await self.arun({"messages": [Message.human(input)]})
-            return result["output"]
+            result = await self.arun(input)
+            return result.output
 
         call.__name__ = name or self.name
         call._tool_spec = ToolSpec(  # type: ignore[attr-defined]
@@ -141,14 +128,13 @@ class Agent:
         )
         return call
 
-    def _prepare_messages(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+    def _prepare_messages(self, state: AgentState) -> list[dict[str, Any]]:
         """The transcript to send, as wire-form dicts.
 
-        Callers may hand over Message objects or plain dicts; both are
-        normalized here so everything downstream - providers included - sees one
-        shape.
+        Entries are normalized because a caller resuming a paused run appends a
+        Message of their own, and a provider must never be handed one.
         """
-        messages = [as_dict(message) for message in state.get("messages", [])]
+        messages = [as_dict(message) for message in state.messages]
         if self.system and not any(m["role"] == "system" for m in messages):
             messages.insert(0, Message.system(self.system).to_dict())
         return messages
@@ -170,7 +156,7 @@ class Agent:
     def _account_for_usage(
         self,
         response: Any,
-        state: dict[str, Any],
+        state: AgentState,
         messages: list[dict[str, Any]],
     ) -> None:
         if response.usage is None:
@@ -190,20 +176,19 @@ class Agent:
 
     def _result(
         self,
-        state: dict[str, Any],
+        state: AgentState,
         messages: list[dict[str, Any]],
         output: Any,
         stop_reason: StopReason,
         paused: list[PendingHumanInput] | None = None,
-    ) -> dict[str, Any]:
-        return {
-            **state,
-            "messages": messages,
-            "output": output,
-            "usage": self.total_usage,
-            "stop_reason": stop_reason,
-            "paused": paused,
-        }
+    ) -> AgentState:
+        return AgentState(
+            messages=messages,
+            output=output,
+            usage=self.total_usage,
+            stop_reason=stop_reason,
+            paused=paused or [],
+        )
 
     @staticmethod
     def _record_tool_results(
@@ -234,8 +219,8 @@ class Agent:
         return pending
 
     def _turns(
-        self, state: dict[str, Any], messages: list[dict[str, Any]]
-    ) -> Generator[_Ask | _Dispatch, Any, dict[str, Any]]:
+        self, state: AgentState, messages: list[dict[str, Any]]
+    ) -> Generator[_Ask | _Dispatch, Any, AgentState]:
         """The think/act loop itself, with the I/O lifted out of it.
 
         The loop yields the work it needs done - a model call, or a round of
@@ -297,7 +282,7 @@ class Agent:
             (call for call in response.tool_calls if call.name == FINAL_TOOL), None
         )
 
-    def _passthrough(self, state: dict[str, Any]) -> dict[str, Any]:
+    def _passthrough(self, state: AgentState) -> AgentState:
         """Without a model an Agent is inert - a placeholder node in a Graph.
 
         Returns the state untouched rather than announcing itself: printing from
@@ -312,7 +297,8 @@ class Agent:
             schemas.append(self._final_schema)
         return schemas or None
 
-    async def arun(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def arun(self, state: Any = None) -> AgentState:
+        state = AgentState.of(state)
         if self.model is None:
             return self._passthrough(state)
 
@@ -336,7 +322,8 @@ class Agent:
         except StopIteration as done:
             return done.value
 
-    def run(self, state: dict[str, Any]) -> dict[str, Any]:
+    def run(self, state: Any = None) -> AgentState:
+        state = AgentState.of(state)
         if self.model is None:
             return self._passthrough(state)
 
