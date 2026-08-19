@@ -1,9 +1,8 @@
 from subagents.providers.anthropic import Anthropic
 from subagents.providers.base import (
     LLM,
-    REASONING_EFFORT_BUDGET_TOKENS,
     CompletionResponse,
-    ReasoningEffort,
+    ReasoningLevel,
     TokenUsage,
     ToolCall,
 )
@@ -25,7 +24,6 @@ from subagents.providers.openai import OpenAI
 
 __all__ = [
     "LLM",
-    "REASONING_EFFORT_BUDGET_TOKENS",
     "VLLM",
     "XAI",
     "Anthropic",
@@ -40,7 +38,7 @@ __all__ = [
     "Ollama",
     "OpenAI",
     "OpenRouter",
-    "ReasoningEffort",
+    "ReasoningLevel",
     "Together",
     "TokenUsage",
     "ToolCall",
