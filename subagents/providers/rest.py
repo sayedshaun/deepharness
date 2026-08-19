@@ -11,12 +11,13 @@ inherits the four LLM methods from RestLLM.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, Protocol
 
 import httpx
 
-from .base import LLM, CompletionResponse
+from .base import LLM, Completed, CompletionResponse, StreamEvent, TextDelta
 from .client import HTTPClient
 
 _SSE_DONE = "[DONE]"
@@ -44,8 +45,23 @@ class Wire(Protocol):
     def parse_response(self, response: httpx.Response) -> CompletionResponse:
         """One completion response, normalized."""
 
-    def extract_delta(self, data: str) -> str | None:
-        """The text in one SSE data payload, or None if it carries none."""
+    def accumulator(self) -> StreamAccumulator:
+        """A fresh reader for one stream of this vendor's SSE payloads."""
+
+
+class StreamAccumulator(Protocol):
+    """Folds one vendor's SSE payloads into text deltas plus a final response.
+
+    Stateful by necessity: vendors fragment tool calls across many events - a
+    name in one, argument JSON in pieces after it - so something has to hold the
+    partial call until the stream ends.
+    """
+
+    def feed(self, data: dict[str, Any]) -> str | None:
+        """Take one payload; return any text it carried."""
+
+    def response(self) -> CompletionResponse:
+        """The whole turn, once the stream has ended."""
 
 
 class RestCompletions:
@@ -75,10 +91,11 @@ class RestCompletions:
         )
         return self._wire.parse_response(response)
 
-    async def astream(
+    async def astream_events(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[StreamEvent]:
         payload = self._wire.payload(messages, tools, stream=True)
+        reader = self._wire.accumulator()
         async with self._http.stream(
             "POST",
             self._wire.endpoint(stream=True),
@@ -86,13 +103,15 @@ class RestCompletions:
             **self._wire.request_args(stream=True),
         ) as response:
             async for line in response.aiter_lines():
-                for delta in self._deltas(line):
-                    yield delta
+                for event in _feed(reader, line):
+                    yield event
+        yield Completed(reader.response())
 
-    def stream(
+    def stream_events(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
-    ) -> Iterator[str]:
+    ) -> Iterator[StreamEvent]:
         payload = self._wire.payload(messages, tools, stream=True)
+        reader = self._wire.accumulator()
         with self._http.stream_sync(
             "POST",
             self._wire.endpoint(stream=True),
@@ -100,22 +119,24 @@ class RestCompletions:
             **self._wire.request_args(stream=True),
         ) as response:
             for line in response.iter_lines():
-                yield from self._deltas(line)
+                yield from _feed(reader, line)
+        yield Completed(reader.response())
 
-    def _deltas(self, line: str) -> Iterator[str]:
-        """Zero or one delta for one SSE line, so both stream loops stay identical.
 
-        A generator rather than a str | None so that "this line ends the stream"
-        and "this line carries no text" are the same empty result to the caller.
-        """
-        if not line.startswith("data:"):
-            return
-        data = line[len("data:") :].strip()
-        if not data or data == _SSE_DONE:
-            return
-        delta = self._wire.extract_delta(data)
-        if delta:
-            yield delta
+def _feed(reader: StreamAccumulator, line: str) -> Iterator[StreamEvent]:
+    """One SSE line into zero or one TextDelta, so both loops stay identical.
+
+    A generator rather than an optional return so that "not a data line",
+    "stream is done" and "carried no text" are all the same empty result.
+    """
+    if not line.startswith("data:"):
+        return
+    data = line[len("data:") :].strip()
+    if not data or data == _SSE_DONE:
+        return
+    text = reader.feed(json.loads(data))
+    if text:
+        yield TextDelta(text)
 
 
 class RestLLM(LLM):
@@ -150,19 +171,19 @@ class RestLLM(LLM):
     ) -> CompletionResponse:
         return self._rest.generate(messages, tools)
 
-    async def astream(
+    async def astream_events(
         self,
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None = None,
-    ) -> AsyncIterator[str]:
-        async for delta in self._rest.astream(messages, tools):
-            yield delta
+    ) -> AsyncIterator[StreamEvent]:
+        async for event in self._rest.astream_events(messages, tools):
+            yield event
 
-    def stream(
+    def stream_events(
         self,
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None = None,
-    ) -> Iterator[str]:
-        yield from self._rest.stream(messages, tools)
+    ) -> Iterator[StreamEvent]:
+        yield from self._rest.stream_events(messages, tools)
