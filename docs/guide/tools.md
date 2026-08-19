@@ -59,6 +59,19 @@ its own dependencies. A sub-agent registered with `as_tool()` inherits the calle
 a delegated run keeps the same scope. Calling a tool outside a run gets an empty `Ctx`, so
 `ctx.deps` is always readable without a guard.
 
+## Gating a tool on a human
+
+`@tool(requires_approval=True)` pauses the run before the tool executes, every time. Approving
+runs it with the arguments the model sent; rejecting tells the model it was denied. See
+[human in the loop](agents.md#human-in-the-loop).
+
+```python
+@tool(requires_approval=True)
+def delete_records(table: str) -> str:
+    """Delete every row in a table."""
+    return f"cleared {table}"
+```
+
 ## Passing tools to an agent
 
 ```python
