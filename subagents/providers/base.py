@@ -94,11 +94,13 @@ class CompletionResponse:
 
 
 class LLM(ABC):
-    """Base interface for LLM providers.
+    """The interface agent/ and graph/ depend on: send messages, get a reply.
 
-    Keeps the core framework decoupled from any specific vendor. Concrete
-    providers live under myagents.providers as optional integrations —
-    import only the one you need, so unused vendor SDKs are never required.
+    Deliberately narrow and transport-agnostic. A provider does not have to
+    speak HTTP - a local model, a fake for tests, or a queue-backed worker
+    implements these four methods and works everywhere. Vendors that do speak
+    HTTP share their request sequence through RestCompletions (see rest.py)
+    rather than through this class.
     """
 
     @abstractmethod
@@ -108,7 +110,7 @@ class LLM(ABC):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        """Send messages (and optional tool schemas) to the model and return a normalized response."""
+        """Send messages (and optional tool schemas) and return a normalized response."""
 
     @abstractmethod
     def generate(
