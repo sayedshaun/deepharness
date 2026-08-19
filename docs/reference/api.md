@@ -27,9 +27,9 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 | --- | --- | --- |
 | `arun` | `async def arun(state: Any = None) -> AgentState` | Async run. Tool calls in the same turn dispatch concurrently. |
 | `run` | `def run(state: Any = None) -> AgentState` | Sync run. Raises if a registered tool is `async def`. |
-| `total_usage` | `TokenUsage` | Cumulative token usage across every call made by this agent instance. |
-| `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. |
-| `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. |
+| `total_usage` | `TokenUsage` | Cumulative token usage across every call made by this agent instance. Read-only. |
+| `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. Read-only. |
+| `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
 | `output` | `type \| None` | A dataclass; when set, `state.output` is a validated instance of it. |
 
 ### `AgentState`
@@ -183,6 +183,12 @@ Every provider below implements the same interface:
 | `generate(messages: list[dict], *, tools: list[dict] \| None = None)` | `CompletionResponse` |
 | `async for chunk in astream(messages, *, tools=None)` | text deltas |
 | `for chunk in stream(messages, *, tools=None)` | text deltas |
+
+`agenerate`/`generate` are the required pair — implement those two and a custom provider works
+everywhere, transport regardless. The streaming pair is optional: the base class raises
+`NotImplementedError` naming the provider, so a backend that cannot stream needs no stub.
+Vendors that speak REST share their request sequence through `RestCompletions` rather than by
+inheriting it (see `providers/rest.py`).
 
 ### Response types
 
