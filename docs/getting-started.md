@@ -82,8 +82,8 @@ writer = Agent(OpenAI("gpt-4o-mini"), name="writer", system="You are concise.")
 
 @graph.add(start=True, end=True)
 async def write(state: State) -> State:
-    out = await writer.arun({"messages": [Message.human(f"Summarize: {state.sales}")]})
-    state.summary = out["output"]
+    out = await writer.arun(f"Summarize: {state.sales}")
+    state.summary = out.output
     return state
 ```
 
