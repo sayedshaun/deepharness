@@ -64,8 +64,8 @@ async def test_returns_a_validated_instance():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "Oslo?"}]})
 
-    assert state["output"] == Weather(city="Oslo", celsius=22)
-    assert state["stop_reason"] == "answer"
+    assert state.output == Weather(city="Oslo", celsius=22)
+    assert state.stop_reason == "answer"
 
 
 async def test_invalid_fields_are_handed_back_to_the_model_to_retry():
@@ -76,11 +76,11 @@ async def test_invalid_fields_are_handed_back_to_the_model_to_retry():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "Oslo?"}]})
 
-    assert state["output"] == Weather(city="Oslo", celsius=22)
+    assert state.output == Weather(city="Oslo", celsius=22)
     assert len(provider.calls) == 2
     assert any(
         message.get("role") == "tool" and "celsius" in message["content"]
-        for message in state["messages"]
+        for message in state.messages
     )
 
 
@@ -95,10 +95,8 @@ async def test_prose_is_not_an_answer_when_output_is_requested():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "Oslo?"}]})
 
-    assert state["output"] == Weather(city="Oslo", celsius=22)
-    assert any(
-        FINAL_TOOL in str(message.get("content")) for message in state["messages"]
-    )
+    assert state.output == Weather(city="Oslo", celsius=22)
+    assert any(FINAL_TOOL in str(message.get("content")) for message in state.messages)
 
 
 async def test_a_model_that_never_calls_the_final_tool_runs_out_of_steps():
@@ -107,7 +105,7 @@ async def test_a_model_that_never_calls_the_final_tool_runs_out_of_steps():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "Oslo?"}]})
 
-    assert state["stop_reason"] == "step_budget"
+    assert state.stop_reason == "step_budget"
 
 
 def test_missing_and_wrong_fields_are_reported_together():
