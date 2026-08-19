@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,7 +14,7 @@ from subagents.providers.base import (
 )
 from subagents.providers.client import HTTPClient
 from subagents.providers.rest import RestCompletions, RestLLM
-from subagents.providers.types import AnthropicMessage, anthropic_stream_delta
+from subagents.providers.types import AnthropicMessage, AnthropicStream
 
 _BASE_URL = "https://api.anthropic.com/v1"
 _ANTHROPIC_VERSION = "2023-06-01"
@@ -92,8 +91,8 @@ class Anthropic(RestLLM):
     def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_anthropic_response(AnthropicMessage.from_json(response.json()))
 
-    def extract_delta(self, data: str) -> str | None:
-        return anthropic_stream_delta(json.loads(data))
+    def accumulator(self) -> AnthropicStream:
+        return AnthropicStream()
 
 
 def _build_payload(
