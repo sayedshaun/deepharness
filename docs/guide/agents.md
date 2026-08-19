@@ -30,7 +30,8 @@ agent isn't limited to one. See the [tools guide](tools.md) for how a function b
 ## `run()` vs `arun()`
 
 Same split as providers: `arun()` is the async path — tool calls requested in the same turn
-run **concurrently**. `run()` is a real synchronous path rather than a wrapper, so it raises
+run **concurrently**, sync tools included: those go to a thread so one blocking call cannot
+stall the rest. `run()` is a real synchronous path rather than a wrapper, so it raises
 if a registered tool turns out to be `async def` — there's no event loop here to await it:
 
 ```python
