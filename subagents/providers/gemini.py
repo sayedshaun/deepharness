@@ -39,6 +39,8 @@ class GeminiPayload:
 class Gemini(LLM):
     """Provider backed by Google's Gemini REST API."""
 
+    __slots__ = ("_api_key", "_http", "_model", "_reasoning_effort", "_rest")
+
     def __init__(
         self,
         model: str,
