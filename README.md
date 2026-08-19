@@ -62,8 +62,8 @@ agent = Agent(
     tools=[get_weather],
 )
 
-result = await agent.arun({"messages": [Message.human("Weather in Oslo?")]})
-print(result["output"])
+result = await agent.arun("Weather in Oslo?")
+print(result.output)
 ```
 
 An `Agent` can itself be handed to another agent as a tool via `as_tool()`, so one agent can
