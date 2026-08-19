@@ -15,11 +15,33 @@ a real answer from a truncated run."""
 
 @dataclass(slots=True)
 class PendingHumanInput:
-    """One tool call that's waiting on a human answer."""
+    """One tool call waiting on a human, and what happens when one answers.
+
+    Two kinds of pause end up here, and they resolve differently:
+
+    * A tool that raised HumanInputRequired is *asking* something. The human's
+      answer becomes that call's result - the tool has already run.
+    * A tool marked requires_approval has not run at all. Approving it runs it
+      now and records the real result; rejecting it records the refusal. That is
+      the difference between "yes" meaning something and "yes" being recorded as
+      the answer to a question nobody asked.
+
+    arguments is kept for the second case, because re-dispatching an approved
+    call needs the arguments the model sent.
+    """
 
     call_id: str | None
     name: str
     question: str
+    arguments: dict[str, Any] | None = None
+    """Present only for an approval pause: the call to run once approved."""
+
+    approved: bool | None = None
+    """Set by AgentState.approve()/reject(); None means still waiting."""
+
+    @property
+    def needs_approval(self) -> bool:
+        return self.arguments is not None
 
 
 @dataclass(slots=True)
@@ -36,6 +58,32 @@ class AgentState:
     usage: TokenUsage = field(default_factory=lambda: TokenUsage(0, 0, 0))
     stop_reason: StopReason | None = None
     paused: list[PendingHumanInput] = field(default_factory=list)
+
+    def approve(self, call_id: str | None = None) -> AgentState:
+        """Allow a paused call to run on the next run()/arun().
+
+        Returns self so a resume reads as one line:
+        `await agent.arun(state.approve())`. With no call_id every pending call
+        is approved, which is the common case of a single gated tool.
+        """
+        return self._resolve(call_id, True)
+
+    def reject(self, call_id: str | None = None) -> AgentState:
+        """Refuse a paused call; the model is told it was denied."""
+        return self._resolve(call_id, False)
+
+    def _resolve(self, call_id: str | None, approved: bool) -> AgentState:
+        matched = False
+        for pending in self.paused:
+            if call_id is None or pending.call_id == call_id:
+                pending.approved = approved
+                matched = True
+        if not matched:
+            raise ConfigurationError(
+                "no paused call to resolve"
+                + (f" with call_id {call_id!r}" if call_id else "")
+            )
+        return self
 
     @property
     def answered(self) -> bool:
