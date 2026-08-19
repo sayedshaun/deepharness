@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,7 +14,7 @@ from .base import (
 )
 from .client import HTTPClient
 from .rest import RestCompletions, RestLLM
-from .types import GeminiResponse
+from .types import GeminiResponse, GeminiStream
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _ROLE_MAP = {"assistant": "model", "system": "user", "user": "user"}
@@ -77,9 +76,8 @@ class Gemini(RestLLM):
     def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_gemini_response(GeminiResponse.from_json(response.json()))
 
-    def extract_delta(self, data: str) -> str | None:
-        parts = GeminiResponse.from_json(json.loads(data)).parts
-        return "".join(part.text for part in parts if part.text) or None
+    def accumulator(self) -> GeminiStream:
+        return GeminiStream()
 
 
 def _build_payload(
