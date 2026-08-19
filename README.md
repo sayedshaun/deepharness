@@ -6,11 +6,11 @@
 
 **Compose LLM agents into typed, concurrent workflows.**
 
-A small framework for wiring plain Python functions — and the agents inside them — into a
+A lightweight framework for wiring plain Python functions — and the agents inside them — into a
 graph that runs branches in parallel, routes on conditions, and threads one typed state
 object through the whole thing.
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![Dependencies: httpx + pydantic](https://img.shields.io/badge/dependencies-httpx%20%2B%20pydantic-6E63F5)](pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/subagents/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/subagents/)
 
 </div>
 
@@ -18,7 +18,7 @@ object through the whole thing.
 
 ## Why Subagents
 
-- **Two dependencies. That's it.** `httpx` and `pydantic`. Providers talk to vendor REST APIs
+- **One dependency. That's it.** `httpx`. Providers talk to vendor REST APIs
   directly — no vendor SDKs, no transitive dependency sprawl.
 - **Your state is a dataclass.** Not an untyped dict. Your editor autocompletes it, your type
   checker checks it.
@@ -58,8 +58,7 @@ def get_weather(city: str) -> str:
 
 
 agent = Agent(
-    "assistant",
-    model=OpenAI(model="gpt-4o-mini", api_key="sk-..."),
+    OpenAI(model="gpt-4o-mini", api_key="sk-..."),
     tools=[get_weather],
 )
 
@@ -71,11 +70,11 @@ An `Agent` can itself be handed to another agent as a tool via `as_tool()`, so o
 delegate a task to another:
 
 ```python
-researcher = Agent("researcher", model=OpenAI(model="gpt-4o-mini", api_key="sk-..."))
+researcher = Agent(OpenAI(model="gpt-4o-mini", api_key="sk-..."), name="researcher")
 
 editor = Agent(
-    "editor",
-    model=OpenAI(model="gpt-4o-mini", api_key="sk-..."),
+    OpenAI(model="gpt-4o-mini", api_key="sk-..."),
+    name="editor",
     tools=[researcher.as_tool(description="Look up facts on a topic.")],
 )
 ```
