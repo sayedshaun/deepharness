@@ -69,6 +69,27 @@ class Usage:
     total_tokens: int = 0
 
 
+def _usage(
+    usage: Any, *, prompt: str, completion: str, total: str | None = None
+) -> Usage | None:
+    """One vendor's token counts under its own key names, or None if it sent none.
+
+    total is optional because Anthropic reports only the two halves; summing
+    them here keeps that quirk out of the response types.
+    """
+    if not usage:
+        return None
+    prompt_tokens = usage.get(prompt, 0)
+    completion_tokens = usage.get(completion, 0)
+    return Usage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=usage.get(total, 0)
+        if total
+        else prompt_tokens + completion_tokens,
+    )
+
+
 @dataclass(slots=True)
 class OpenAIChatCompletion:
     message: OpenAIMessage
@@ -79,16 +100,14 @@ class OpenAIChatCompletion:
         choices = _require(data, "choices", "OpenAI")
         if not choices:
             raise ProviderError(f"OpenAI response has no choices: {_clip(data)}")
-        usage = data.get("usage")
         return cls(
             message=OpenAIMessage.from_json(_require(choices[0], "message", "OpenAI")),
-            usage=Usage(
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
-            )
-            if usage
-            else None,
+            usage=_usage(
+                data.get("usage"),
+                prompt="prompt_tokens",
+                completion="completion_tokens",
+                total="total_tokens",
+            ),
         )
 
 
@@ -123,18 +142,12 @@ class AnthropicMessage:
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> AnthropicMessage:
-        usage = data.get("usage")
         blocks = _require(data, "content", "Anthropic")
         return cls(
             content=[AnthropicContentBlock.from_json(block) for block in blocks],
-            usage=Usage(
-                prompt_tokens=usage.get("input_tokens", 0),
-                completion_tokens=usage.get("output_tokens", 0),
-                total_tokens=usage.get("input_tokens", 0)
-                + usage.get("output_tokens", 0),
-            )
-            if usage
-            else None,
+            usage=_usage(
+                data.get("usage"), prompt="input_tokens", completion="output_tokens"
+            ),
         )
 
 
@@ -172,16 +185,14 @@ class GeminiResponse:
         if candidates is None:
             raise ProviderError(f"Gemini response has no candidates: {_clip(data)}")
         content = candidates[0].get("content") if candidates else None
-        usage = data.get("usageMetadata")
         return cls(
             parts=[
                 GeminiPart.from_json(part) for part in (content or {}).get("parts", [])
             ],
-            usage=Usage(
-                prompt_tokens=usage.get("promptTokenCount", 0),
-                completion_tokens=usage.get("candidatesTokenCount", 0),
-                total_tokens=usage.get("totalTokenCount", 0),
-            )
-            if usage
-            else None,
+            usage=_usage(
+                data.get("usageMetadata"),
+                prompt="promptTokenCount",
+                completion="candidatesTokenCount",
+                total="totalTokenCount",
+            ),
         )
