@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import AsyncIterator, Callable, Generator, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from subagents.providers.base import LLM, TokenUsage
+from subagents.providers.base import (
+    LLM,
+    Completed,
+    TextDelta,
+    TokenUsage,
+)
 
 from ..errors import (
     ConfigurationError,
@@ -17,7 +22,10 @@ from ..tools.toolbox import Ctx, Toolbox, ToolSpec
 from .budget import Budget
 from .message import Message, as_dict
 from .output import FINAL_TOOL, coerce, final_tool_schema
-from .state import AgentState, PendingHumanInput, StopReason
+from .state import AgentState, Finished, PendingHumanInput, StopReason
+
+AgentEvent = TextDelta | Finished
+"""What streaming a run emits: prose as it arrives, then the final state."""
 
 
 @dataclass(slots=True)
@@ -392,6 +400,92 @@ class Agent:
                     ]
         except StopIteration as done:
             return done.value
+
+    async def astream_events(
+        self, state: Any = None, *, deps: Any = None
+    ) -> AsyncIterator[AgentEvent]:
+        """Run while streaming, emitting prose as it arrives then the state.
+
+        Every turn is streamed, not just the answering one: the agent cannot know
+        in advance whether a turn will answer or ask for tools, so the provider
+        hands back the assembled response either way and a tool turn simply
+        yields no text.
+        """
+        state = AgentState.of(state)
+        if self._model is None:
+            yield Finished(self._passthrough(state))
+            return
+
+        ctx = Ctx(state=state, deps=deps)
+        turns = self._turns(state, self._prepare_messages(state))
+        schemas = self._schemas()
+        outcome: Any = None
+        try:
+            while True:
+                request = turns.send(outcome)
+                if isinstance(request, _Ask):
+                    async for event in self._model.astream_events(
+                        request.messages, tools=schemas
+                    ):
+                        if isinstance(event, TextDelta):
+                            yield event
+                        elif isinstance(event, Completed):
+                            outcome = event.response
+                else:
+                    outcome = await asyncio.gather(
+                        *(
+                            self._call_tool(call.name, call.arguments, ctx)
+                            for call in request.calls
+                        )
+                    )
+        except StopIteration as done:
+            yield Finished(done.value)
+
+    async def astream(
+        self, state: Any = None, *, deps: Any = None
+    ) -> AsyncIterator[str]:
+        """Just the text, for the common "print as it types" case."""
+        async for event in self.astream_events(state, deps=deps):
+            if isinstance(event, TextDelta):
+                yield event.text
+
+    def stream_events(
+        self, state: Any = None, *, deps: Any = None
+    ) -> Iterator[AgentEvent]:
+        """Synchronous counterpart to astream_events()."""
+        state = AgentState.of(state)
+        if self._model is None:
+            yield Finished(self._passthrough(state))
+            return
+
+        ctx = Ctx(state=state, deps=deps)
+        turns = self._turns(state, self._prepare_messages(state))
+        schemas = self._schemas()
+        outcome: Any = None
+        try:
+            while True:
+                request = turns.send(outcome)
+                if isinstance(request, _Ask):
+                    for event in self._model.stream_events(
+                        request.messages, tools=schemas
+                    ):
+                        if isinstance(event, TextDelta):
+                            yield event
+                        elif isinstance(event, Completed):
+                            outcome = event.response
+                else:
+                    outcome = [
+                        self._call_tool_sync(call.name, call.arguments, ctx)
+                        for call in request.calls
+                    ]
+        except StopIteration as done:
+            yield Finished(done.value)
+
+    def stream(self, state: Any = None, *, deps: Any = None) -> Iterator[str]:
+        """Synchronous counterpart to astream()."""
+        for event in self.stream_events(state, deps=deps):
+            if isinstance(event, TextDelta):
+                yield event.text
 
     async def _call_tool(self, name: str, arguments: dict[str, Any], ctx: Ctx) -> Any:
         try:
