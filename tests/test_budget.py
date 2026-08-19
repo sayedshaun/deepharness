@@ -43,8 +43,8 @@ async def test_single_shot_budget_makes_exactly_one_model_call():
     state = await agent.arun({"messages": [{"role": "user", "content": "2+2?"}]})
 
     assert len(provider.calls) == 1
-    assert state["stop_reason"] == "answer"
-    assert state["output"] == "42"
+    assert state.stop_reason == "answer"
+    assert state.output == "42"
 
 
 async def test_single_shot_agent_that_calls_a_tool_stops_without_answering():
@@ -66,5 +66,5 @@ async def test_single_shot_agent_that_calls_a_tool_stops_without_answering():
 
     state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
 
-    assert state["stop_reason"] == "step_budget"
-    assert state["output"] == ""
+    assert state.stop_reason == "step_budget"
+    assert state.output == ""
