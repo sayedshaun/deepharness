@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import enum
 import inspect
-from collections.abc import Callable
+import types
+import typing
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, get_type_hints
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from ..errors import ConfigurationError, ToolNotFoundError
 
-_JSON_TYPES: dict[type, str] = {
+_NONE = type(None)
+_PRIMITIVES: dict[Any, str] = {
     str: "string",
     int: "integer",
     float: "number",
     bool: "boolean",
-    list: "array",
-    dict: "object",
 }
 
 
@@ -59,41 +61,75 @@ def _build_spec(
     name: str | None,
     description: str | None,
 ) -> ToolSpec:
-    signature = inspect.signature(fn)
-    hints = get_type_hints(fn)
-
-    properties: dict[str, Any] = {}
-    required: list[str] = []
-
-    for param_name, param in signature.parameters.items():
-        if param_name == "self":
-            continue
-
-        properties[param_name] = {"type": _json_type(hints.get(param_name))}
-        if param.default is inspect.Parameter.empty:
-            required.append(param_name)
-
     return ToolSpec(
         name=name or fn.__name__,
         description=description or inspect.getdoc(fn) or "",
-        parameters={
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        },
+        parameters=_parameters(fn),
         func=fn,
     )
 
 
-def _json_type(annotation: Any) -> str:
-    return _JSON_TYPES.get(annotation, "string")
+def _parameters(fn: Callable[..., Any]) -> dict[str, Any]:
+    """The JSON Schema object describing what the model may pass to fn."""
+    signature = inspect.signature(fn)
+    hints = typing.get_type_hints(fn, include_extras=True)
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for name, param in signature.parameters.items():
+        if name == "self" or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+            continue
+        properties[name] = json_type(hints.get(name, param.annotation))
+        if param.default is inspect.Parameter.empty:
+            required.append(name)
+
+    return {"type": "object", "properties": properties, "required": required}
+
+
+def json_type(annotation: Any) -> dict[str, Any]:
+    """One annotation as JSON Schema. An empty dict means "unconstrained".
+
+    An annotation this cannot describe stays unconstrained on purpose: saying
+    nothing leaves the model to infer from the name and docstring, while
+    defaulting it to "string" would tell the model something false.
+    """
+    origin = get_origin(annotation)
+
+    if origin is Annotated:
+        return json_type(get_args(annotation)[0])
+    if origin is Literal:
+        return {"enum": list(get_args(annotation))}
+    if origin is Union or origin is types.UnionType:
+        variants = [a for a in get_args(annotation) if a is not _NONE]
+        if len(variants) == 1:  # Optional[X] is just X, minus the requirement
+            return json_type(variants[0])
+        return {"anyOf": [json_type(a) for a in variants]}
+    if origin in (list, set, frozenset, tuple):
+        args = get_args(annotation)
+        return {"type": "array", "items": json_type(args[0]) if args else {}}
+    if origin is dict:
+        return {"type": "object"}
+
+    if isinstance(annotation, type):
+        if annotation in _PRIMITIVES:
+            return {"type": _PRIMITIVES[annotation]}
+        if issubclass(annotation, enum.Enum):
+            return {"enum": [member.value for member in annotation]}
+        if annotation is dict:
+            return {"type": "object"}
+    return {}
 
 
 class Toolbox:
     """Registry of tools that can be listed as schemas and invoked by name."""
 
-    def __init__(self) -> None:
+    def __init__(self, tools: Iterable[Callable[..., Any]] = ()) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        for func in tools:
+            self.register(func)
+
+    def __len__(self) -> int:
+        return len(self._tools)
 
     def register(self, func: Callable[..., Any]) -> Callable[..., Any]:
         spec = getattr(func, "_tool_spec", None) or _build_spec(func, None, None)
