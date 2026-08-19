@@ -88,14 +88,46 @@ class Agent:
         budget: Budget | None = None,
         output: type | None = None,
     ):
-        self.model = model
-        self.tools = tools if isinstance(tools, Toolbox) else Toolbox(tools)
-        self.system = system
-        self.name = name
-        self.budget = budget or Budget()
-        self.output = output
+        self._model = model
+        self._tools = tools if isinstance(tools, Toolbox) else Toolbox(tools)
+        self._system = system
+        self._name = name
+        self._budget = budget or Budget()
+        self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
-        self.total_usage = TokenUsage(0, 0, 0)
+        self._total_usage = TokenUsage(0, 0, 0)
+
+    # Read-only views: an agent's configuration is settled at construction, and
+    # total_usage is live state no caller should be able to reset or inflate.
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def model(self) -> LLM | None:
+        return self._model
+
+    @property
+    def tools(self) -> Toolbox:
+        return self._tools
+
+    @property
+    def system(self) -> str | None:
+        return self._system
+
+    @property
+    def budget(self) -> Budget:
+        return self._budget
+
+    @property
+    def output(self) -> type | None:
+        return self._output
+
+    @property
+    def total_usage(self) -> TokenUsage:
+        """Cumulative usage across every model call this agent has made."""
+        return self._total_usage
 
     def as_tool(
         self, *, name: str | None = None, description: str | None = None
@@ -113,12 +145,12 @@ class Agent:
             result = await self.arun(input)
             return result.output
 
-        call.__name__ = name or self.name
+        call.__name__ = name or self._name
         call._tool_spec = ToolSpec(  # type: ignore[attr-defined]
-            name=name or self.name,
+            name=name or self._name,
             description=description
-            or self.system
-            or f"Delegate a task to the '{self.name}' agent.",
+            or self._system
+            or f"Delegate a task to the '{self._name}' agent.",
             parameters={
                 "type": "object",
                 "properties": {"input": {"type": "string"}},
@@ -135,8 +167,8 @@ class Agent:
         Message of their own, and a provider must never be handed one.
         """
         messages = [as_dict(message) for message in state.messages]
-        if self.system and not any(m["role"] == "system" for m in messages):
-            messages.insert(0, Message.system(self.system).to_dict())
+        if self._system and not any(m["role"] == "system" for m in messages):
+            messages.insert(0, Message.system(self._system).to_dict())
         return messages
 
     @staticmethod
@@ -162,15 +194,15 @@ class Agent:
         if response.usage is None:
             return
 
-        self.total_usage = self.total_usage + response.usage
+        self._total_usage = self._total_usage + response.usage
         if (
-            self.budget.tokens is not None
-            and self.total_usage.total_tokens > self.budget.tokens
+            self._budget.tokens is not None
+            and self._total_usage.total_tokens > self._budget.tokens
         ):
             raise TokenBudgetExceeded(
-                self.name,
-                self.total_usage,
-                self.budget.tokens,
+                self._name,
+                self._total_usage,
+                self._budget.tokens,
                 state=self._result(state, messages, response.content, "token_budget"),
             )
 
@@ -185,7 +217,7 @@ class Agent:
         return AgentState(
             messages=messages,
             output=output,
-            usage=self.total_usage,
+            usage=self._total_usage,
             stop_reason=stop_reason,
             paused=paused or [],
         )
@@ -230,7 +262,7 @@ class Agent:
         reasons, pausing for a human, feeding a failed tool back to the model)
         lives here once instead of being maintained in two copies.
         """
-        for _ in range(self.budget.steps):
+        for _ in range(self._budget.steps):
             response = yield _Ask(messages)
             self._account_for_usage(response, state, messages)
 
@@ -238,7 +270,7 @@ class Agent:
             if final is not None:
                 self._record_tool_call_request(messages, response)
                 try:
-                    answer = coerce(self.output, final.arguments)
+                    answer = coerce(self._output, final.arguments)
                 except OutputValidationError as exc:
                     # Same courtesy a failing tool gets: hand the model the
                     # error so it can call FINAL_TOOL again with valid fields.
@@ -260,9 +292,9 @@ class Agent:
                     continue
                 return self._result(state, messages, response.content, "answer")
 
-            if not self.tools:
+            if not self._tools:
                 raise ConfigurationError(
-                    f"{self.name} received tool calls but has no tools registered"
+                    f"{self._name} received tool calls but has no tools registered"
                 )
 
             self._record_tool_call_request(messages, response)
@@ -292,14 +324,14 @@ class Agent:
         return state
 
     def _schemas(self) -> list[dict[str, Any]] | None:
-        schemas = self.tools.schemas()
+        schemas = self._tools.schemas()
         if self._final_schema is not None:
             schemas.append(self._final_schema)
         return schemas or None
 
     async def arun(self, state: Any = None) -> AgentState:
         state = AgentState.of(state)
-        if self.model is None:
+        if self._model is None:
             return self._passthrough(state)
 
         turns = self._turns(state, self._prepare_messages(state))
@@ -309,7 +341,7 @@ class Agent:
             while True:
                 request = turns.send(outcome)
                 if isinstance(request, _Ask):
-                    outcome = await self.model.agenerate(
+                    outcome = await self._model.agenerate(
                         request.messages, tools=schemas
                     )
                 else:
@@ -324,7 +356,7 @@ class Agent:
 
     def run(self, state: Any = None) -> AgentState:
         state = AgentState.of(state)
-        if self.model is None:
+        if self._model is None:
             return self._passthrough(state)
 
         turns = self._turns(state, self._prepare_messages(state))
@@ -334,7 +366,7 @@ class Agent:
             while True:
                 request = turns.send(outcome)
                 if isinstance(request, _Ask):
-                    outcome = self.model.generate(request.messages, tools=schemas)
+                    outcome = self._model.generate(request.messages, tools=schemas)
                 else:
                     outcome = [
                         self._call_tool_sync(call.name, call.arguments)
@@ -345,7 +377,7 @@ class Agent:
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         try:
-            return await self.tools.call(name, **arguments)
+            return await self._tools.call(name, **arguments)
         except ConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001 - see _record_tool_results
@@ -353,7 +385,7 @@ class Agent:
 
     def _call_tool_sync(self, name: str, arguments: dict[str, Any]) -> Any:
         try:
-            return self.tools.call_sync(name, **arguments)
+            return self._tools.call_sync(name, **arguments)
         except ConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001 - see _record_tool_results
