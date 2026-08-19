@@ -25,12 +25,28 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 
 | Member | Signature | Description |
 | --- | --- | --- |
-| `arun` | `async def arun(state: dict) -> dict` | Async run. Tool calls in the same turn dispatch concurrently. |
-| `run` | `def run(state: dict) -> dict` | Sync run. Raises if a registered tool is `async def`. |
+| `arun` | `async def arun(state: Any = None) -> AgentState` | Async run. Tool calls in the same turn dispatch concurrently. |
+| `run` | `def run(state: Any = None) -> AgentState` | Sync run. Raises if a registered tool is `async def`. |
 | `total_usage` | `TokenUsage` | Cumulative token usage across every call made by this agent instance. |
 | `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. |
-| `output` | `type \| None` | A dataclass; when set, `state["output"]` is a validated instance of it. |
+| `output` | `type \| None` | A dataclass; when set, `state.output` is a validated instance of it. |
+
+### `AgentState`
+
+```python
+AgentState(
+    messages: list[dict] = [],
+    output: Any = None,
+    usage: TokenUsage = TokenUsage(0, 0, 0),
+    stop_reason: StopReason | None = None,
+    paused: list[PendingHumanInput] = [],
+)
+```
+
+What a run consumed and produced. `answered` is `True` only when `stop_reason == "answer"`.
+`AgentState.of(value)` builds one from a prompt string, a list of messages, a dict of known
+fields, or an existing state; an unknown dict key raises `ConfigurationError`.
 
 ### `Budget`
 
@@ -80,7 +96,7 @@ save_session(path: str, messages: list[dict]) -> None
 load_session(path: str) -> list[dict]  # [] if the file doesn't exist
 ```
 
-Round-trips `state["messages"]` through JSON so a conversation can resume across process runs.
+Round-trips `state.messages` through JSON so a conversation can resume across process runs.
 
 ## Tools
 
