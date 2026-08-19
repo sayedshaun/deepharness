@@ -17,6 +17,7 @@ from subagents.providers.base import (
     without_none,
 )
 from subagents.providers.client import HTTPClient
+from subagents.providers.rest import RestCompletions
 from subagents.providers.types import OpenAIChatCompletion, openai_stream_delta
 
 _BASE_URL = "https://api.openai.com/v1"
@@ -69,19 +70,36 @@ class OpenAI(LLM):
         self._http = HTTPClient(
             resolved_base_url, headers=headers, client=client, sync_client=sync_client
         )
+        self._rest = RestCompletions(self._http, self)
         self._model = model
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
 
-    def _payload(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    def payload(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        *,
+        stream: bool = False,
     ) -> OpenAIPayload:
-        return _build_payload(
+        payload = _build_payload(
             self._model, messages, tools, self._temperature, self._reasoning_effort
         )
+        payload.stream = stream or None
+        return payload
 
-    def _parse_response(self, response: httpx.Response) -> CompletionResponse:
+    def endpoint(self, *, stream: bool = False) -> str:
+        return "/chat/completions"
+
+    def request_args(self, *, stream: bool = False) -> dict[str, Any]:
+        """OpenAI authenticates with a bearer header set once in __init__."""
+        return {}
+
+    def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_openai_response(OpenAIChatCompletion.from_json(response.json()))
+
+    def extract_delta(self, data: str) -> str | None:
+        return openai_stream_delta(json.loads(data))
 
     async def agenerate(
         self,
@@ -89,9 +107,7 @@ class OpenAI(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = self._payload(messages, tools)
-        response = await self._http.post("/chat/completions", json=payload.to_json())
-        return self._parse_response(response)
+        return await self._rest.agenerate(messages, tools)
 
     def generate(
         self,
@@ -99,9 +115,7 @@ class OpenAI(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = self._payload(messages, tools)
-        response = self._http.post_sync("/chat/completions", json=payload.to_json())
-        return self._parse_response(response)
+        return self._rest.generate(messages, tools)
 
     async def astream(
         self,
@@ -109,20 +123,8 @@ class OpenAI(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
-        payload = self._payload(messages, tools)
-        payload.stream = True
-        async with self._http.stream(
-            "POST", "/chat/completions", json=payload.to_json()
-        ) as response:
-            async for line in response.aiter_lines():
-                data = _parse_sse_line(line)
-                if data is None:
-                    continue
-                if data == "[DONE]":
-                    break
-                delta = _extract_delta(data)
-                if delta:
-                    yield delta
+        async for delta in self._rest.astream(messages, tools):
+            yield delta
 
     def stream(
         self,
@@ -130,30 +132,7 @@ class OpenAI(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
-        payload = self._payload(messages, tools)
-        payload.stream = True
-        with self._http.stream_sync(
-            "POST", "/chat/completions", json=payload.to_json()
-        ) as response:
-            for line in response.iter_lines():
-                data = _parse_sse_line(line)
-                if data is None:
-                    continue
-                if data == "[DONE]":
-                    break
-                delta = _extract_delta(data)
-                if delta:
-                    yield delta
-
-
-def _parse_sse_line(line: str) -> str | None:
-    if not line or not line.startswith("data:"):
-        return None
-    return line[len("data:") :].strip()
-
-
-def _extract_delta(data: str) -> str | None:
-    return openai_stream_delta(json.loads(data))
+        yield from self._rest.stream(messages, tools)
 
 
 def _build_payload(
