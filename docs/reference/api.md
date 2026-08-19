@@ -25,8 +25,8 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 
 | Member | Signature | Description |
 | --- | --- | --- |
-| `arun` | `async def arun(state: Any = None) -> AgentState` | Async run. Tool calls in the same turn dispatch concurrently. |
-| `run` | `def run(state: Any = None) -> AgentState` | Sync run. Raises if a registered tool is `async def`. |
+| `arun` | `async def arun(state: Any = None, *, deps: Any = None) -> AgentState` | Async run. Tool calls in the same turn dispatch concurrently. |
+| `run` | `def run(state: Any = None, *, deps: Any = None) -> AgentState` | Sync run. Raises if a registered tool is `async def`. |
 | `total_usage` | `TokenUsage` | Cumulative token usage across every call made by this agent instance. Read-only. |
 | `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. Read-only. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
@@ -111,6 +111,15 @@ Decorates a function so it can be registered as a callable tool. Builds a JSON s
 the function's signature (parameter types, required-ness) and docstring (summary plus
 `Args:`/`:param:` descriptions). Handles containers, `Literal`, `Enum` and unions — see [Tools](../guide/tools.md). Works on
 both sync and async functions.
+
+### `Ctx`
+
+```python
+Ctx(state: Any = None, deps: Any = None)
+```
+
+Injected into any tool parameter annotated `Ctx`, and hidden from that tool's schema. `deps` is
+whatever the run was given; `state` is the run's `AgentState`.
 
 ### `Toolbox`
 
