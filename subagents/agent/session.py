@@ -13,7 +13,11 @@ def save_session(path: str, messages: list[Message | dict[str, Any]]) -> None:
 
 
 def load_session(path: str) -> list[dict[str, Any]]:
-    """Read a message history written by save_session(), or [] if the file doesn't exist yet."""
+    """Read a message history written by save_session().
+
+    Returns [] when the file does not exist yet, so a first run needs no
+    special case at the call site.
+    """
     file = Path(path)
     if not file.exists():
         return []
