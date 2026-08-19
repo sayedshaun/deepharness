@@ -3,37 +3,39 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
 
 from subagents.providers.base import (
     LLM,
     CompletionResponse,
-    ReasoningEffort,
-    TokenUsage,
+    ReasoningLevel,
     ToolCall,
+    token_usage,
+    without_none,
 )
 from subagents.providers.client import HTTPClient
-from subagents.providers.types import OpenAIChatCompletion, OpenAIStreamChunk
+from subagents.providers.types import OpenAIChatCompletion, openai_stream_delta
 
 _BASE_URL = "https://api.openai.com/v1"
 
 
-class OpenAIPayload(BaseModel):
-    """Request body for POST /chat/completions, serialized with exclude_none
-    so unset optional fields never hit the wire."""
+@dataclass(slots=True)
+class OpenAIPayload:
+    """Request body for POST /chat/completions, with unset optional fields
+    dropped rather than sent as null."""
 
     model: str
     messages: list[dict[str, Any]]
     tools: list[dict[str, Any]] | None = None
     temperature: float | None = None
-    reasoning_effort: ReasoningEffort | None = None
+    reasoning_effort: ReasoningLevel | None = None
     stream: bool | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return self.model_dump(exclude_none=True)
+        return without_none(self)
 
 
 class OpenAI(LLM):
@@ -55,7 +57,7 @@ class OpenAI(LLM):
         *,
         base_url: str | None = None,
         temperature: float | None = None,
-        reasoning_effort: ReasoningEffort | None = None,
+        reasoning_effort: ReasoningLevel | None = None,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
@@ -79,9 +81,7 @@ class OpenAI(LLM):
         )
 
     def _parse_response(self, response: httpx.Response) -> CompletionResponse:
-        return _from_openai_response(
-            OpenAIChatCompletion.model_validate(response.json())
-        )
+        return _from_openai_response(OpenAIChatCompletion.from_json(response.json()))
 
     async def agenerate(
         self,
@@ -153,8 +153,7 @@ def _parse_sse_line(line: str) -> str | None:
 
 
 def _extract_delta(data: str) -> str | None:
-    chunk = OpenAIStreamChunk.model_validate(json.loads(data))
-    return chunk.choices[0].delta.content if chunk.choices else None
+    return openai_stream_delta(json.loads(data))
 
 
 def _build_payload(
@@ -162,7 +161,7 @@ def _build_payload(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
     temperature: float | None = None,
-    reasoning_effort: ReasoningEffort | None = None,
+    reasoning_effort: ReasoningLevel | None = None,
 ) -> OpenAIPayload:
     return OpenAIPayload(
         model=model,
@@ -221,24 +220,12 @@ def _to_openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
 
 
 def _from_openai_response(completion: OpenAIChatCompletion) -> CompletionResponse:
-    message = completion.choices[0].message
     tool_calls = [
-        ToolCall(
-            id=call.id,
-            name=call.function.name,
-            arguments=json.loads(call.function.arguments),
-        )
-        for call in (message.tool_calls or [])
+        ToolCall(id=call.id, name=call.name, arguments=json.loads(call.arguments))
+        for call in completion.message.tool_calls
     ]
-    usage = (
-        TokenUsage(
-            prompt_tokens=completion.usage.prompt_tokens,
-            completion_tokens=completion.usage.completion_tokens,
-            total_tokens=completion.usage.total_tokens,
-        )
-        if completion.usage
-        else None
-    )
     return CompletionResponse(
-        content=message.content or "", tool_calls=tool_calls, usage=usage
+        content=completion.message.content or "",
+        tool_calls=tool_calls,
+        usage=token_usage(completion.usage),
     )
