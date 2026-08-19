@@ -1,8 +1,11 @@
 from subagents.providers.anthropic import Anthropic
 from subagents.providers.base import (
     LLM,
+    Completed,
     CompletionResponse,
     ReasoningLevel,
+    StreamEvent,
+    TextDelta,
     TokenUsage,
     ToolCall,
 )
@@ -28,6 +31,7 @@ __all__ = [
     "XAI",
     "Anthropic",
     "Cerebras",
+    "Completed",
     "CompletionResponse",
     "DeepSeek",
     "Fireworks",
@@ -39,6 +43,8 @@ __all__ = [
     "OpenAI",
     "OpenRouter",
     "ReasoningLevel",
+    "StreamEvent",
+    "TextDelta",
     "Together",
     "TokenUsage",
     "ToolCall",
