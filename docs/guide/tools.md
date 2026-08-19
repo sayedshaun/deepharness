@@ -27,6 +27,38 @@ def get_weather(city: str) -> str:
 `@tool(name=..., description=...)` overrides the inferred name or description if you need
 something different from the function's own.
 
+## Reaching the run: `Ctx`
+
+Annotate a parameter `ctx: Ctx` and the runtime fills it in. The parameter is hidden from the
+model — it never appears in the schema and the model cannot pass it — so a tool can reach the
+run without a module-level global:
+
+```python
+from subagents import Agent, Ctx, tool
+
+
+@tool
+def lookup_plan(customer: str, ctx: Ctx) -> str:
+    """Look up a customer's plan."""
+    return ctx.deps.db.plan_for(customer, tenant=ctx.deps.tenant)
+
+
+agent = Agent(llm, tools=[lookup_plan])
+state = await agent.arun("What plan is Acme on?", deps=Deps(db=db, tenant="acme"))
+```
+
+`Ctx` carries two things:
+
+| Field | What it holds |
+| --- | --- |
+| `deps` | Whatever you passed as `deps=` to `run`/`arun` — a database handle, a tenant, a request scope. |
+| `state` | The `AgentState` for this run, so a tool can read the transcript so far. |
+
+`deps` belongs to the run, not the agent: one agent instance serves many requests, each with
+its own dependencies. A sub-agent registered with `as_tool()` inherits the caller's `deps`, so
+a delegated run keeps the same scope. Calling a tool outside a run gets an empty `Ctx`, so
+`ctx.deps` is always readable without a guard.
+
 ## Passing tools to an agent
 
 ```python
