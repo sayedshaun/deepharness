@@ -14,7 +14,7 @@ cd subagents
 pip install -e .
 ```
 
-Requires Python 3.11+. Runtime dependencies are just `httpx` and `pydantic`.
+Requires Python 3.11+. The only runtime dependency is `httpx`.
 
 ## Quickstart
 
@@ -77,7 +77,7 @@ Drop an [`Agent`](guide/agents.md) inside any node and the graph handles sequenc
 from subagents import Agent, Message
 from subagents import OpenAI
 
-writer = Agent("writer", model=OpenAI("gpt-4o-mini"), system_prompt="You are concise.")
+writer = Agent(OpenAI("gpt-4o-mini"), name="writer", system="You are concise.")
 
 
 @graph.add(start=True, end=True)
