@@ -21,7 +21,7 @@ object through the whole thing.
 
 <p class="sa-badges">
 <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
-<img src="https://img.shields.io/badge/dependencies-httpx%20%2B%20pydantic-6E63F5" alt="Dependencies: httpx + pydantic">
+<img src="https://img.shields.io/badge/dependencies-httpx%20only-6E63F5" alt="Dependencies: httpx only">
 <img src="https://img.shields.io/badge/async-native-0EA5E9" alt="Async native">
 </p>
 
@@ -29,7 +29,7 @@ object through the whole thing.
 
 ## Why Subagents
 
-- **Two dependencies. That's it.** `httpx` and `pydantic`. Providers talk to vendor REST APIs
+- **One dependency. That's it.** `httpx`. Providers talk to vendor REST APIs
   directly — no OpenAI SDK, no `google-genai`, no transitive dependency sprawl.
 - **Your state is a dataclass.** Not an untyped dict. Your editor autocompletes it, your type
   checker checks it.
