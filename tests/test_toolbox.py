@@ -1,3 +1,6 @@
+import enum
+from typing import Any, Literal
+
 import pytest
 
 from subagents.agent import Toolbox, tool
@@ -109,3 +112,90 @@ async def test_toolbox_call_unknown_tool_raises():
 
     with pytest.raises(KeyError):
         await toolbox.call("missing")
+
+
+def test_toolbox_registers_an_iterable_passed_to_the_constructor():
+    @tool
+    def first() -> str:
+        """First."""
+        return "1"
+
+    def second() -> str:
+        """Second, undecorated."""
+        return "2"
+
+    toolbox = Toolbox([first, second])
+
+    assert len(toolbox) == 2
+    assert {schema["name"] for schema in toolbox.schemas()} == {"first", "second"}
+
+
+def test_empty_toolbox_is_falsy():
+    assert not Toolbox()
+    assert len(Toolbox()) == 0
+
+
+def test_container_parameters_declare_their_item_type():
+    @tool
+    def fn(names: list[str], counts: list[int], mapping: dict[str, int]) -> str:
+        """Doc."""
+        return ""
+
+    props = fn._tool_spec.parameters["properties"]
+
+    assert props["names"] == {"type": "array", "items": {"type": "string"}}
+    assert props["counts"] == {"type": "array", "items": {"type": "integer"}}
+    assert props["mapping"] == {"type": "object"}
+
+
+def test_literal_and_enum_parameters_become_enums():
+    class Unit(enum.Enum):
+        C = "c"
+        F = "f"
+
+    @tool
+    def fn(units: Literal["c", "f"], unit: Unit) -> str:
+        """Doc."""
+        return ""
+
+    props = fn._tool_spec.parameters["properties"]
+
+    assert props["units"] == {"enum": ["c", "f"]}
+    assert props["unit"] == {"enum": ["c", "f"]}
+
+
+def test_optional_parameter_keeps_its_type_but_is_not_required():
+    @tool
+    def fn(city: str, limit: int | None = None) -> str:
+        """Doc."""
+        return ""
+
+    spec = fn._tool_spec
+
+    assert spec.parameters["properties"]["limit"] == {"type": "integer"}
+    assert spec.parameters["required"] == ["city"]
+
+
+def test_union_parameter_becomes_any_of():
+    @tool
+    def fn(value: int | str) -> str:
+        """Doc."""
+        return ""
+
+    assert fn._tool_spec.parameters["properties"]["value"] == {
+        "anyOf": [{"type": "integer"}, {"type": "string"}]
+    }
+
+
+def test_undescribable_parameters_stay_unconstrained():
+    class Whatever:
+        pass
+
+    @tool
+    def fn(a, b: Any, c: Whatever) -> str:
+        """Doc."""
+        return ""
+
+    props = fn._tool_spec.parameters["properties"]
+
+    assert props["a"] == {} and props["b"] == {} and props["c"] == {}
