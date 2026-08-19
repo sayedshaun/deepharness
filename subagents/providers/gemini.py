@@ -2,36 +2,37 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
 
 from .base import (
     LLM,
-    REASONING_EFFORT_BUDGET_TOKENS,
     CompletionResponse,
-    ReasoningEffort,
-    TokenUsage,
+    ReasoningLevel,
     ToolCall,
+    token_usage,
+    without_none,
 )
 from .client import HTTPClient
-from .types import GeminiGenerateContentResponse
+from .types import GeminiResponse
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _ROLE_MAP = {"assistant": "model", "system": "user", "user": "user"}
 
 
-class GeminiPayload(BaseModel):
-    """Request body for :generateContent / :streamGenerateContent, serialized
-    with exclude_none so unset optional fields never hit the wire."""
+@dataclass(slots=True)
+class GeminiPayload:
+    """Request body for :generateContent / :streamGenerateContent, with unset
+    optional fields dropped rather than sent as null."""
 
     contents: list[dict[str, Any]]
     tools: list[dict[str, Any]] | None = None
     generationConfig: dict[str, Any] | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return self.model_dump(exclude_none=True)
+        return without_none(self)
 
 
 class Gemini(LLM):
@@ -42,7 +43,7 @@ class Gemini(LLM):
         model: str,
         api_key: str | None = None,
         *,
-        reasoning_effort: ReasoningEffort | None = None,
+        reasoning_effort: ReasoningLevel | None = None,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
@@ -57,9 +58,7 @@ class Gemini(LLM):
         return _build_payload(messages, tools, self._reasoning_effort)
 
     def _parse_response(self, response: httpx.Response) -> CompletionResponse:
-        return _from_gemini_response(
-            GeminiGenerateContentResponse.model_validate(response.json())
-        )
+        return _from_gemini_response(GeminiResponse.from_json(response.json()))
 
     async def agenerate(
         self,
@@ -139,24 +138,18 @@ def _parse_sse_line(line: str) -> str | None:
 
 
 def _extract_delta(data: str) -> str | None:
-    chunk = GeminiGenerateContentResponse.model_validate(json.loads(data))
-    parts = (
-        chunk.candidates[0].content.parts
-        if chunk.candidates and chunk.candidates[0].content
-        else []
-    )
-    text = "".join(part.text for part in parts if part.text)
-    return text or None
+    parts = GeminiResponse.from_json(json.loads(data)).parts
+    return "".join(part.text for part in parts if part.text) or None
 
 
 def _build_payload(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
-    reasoning_effort: ReasoningEffort | None = None,
+    reasoning_effort: ReasoningLevel | None = None,
 ) -> GeminiPayload:
     generation_config: dict[str, Any] | None = None
     if reasoning_effort:
-        budget = REASONING_EFFORT_BUDGET_TOKENS[reasoning_effort]
+        budget = ReasoningLevel(reasoning_effort).budget
         generation_config = {"thinkingConfig": {"thinkingBudget": budget}}
     return GeminiPayload(
         contents=[_to_gemini_content(m) for m in messages],
@@ -211,27 +204,13 @@ def _to_gemini_tool(tool: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _from_gemini_response(
-    response: GeminiGenerateContentResponse,
-) -> CompletionResponse:
-    parts = (
-        response.candidates[0].content.parts
-        if response.candidates and response.candidates[0].content
-        else []
-    )
-    text = "".join(part.text for part in parts if part.text)
+def _from_gemini_response(response: GeminiResponse) -> CompletionResponse:
+    text = "".join(part.text for part in response.parts if part.text)
     tool_calls = [
-        ToolCall(name=part.functionCall.name, arguments=dict(part.functionCall.args))
-        for part in parts
-        if part.functionCall
+        ToolCall(name=part.name, arguments=dict(part.args))
+        for part in response.parts
+        if part.name
     ]
-    usage = (
-        TokenUsage(
-            prompt_tokens=response.usageMetadata.promptTokenCount,
-            completion_tokens=response.usageMetadata.candidatesTokenCount,
-            total_tokens=response.usageMetadata.totalTokenCount,
-        )
-        if response.usageMetadata
-        else None
+    return CompletionResponse(
+        content=text, tool_calls=tool_calls, usage=token_usage(response.usage)
     )
-    return CompletionResponse(content=text, tool_calls=tool_calls, usage=usage)
