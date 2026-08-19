@@ -8,10 +8,12 @@ response rather than quietly yielding an empty completion.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..errors import ProviderError
+from .base import CompletionResponse, ToolCall, token_usage
 
 
 def _require(data: dict[str, Any], key: str, where: str) -> Any:
@@ -111,9 +113,73 @@ class OpenAIChatCompletion:
         )
 
 
-def openai_stream_delta(data: dict[str, Any]) -> str | None:
-    choices = data.get("choices") or []
-    return choices[0].get("delta", {}).get("content") if choices else None
+class OpenAIStream:
+    """Folds OpenAI's chat-completion chunks into text plus tool calls.
+
+    Tool calls arrive spread over many chunks: the first carries an index, id and
+    function name, and later ones append fragments of the argument JSON. They are
+    keyed by index because that is the only field present on every fragment.
+    """
+
+    __slots__ = ("_calls", "_text", "_usage")
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._calls: dict[int, dict[str, Any]] = {}
+        self._usage: Usage | None = None
+
+    def feed(self, data: dict[str, Any]) -> str | None:
+        if usage := data.get("usage"):
+            self._usage = Usage(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+            )
+        choices = data.get("choices") or []
+        if not choices:
+            return None
+        delta = choices[0].get("delta") or {}
+        for fragment in delta.get("tool_calls") or []:
+            call = self._calls.setdefault(
+                fragment.get("index", 0), {"id": "", "name": "", "arguments": ""}
+            )
+            call["id"] = fragment.get("id") or call["id"]
+            function = fragment.get("function") or {}
+            call["name"] = function.get("name") or call["name"]
+            call["arguments"] += function.get("arguments") or ""
+        text = delta.get("content")
+        if text:
+            self._text.append(text)
+        return text
+
+    def response(self) -> CompletionResponse:
+        return CompletionResponse(
+            content="".join(self._text),
+            tool_calls=[
+                ToolCall(
+                    id=call["id"] or None,
+                    name=call["name"],
+                    arguments=_load_arguments(call["arguments"]),
+                )
+                for call in self._calls.values()
+                if call["name"]
+            ],
+            usage=token_usage(self._usage),
+        )
+
+
+def _load_arguments(raw: str) -> dict[str, Any]:
+    """Argument JSON assembled from fragments, empty if the model sent none.
+
+    A truncated stream can leave this unparseable; an empty dict lets the tool
+    report the real problem (a missing argument) rather than the stream dying.
+    """
+    if not raw.strip():
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
 
 
 @dataclass(slots=True)
@@ -151,11 +217,115 @@ class AnthropicMessage:
         )
 
 
-def anthropic_stream_delta(data: dict[str, Any]) -> str | None:
-    if data.get("type") != "content_block_delta":
+class AnthropicStream:
+    """Folds Anthropic's block events into text plus tool calls.
+
+    Anthropic streams content as numbered blocks: content_block_start announces a
+    block's type (text or tool_use), the deltas that follow belong to whichever
+    block is open, and tool arguments arrive as partial_json fragments.
+    """
+
+    __slots__ = ("_blocks", "_text", "_usage")
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._blocks: dict[int, dict[str, Any]] = {}
+        self._usage: Usage | None = None
+
+    def feed(self, data: dict[str, Any]) -> str | None:
+        event = data.get("type")
+        index = data.get("index", 0)
+
+        if event == "content_block_start":
+            block = data.get("content_block") or {}
+            if block.get("type") == "tool_use":
+                self._blocks[index] = {
+                    "id": block.get("id"),
+                    "name": block.get("name", ""),
+                    "arguments": "",
+                }
+            return None
+
+        if event == "content_block_delta":
+            delta = data.get("delta") or {}
+            if delta.get("type") == "text_delta":
+                text = delta.get("text")
+                if text:
+                    self._text.append(text)
+                return text
+            if delta.get("type") == "input_json_delta" and index in self._blocks:
+                self._blocks[index]["arguments"] += delta.get("partial_json") or ""
+            return None
+
+        if event == "message_delta" and (usage := data.get("usage")):
+            self._usage = Usage(
+                prompt_tokens=usage.get("input_tokens", 0),
+                completion_tokens=usage.get("output_tokens", 0),
+                total_tokens=usage.get("input_tokens", 0)
+                + usage.get("output_tokens", 0),
+            )
+        elif event == "message_start":
+            message = data.get("message") or {}
+            if usage := message.get("usage"):
+                self._usage = Usage(
+                    prompt_tokens=usage.get("input_tokens", 0),
+                    completion_tokens=usage.get("output_tokens", 0),
+                    total_tokens=usage.get("input_tokens", 0)
+                    + usage.get("output_tokens", 0),
+                )
         return None
-    delta = data.get("delta") or {}
-    return delta.get("text") if delta.get("type") == "text_delta" else None
+
+    def response(self) -> CompletionResponse:
+        return CompletionResponse(
+            content="".join(self._text),
+            tool_calls=[
+                ToolCall(
+                    id=block["id"],
+                    name=block["name"],
+                    arguments=_load_arguments(block["arguments"]),
+                )
+                for block in self._blocks.values()
+                if block["name"]
+            ],
+            usage=token_usage(self._usage),
+        )
+
+
+class GeminiStream:
+    """Folds Gemini's stream into text plus tool calls.
+
+    Simpler than the others: every chunk is a complete GenerateContentResponse,
+    so a functionCall arrives whole rather than in fragments - nothing to
+    reassemble, only to collect.
+    """
+
+    __slots__ = ("_calls", "_text", "_usage")
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._calls: list[ToolCall] = []
+        self._usage: Usage | None = None
+
+    def feed(self, data: dict[str, Any]) -> str | None:
+        chunk = GeminiResponse.from_json(data)
+        if chunk.usage is not None:
+            self._usage = chunk.usage
+        self._calls.extend(
+            ToolCall(name=part.name, arguments=dict(part.args))
+            for part in chunk.parts
+            if part.name
+        )
+        text = "".join(part.text for part in chunk.parts if part.text)
+        if text:
+            self._text.append(text)
+        return text or None
+
+    def response(self) -> CompletionResponse:
+        return CompletionResponse(
+            content="".join(self._text),
+            tool_calls=list(self._calls),
+            usage=token_usage(self._usage),
+        )
 
 
 @dataclass(slots=True)
