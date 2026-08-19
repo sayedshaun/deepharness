@@ -5,7 +5,8 @@ normalize the reply - and streams it the same way too. That sequence lives here
 once and is composed into a provider rather than inherited from LLM, so LLM
 stays a narrow interface that a non-HTTP provider can still implement.
 
-A provider supplies the parts that actually differ by implementing Wire.
+A provider supplies the parts that actually differ by implementing Wire, and
+inherits the four LLM methods from RestLLM.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from .base import CompletionResponse
+from .base import LLM, CompletionResponse
 from .client import HTTPClient
 
 _SSE_DONE = "[DONE]"
@@ -115,3 +116,53 @@ class RestCompletions:
         delta = self._wire.extract_delta(data)
         if delta:
             yield delta
+
+
+class RestLLM(LLM):
+    """An LLM served by one Wire over HTTP.
+
+    The four LLM methods are the same forwarding call for every REST vendor, so
+    they live here once. A provider subclasses this, builds a RestCompletions
+    into self._rest, and implements only its Wire methods.
+    """
+
+    __slots__ = ()
+
+    _rest: RestCompletions
+
+    def request_args(self, *, stream: bool = False) -> dict[str, Any]:
+        """No extra arguments; most vendors authenticate with a header set once."""
+        return {}
+
+    async def agenerate(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> CompletionResponse:
+        return await self._rest.agenerate(messages, tools)
+
+    def generate(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> CompletionResponse:
+        return self._rest.generate(messages, tools)
+
+    async def astream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[str]:
+        async for delta in self._rest.astream(messages, tools):
+            yield delta
+
+    def stream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Iterator[str]:
+        yield from self._rest.stream(messages, tools)

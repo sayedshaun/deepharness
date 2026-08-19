@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from .base import (
-    LLM,
     CompletionResponse,
     ReasoningLevel,
     ToolCall,
@@ -16,7 +14,7 @@ from .base import (
     without_none,
 )
 from .client import HTTPClient
-from .rest import RestCompletions
+from .rest import RestCompletions, RestLLM
 from .types import GeminiResponse
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -36,7 +34,7 @@ class GeminiPayload:
         return without_none(self)
 
 
-class Gemini(LLM):
+class Gemini(RestLLM):
     """Provider backed by Google's Gemini REST API."""
 
     __slots__ = ("_api_key", "_http", "_model", "_reasoning_effort", "_rest")
@@ -82,39 +80,6 @@ class Gemini(LLM):
     def extract_delta(self, data: str) -> str | None:
         parts = GeminiResponse.from_json(json.loads(data)).parts
         return "".join(part.text for part in parts if part.text) or None
-
-    async def agenerate(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> CompletionResponse:
-        return await self._rest.agenerate(messages, tools)
-
-    def generate(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> CompletionResponse:
-        return self._rest.generate(messages, tools)
-
-    async def astream(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> AsyncIterator[str]:
-        async for delta in self._rest.astream(messages, tools):
-            yield delta
-
-    def stream(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> Iterator[str]:
-        yield from self._rest.stream(messages, tools)
 
 
 def _build_payload(

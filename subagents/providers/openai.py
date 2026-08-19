@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from subagents.providers.base import (
-    LLM,
     CompletionResponse,
     ReasoningLevel,
     ToolCall,
@@ -17,7 +15,7 @@ from subagents.providers.base import (
     without_none,
 )
 from subagents.providers.client import HTTPClient
-from subagents.providers.rest import RestCompletions
+from subagents.providers.rest import RestCompletions, RestLLM
 from subagents.providers.types import OpenAIChatCompletion, openai_stream_delta
 
 _BASE_URL = "https://api.openai.com/v1"
@@ -39,7 +37,7 @@ class OpenAIPayload:
         return without_none(self)
 
 
-class OpenAI(LLM):
+class OpenAI(RestLLM):
     """Provider backed by OpenAI's Chat Completions REST API.
 
     Also the base for any OpenAI-compatible gateway (see providers/gateways.py):
@@ -93,48 +91,11 @@ class OpenAI(LLM):
     def endpoint(self, *, stream: bool = False) -> str:
         return "/chat/completions"
 
-    def request_args(self, *, stream: bool = False) -> dict[str, Any]:
-        """OpenAI authenticates with a bearer header set once in __init__."""
-        return {}
-
     def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_openai_response(OpenAIChatCompletion.from_json(response.json()))
 
     def extract_delta(self, data: str) -> str | None:
         return openai_stream_delta(json.loads(data))
-
-    async def agenerate(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> CompletionResponse:
-        return await self._rest.agenerate(messages, tools)
-
-    def generate(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> CompletionResponse:
-        return self._rest.generate(messages, tools)
-
-    async def astream(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> AsyncIterator[str]:
-        async for delta in self._rest.astream(messages, tools):
-            yield delta
-
-    def stream(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> Iterator[str]:
-        yield from self._rest.stream(messages, tools)
 
 
 def _build_payload(

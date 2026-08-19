@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from subagents.providers.base import (
-    LLM,
     CompletionResponse,
     ReasoningLevel,
     ToolCall,
@@ -16,7 +14,7 @@ from subagents.providers.base import (
     without_none,
 )
 from subagents.providers.client import HTTPClient
-from subagents.providers.rest import RestCompletions
+from subagents.providers.rest import RestCompletions, RestLLM
 from subagents.providers.types import AnthropicMessage, anthropic_stream_delta
 
 _BASE_URL = "https://api.anthropic.com/v1"
@@ -41,7 +39,7 @@ class AnthropicPayload:
         return without_none(self)
 
 
-class Anthropic(LLM):
+class Anthropic(RestLLM):
     """Provider backed by Anthropic's Messages REST API.
 
     Anthropic's wire format differs from OpenAI/Gemini in one structural way
@@ -91,48 +89,11 @@ class Anthropic(LLM):
     def endpoint(self, *, stream: bool = False) -> str:
         return "/messages"
 
-    def request_args(self, *, stream: bool = False) -> dict[str, Any]:
-        """Anthropic authenticates with an x-api-key header set once in __init__."""
-        return {}
-
     def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_anthropic_response(AnthropicMessage.from_json(response.json()))
 
     def extract_delta(self, data: str) -> str | None:
         return anthropic_stream_delta(json.loads(data))
-
-    async def agenerate(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> CompletionResponse:
-        return await self._rest.agenerate(messages, tools)
-
-    def generate(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> CompletionResponse:
-        return self._rest.generate(messages, tools)
-
-    async def astream(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> AsyncIterator[str]:
-        async for delta in self._rest.astream(messages, tools):
-            yield delta
-
-    def stream(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> Iterator[str]:
-        yield from self._rest.stream(messages, tools)
 
 
 def _build_payload(
