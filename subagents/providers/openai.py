@@ -51,6 +51,8 @@ class OpenAI(LLM):
     default_base_url: str = _BASE_URL
     env_key: str = "OPENAI_API_KEY"
 
+    __slots__ = ("_http", "_model", "_reasoning_effort", "_rest", "_temperature")
+
     def __init__(
         self,
         model: str,
