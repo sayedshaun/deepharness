@@ -10,24 +10,39 @@ explanations and examples.
 
 ```python
 Agent(
-    name: str,
     model: LLM | None = None,
     *,
-    system_prompt: str | None = None,
-    tools: list[Callable] | Toolbox | None = None,
-    max_steps: int = 10,
-    token_budget: int | None = None,
+    tools: Iterable[Callable] | Toolbox = (),
+    system: str | None = None,
+    name: str = "agent",
+    budget: Budget | None = None,
+    output: type | None = None,
 )
 ```
 
 Runs a think/act loop against `model`: request a completion, dispatch any requested tool
-calls, repeat until the model stops calling tools or `max_steps` is reached.
+calls, repeat until the model stops calling tools or the budget's step limit is reached.
 
 | Member | Signature | Description |
 | --- | --- | --- |
 | `arun` | `async def arun(state: dict) -> dict` | Async run. Tool calls in the same turn dispatch concurrently. |
 | `run` | `def run(state: dict) -> dict` | Sync run. Raises if a registered tool is `async def`. |
 | `total_usage` | `TokenUsage` | Cumulative token usage across every call made by this agent instance. |
+| `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. |
+| `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. |
+| `output` | `type \| None` | A dataclass; when set, `state["output"]` is a validated instance of it. |
+
+### `Budget`
+
+```python
+Budget(steps: int = 10, tokens: int | None = None)
+```
+
+Frozen dataclass bounding one run. `steps` caps think/act turns — spending them stops the run
+with a `"step_budget"` stop reason rather than raising, since the run is truncated but already
+paid for. `tokens` caps cumulative usage and raises `TokenBudgetExceeded` when crossed.
+`Budget(steps=1)` makes an agent single-shot: one model call, and no turn to react to a tool
+result. Non-positive values raise `ConfigurationError`.
 
 `state` is a dict with a `messages` key (a list of [`Message`](#message)/dict). The returned
 dict adds `output` (the model's final text) and `usage` (a `TokenUsage`).
@@ -41,7 +56,7 @@ wiring a graph.
 TokenBudgetExceeded(agent_name: str, usage: TokenUsage, budget: int)
 ```
 
-Raised by `Agent` the moment cumulative `total_usage` crosses `token_budget`, checked right
+Raised by `Agent` the moment cumulative `total_usage` crosses `Budget.tokens`, checked right
 after a model response — before any further tool dispatch or model call.
 
 ## Messages & sessions
@@ -77,13 +92,14 @@ Round-trips `state["messages"]` through JSON so a conversation can resume across
 ```
 
 Decorates a function so it can be registered as a callable tool. Builds a JSON schema from
-the function's signature (parameter types, required-ness) and docstring (description).
-Works on both sync and async functions.
+the function's signature (parameter types, required-ness) and docstring (summary plus
+`Args:`/`:param:` descriptions). Handles containers, `Literal`, `Enum` and unions — see [Tools](../guide/tools.md). Works on
+both sync and async functions.
 
 ### `Toolbox`
 
 ```python
-Toolbox()
+Toolbox(tools: Iterable[Callable] = ())
 ```
 
 | Method | Signature | Description |
@@ -93,17 +109,6 @@ Toolbox()
 | `schemas` | `def schemas() -> list[dict]` | Returns tool schemas, ready to pass to a provider. |
 | `call` | `async def call(name: str, **kwargs) -> Any` | Invokes a tool by name, awaiting it if async. |
 | `call_sync` | `def call_sync(name: str, **kwargs) -> Any` | Invokes a tool synchronously; raises if it's async. |
-
-### `CodingToolbox` and `set_auto_approve`
-
-`from subagents.tools import CodingToolbox, set_auto_approve`
-
-A ready-to-use `Toolbox` pre-registered with five file/shell tools: `read_file`, `write_file`,
-`apply_patch`, `run_shell`, `grep`. `CodingToolbox.as_list()` returns them as a plain list of
-functions, for `tools=[...]`-style construction.
-
-`set_auto_approve(enabled: bool)` toggles whether the risky tools (`write_file`,
-`apply_patch`, `run_shell`) skip their confirmation prompt — off by default.
 
 ## Graphs & execution
 
@@ -116,18 +121,32 @@ Graph(state_type: type)
 | Method | Signature | Description |
 | --- | --- | --- |
 | `add` | `def add(*, name: str \| None = None, start: bool = False, end: bool = False)` | Decorator that registers a function as a node. |
-| `connect` | `def connect(source: Callable \| str, target: Callable \| str, *, condition: Callable[[Any], bool] \| None = None)` | Declares an edge, optionally conditional. |
-| `build` | `def build() -> Executor` | Validates the graph (has a start node, fully reachable, acyclic) and returns an `Executor`. |
+| `connect` | `def connect(source: Callable \| str, target: Callable \| str, *, condition: Callable[[Any], bool] \| None = None, loop: bool = False)` | Declares an edge, optionally conditional. `loop=True` marks a back-edge, re-running the loop head and everything downstream of it. |
+| `build` | `def build() -> Executor` | Validates the graph (has a start node, fully reachable, no cycle whose back-edge is unmarked) and returns an `Executor`. |
 
 ### `Executor`
 
 ```python
-async def run(state: Any) -> Any
+async def run(state: Any, *, max_steps: int = 50) -> Any
 ```
 
 Runs the graph wave by wave: each wave's ready nodes execute concurrently, results merge back
 into the state field-by-field, and the next wave is whichever nodes now have all predecessors
-satisfied. Returned by `Graph.build()` — not constructed directly.
+satisfied. A field written by two or more concurrent branches is combined by its
+[reducer](../guide/graph.md#reducers), or raises `ConcurrentUpdateError` if it declares none.
+Taking a `loop=True` edge re-runs the loop head and everything downstream of it; exceeding
+`max_steps` raises `StepLimitExceeded`. Returned by `Graph.build()` — not constructed
+directly.
+
+### `concat` / `merge_dicts`
+
+```python
+concat(base: list, values: list[list]) -> list
+merge_dicts(base: dict, values: list[dict]) -> dict
+```
+
+Built-in reducers for merging concurrent writes to one field. Declare one with
+`field(metadata={"reducer": concat})`.
 
 ### `ExecutionError`
 
