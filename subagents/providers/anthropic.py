@@ -16,6 +16,7 @@ from subagents.providers.base import (
     without_none,
 )
 from subagents.providers.client import HTTPClient
+from subagents.providers.rest import RestCompletions
 from subagents.providers.types import AnthropicMessage, anthropic_stream_delta
 
 _BASE_URL = "https://api.anthropic.com/v1"
@@ -67,19 +68,36 @@ class Anthropic(LLM):
         self._http = HTTPClient(
             _BASE_URL, headers=headers, client=client, sync_client=sync_client
         )
+        self._rest = RestCompletions(self._http, self)
         self._model = model
         self._max_tokens = max_tokens
         self._reasoning_effort = reasoning_effort
 
-    def _payload(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    def payload(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        *,
+        stream: bool = False,
     ) -> AnthropicPayload:
-        return _build_payload(
+        payload = _build_payload(
             self._model, self._max_tokens, messages, tools, self._reasoning_effort
         )
+        payload.stream = stream or None
+        return payload
 
-    def _parse_response(self, response: httpx.Response) -> CompletionResponse:
+    def endpoint(self, *, stream: bool = False) -> str:
+        return "/messages"
+
+    def request_args(self, *, stream: bool = False) -> dict[str, Any]:
+        """Anthropic authenticates with an x-api-key header set once in __init__."""
+        return {}
+
+    def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_anthropic_response(AnthropicMessage.from_json(response.json()))
+
+    def extract_delta(self, data: str) -> str | None:
+        return anthropic_stream_delta(json.loads(data))
 
     async def agenerate(
         self,
@@ -87,9 +105,7 @@ class Anthropic(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = self._payload(messages, tools)
-        response = await self._http.post("/messages", json=payload.to_json())
-        return self._parse_response(response)
+        return await self._rest.agenerate(messages, tools)
 
     def generate(
         self,
@@ -97,9 +113,7 @@ class Anthropic(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = self._payload(messages, tools)
-        response = self._http.post_sync("/messages", json=payload.to_json())
-        return self._parse_response(response)
+        return self._rest.generate(messages, tools)
 
     async def astream(
         self,
@@ -107,18 +121,8 @@ class Anthropic(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
-        payload = self._payload(messages, tools)
-        payload.stream = True
-        async with self._http.stream(
-            "POST", "/messages", json=payload.to_json()
-        ) as response:
-            async for line in response.aiter_lines():
-                data = _parse_sse_line(line)
-                if data is None:
-                    continue
-                delta = _extract_delta(data)
-                if delta:
-                    yield delta
+        async for delta in self._rest.astream(messages, tools):
+            yield delta
 
     def stream(
         self,
@@ -126,28 +130,7 @@ class Anthropic(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
-        payload = self._payload(messages, tools)
-        payload.stream = True
-        with self._http.stream_sync(
-            "POST", "/messages", json=payload.to_json()
-        ) as response:
-            for line in response.iter_lines():
-                data = _parse_sse_line(line)
-                if data is None:
-                    continue
-                delta = _extract_delta(data)
-                if delta:
-                    yield delta
-
-
-def _parse_sse_line(line: str) -> str | None:
-    if not line or not line.startswith("data:"):
-        return None
-    return line[len("data:") :].strip()
-
-
-def _extract_delta(data: str) -> str | None:
-    return anthropic_stream_delta(json.loads(data))
+        yield from self._rest.stream(messages, tools)
 
 
 def _build_payload(
