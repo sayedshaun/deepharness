@@ -64,7 +64,7 @@ def test_connect_by_function_reference():
 
     graph.connect(func1, func2)
 
-    assert graph.edges["func1"] == [("func2", None)]
+    assert graph.edges["func1"] == [("func2", None, False)]
 
 
 def test_connect_by_name():
@@ -80,7 +80,7 @@ def test_connect_by_name():
 
     graph.connect("func1", "func2")
 
-    assert graph.edges["func1"] == [("func2", None)]
+    assert graph.edges["func1"] == [("func2", None, False)]
 
 
 def test_connect_with_condition():
@@ -97,7 +97,7 @@ def test_connect_with_condition():
     condition = lambda state: True
     graph.connect(func1, func2, condition=condition)
 
-    assert graph.edges["func1"] == [("func2", condition)]
+    assert graph.edges["func1"] == [("func2", condition, False)]
 
 
 def test_connect_unregistered_function_raises():
@@ -154,5 +154,22 @@ def test_build_with_cycle_raises():
     graph.connect(func1, func2)
     graph.connect(func2, func1)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="loop=True"):
         graph.build()
+
+
+def test_build_with_declared_loop_succeeds():
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def func1(state: State) -> State:
+        return state
+
+    @graph.add()
+    def func2(state: State) -> State:
+        return state
+
+    graph.connect(func1, func2)
+    graph.connect(func2, func1, loop=True)
+
+    assert graph.build() is not None
