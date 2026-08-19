@@ -25,7 +25,7 @@ you need.
 
     ---
 
-    Turning a function into a callable tool, plus the built-in coding tools.
+    Turning a function into a callable tool, and passing tools to an agent.
 
     [:octicons-arrow-right-24: Read](tools.md)
 
