@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import enum
 import inspect
 import types
@@ -145,9 +146,19 @@ class Toolbox:
         return [spec.to_schema() for spec in self._tools.values()]
 
     async def call(self, name: str, **kwargs: Any) -> Any:
-        result = self.get(name).func(**kwargs)
-        if inspect.isawaitable(result):
-            result = await result
+        """Invoke a tool, running a sync one off the event loop.
+
+        The concurrency arun() promises comes from gathering a turn's tool calls,
+        and a blocking call inside one of those coroutines defeats it - so a
+        plain def tool goes to a thread rather than stalling every other tool
+        waiting alongside it.
+        """
+        func = self.get(name).func
+        if inspect.iscoroutinefunction(inspect.unwrap(func)):
+            return await func(**kwargs)
+        result = await asyncio.to_thread(func, **kwargs)
+        if inspect.isawaitable(result):  # a sync def that returns a coroutine
+            return await result
         return result
 
     def call_sync(self, name: str, **kwargs: Any) -> Any:
