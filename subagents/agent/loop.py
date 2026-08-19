@@ -78,6 +78,17 @@ class Agent:
     run()/arun() again with the updated state.
     """
 
+    __slots__ = (
+        "_budget",
+        "_final_schema",
+        "_model",
+        "_name",
+        "_output",
+        "_system",
+        "_tools",
+        "_total_usage",
+    )
+
     def __init__(
         self,
         model: LLM | None = None,
