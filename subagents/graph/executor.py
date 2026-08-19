@@ -7,7 +7,7 @@ import inspect
 from typing import Any
 
 from ..errors import ConcurrentUpdateError, ExecutionError, StepLimitExceeded
-from .graph import Condition, NodeSpec
+from .builder import Condition, NodeSpec
 
 Loop = tuple[str, str, Condition | None, frozenset[str]]
 """(source, target, condition, body) - see Graph.connect(loop=True)."""
