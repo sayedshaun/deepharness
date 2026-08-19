@@ -51,6 +51,26 @@ What a run consumed and produced. `answered` is `True` only when `stop_reason ==
 `AgentState.of(value)` builds one from a prompt string, a list of messages, a dict of known
 fields, or an existing state; an unknown dict key raises `ConfigurationError`.
 
+`approve(call_id=None)` / `reject(call_id=None)` rule on calls waiting in `paused`, returning the
+state so a resume reads as `await agent.arun(state.approve())`. Both raise `ConfigurationError`
+when nothing matches.
+
+### `PendingHumanInput`
+
+```python
+PendingHumanInput(
+    call_id: str | None,
+    name: str,
+    question: str,
+    arguments: dict | None = None,
+    approved: bool | None = None,
+)
+```
+
+One paused call. `needs_approval` is `True` when it came from a `requires_approval` tool — those
+have not run yet and carry the `arguments` to run with. Otherwise the pause came from a tool
+raising `HumanInputRequired`, and the human's answer becomes that call's result.
+
 ### `Budget`
 
 ```python
@@ -107,13 +127,18 @@ Round-trips `state.messages` through JSON so a conversation can resume across pr
 
 ```python
 @tool
-@tool(name: str | None = None, description: str | None = None)
+@tool(
+    name: str | None = None,
+    description: str | None = None,
+    requires_approval: bool = False,
+)
 ```
 
 Decorates a function so it can be registered as a callable tool. Builds a JSON schema from
 the function's signature (parameter types, required-ness) and docstring (summary plus
 `Args:`/`:param:` descriptions). Handles containers, `Literal`, `Enum` and unions — see [Tools](../guide/tools.md). Works on
-both sync and async functions.
+both sync and async functions. `requires_approval=True` makes the agent pause before every call
+to it and run it only once approved.
 
 ### `Ctx`
 
