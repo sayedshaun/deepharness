@@ -10,10 +10,10 @@ def test_groq_uses_its_own_base_url_and_env_key(monkeypatch):
     provider = Groq("llama-3.3-70b-versatile")
 
     assert (
-        str(provider._http.async_client.base_url) == "https://api.groq.com/openai/v1/"
+        str(provider._http._async_client.base_url) == "https://api.groq.com/openai/v1/"
     )
     assert (
-        provider._http.async_client.headers["authorization"] == "Bearer test-groq-key"
+        provider._http._async_client.headers["authorization"] == "Bearer test-groq-key"
     )
 
 
@@ -22,7 +22,9 @@ def test_explicit_api_key_overrides_env(monkeypatch):
 
     provider = Groq("llama-3.3-70b-versatile", api_key="explicit-key")
 
-    assert provider._http.async_client.headers["authorization"] == "Bearer explicit-key"
+    assert (
+        provider._http._async_client.headers["authorization"] == "Bearer explicit-key"
+    )
 
 
 def test_local_gateway_has_no_env_lookup_and_empty_auth(monkeypatch):
@@ -30,8 +32,8 @@ def test_local_gateway_has_no_env_lookup_and_empty_auth(monkeypatch):
 
     provider = Ollama("llama3")
 
-    assert str(provider._http.async_client.base_url) == "http://localhost:11434/v1/"
-    assert provider._http.async_client.headers["authorization"] == "Bearer "
+    assert str(provider._http._async_client.base_url) == "http://localhost:11434/v1/"
+    assert provider._http._async_client.headers["authorization"] == "Bearer "
 
 
 def test_base_url_param_overrides_default(monkeypatch):
@@ -39,7 +41,7 @@ def test_base_url_param_overrides_default(monkeypatch):
 
     provider = Groq("llama-3.3-70b-versatile", base_url="https://custom.internal/v1")
 
-    assert str(provider._http.async_client.base_url) == "https://custom.internal/v1/"
+    assert str(provider._http._async_client.base_url) == "https://custom.internal/v1/"
 
 
 def test_temperature_is_forwarded_to_the_request():
