@@ -1,6 +1,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from subagents.providers.anthropic import Anthropic
+from subagents.providers.base import LLM, CompletionResponse
 from subagents.providers.gemini import Gemini
 from subagents.providers.openai import OpenAI
 
@@ -628,3 +631,25 @@ async def test_gemini_reconstructs_assistant_function_call_turn_and_result():
             }
         ],
     }
+
+
+async def test_a_provider_that_cannot_stream_says_so():
+    class TextOnly(LLM):
+        async def agenerate(self, messages, *, tools=None):
+            return CompletionResponse(content="hi")
+
+        def generate(self, messages, *, tools=None):
+            return CompletionResponse(content="hi")
+
+    provider = TextOnly()
+
+    assert (await provider.agenerate([])).content == "hi"
+    with pytest.raises(
+        NotImplementedError, match="TextOnly does not support streaming"
+    ):
+        async for _ in provider.astream([]):
+            pass
+    with pytest.raises(
+        NotImplementedError, match="TextOnly does not support streaming"
+    ):
+        next(iter(provider.stream([])))
