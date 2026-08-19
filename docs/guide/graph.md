@@ -1,6 +1,6 @@
 # Graphs
 
-`Graph` wires plain functions into a DAG that runs independent branches concurrently and
+`Graph` wires plain functions into a graph that runs independent branches concurrently and
 threads one typed state object through the whole run. It has no idea what an LLM is — use it
 for plain orchestration, or put an [`Agent`](agents.md) inside a node.
 
@@ -66,13 +66,70 @@ Each wave runs its ready nodes concurrently, then merges results back field by f
 
 - A field is written back only if the branch **changed** it relative to the state the wave
   started from.
-- If two concurrent branches change the *same* field, the later one (in registration order)
-  wins.
+- If **one** branch changed a field, its value is written.
+- If **two or more** branches changed the same field, the field's *reducer* decides how to
+  combine them. With no reducer declared, the merge raises `ConcurrentUpdateError` rather
+  than silently dropping a branch's work.
 
-!!! warning "Merging is whole-field, last-writer-wins"
-    It is not additive. Two parallel branches that both `append` to the same list will
-    clobber each other rather than combine. **Give each parallel branch its own field**
-    (`sales` / `churn` in the quickstart), and join them in a downstream node.
+### Reducers
+
+Declare a reducer in the field's `metadata`, so the merge policy lives with the data:
+
+```python
+from dataclasses import dataclass, field
+
+from subagents import concat
+
+
+@dataclass
+class State:
+    findings: list[str] = field(default_factory=list, metadata={"reducer": concat})
+```
+
+Now two parallel branches that both append to `findings` combine instead of clobbering.
+Built-ins: `concat` for sequences and `merge_dicts` for dicts. A reducer is any
+`Callable[[Any, list[Any]], Any]` — it receives the field's value at the start of the wave
+plus each branch's value, and returns the merged result.
+
+!!! note "Reducers are only consulted for genuine conflicts"
+    A field written by a single branch is assigned directly, so declaring a reducer costs
+    nothing on the common path. Fields with no reducer are still perfectly fine — as long as
+    only one parallel branch writes each of them.
+
+## Loops
+
+Ordinary edges must form a DAG. To iterate, mark the back-edge with `loop=True`:
+
+```python
+graph.connect(think, act, condition=lambda s: bool(s.pending_calls))
+graph.connect(act, think, loop=True)
+```
+
+When a loop edge is taken, the loop's **head** and everything downstream of it re-run.
+Anything *upstream* of the head keeps its result and runs exactly once, so setup work stays
+outside the iteration:
+
+```python
+graph.connect(load_rubric, critique)  # runs once
+graph.connect(draft, critique)
+graph.connect(critique, draft, loop=True, condition=lambda s: s.score < 0.8)
+```
+
+Requiring the flag is deliberate: it keeps loops visible in the wiring, and it means the
+scheduler still only ever sees a DAG. An *undeclared* cycle is a build error.
+
+`run()` takes `max_steps` (default 50) as the termination guard. Exceeding it raises
+`StepLimitExceeded`, with the partial state on `.state` so a runaway loop is still
+inspectable:
+
+```python
+from subagents import StepLimitExceeded
+
+try:
+    result = await executor.run(State(), max_steps=20)
+except StepLimitExceeded as exc:
+    print(exc.state)
+```
 
 ## Validation
 
@@ -80,10 +137,7 @@ Each wave runs its ready nodes concurrently, then merges results back field by f
 
 - no node marked `start=True`
 - a node that is unreachable (no `start` flag, no incoming edges)
-- a cycle
-
-The graph is a DAG: every node runs at most once. Iteration belongs *inside* a node — an
-`Agent` already loops over its own tool calls via `max_steps`.
+- a cycle whose back-edge is not marked `loop=True`
 
 ## Human in the loop
 
@@ -129,8 +183,8 @@ build a multi-agent system:
 ```python
 from subagents import Agent, Message
 
-researcher = Agent("researcher", model=llm, system_prompt="You research topics.")
-writer = Agent("writer", model=llm, system_prompt="You write short reports.")
+researcher = Agent(llm, name="researcher", system="You research topics.")
+writer = Agent(llm, name="writer", system="You write short reports.")
 
 
 @graph.add(start=True)
