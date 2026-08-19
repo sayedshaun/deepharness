@@ -15,7 +15,7 @@ from ..errors import (
 )
 from ..tools.toolbox import Toolbox, ToolSpec
 from .budget import Budget
-from .message import Message
+from .message import Message, as_dict
 from .output import FINAL_TOOL, coerce, final_tool_schema
 
 StopReason = Literal["answer", "step_budget", "paused", "token_budget"]
@@ -142,9 +142,15 @@ class Agent:
         return call
 
     def _prepare_messages(self, state: dict[str, Any]) -> list[dict[str, Any]]:
-        messages = list(state.get("messages", []))
+        """The transcript to send, as wire-form dicts.
+
+        Callers may hand over Message objects or plain dicts; both are
+        normalized here so everything downstream - providers included - sees one
+        shape.
+        """
+        messages = [as_dict(message) for message in state.get("messages", [])]
         if self.system and not any(m["role"] == "system" for m in messages):
-            messages.insert(0, Message.system(self.system))
+            messages.insert(0, Message.system(self.system).to_dict())
         return messages
 
     @staticmethod
@@ -158,7 +164,7 @@ class Agent:
                     {"id": call.id, "name": call.name, "arguments": call.arguments}
                     for call in response.tool_calls
                 ],
-            )
+            ).to_dict()
         )
 
     def _account_for_usage(
@@ -222,7 +228,9 @@ class Agent:
             content = (
                 f"Error: {result!r}" if isinstance(result, Exception) else str(result)
             )
-            messages.append(Message.tool(content, name=call.name, call_id=call.id))
+            messages.append(
+                Message.tool(content, name=call.name, call_id=call.id).to_dict()
+            )
         return pending
 
     def _turns(
@@ -250,16 +258,20 @@ class Agent:
                     # Same courtesy a failing tool gets: hand the model the
                     # error so it can call FINAL_TOOL again with valid fields.
                     messages.append(
-                        Message.tool(f"Error: {exc}", name=FINAL_TOOL, call_id=final.id)
+                        Message.tool(
+                            f"Error: {exc}", name=FINAL_TOOL, call_id=final.id
+                        ).to_dict()
                     )
                     continue
                 return self._result(state, messages, answer, "answer")
 
             if not response.tool_calls:
-                messages.append(Message.ai(response.content))
+                messages.append(Message.ai(response.content).to_dict())
                 if self._final_schema is not None:
                     # output= was asked for, so plain prose is not an answer yet.
-                    messages.append(Message.human(f"Answer by calling {FINAL_TOOL}."))
+                    messages.append(
+                        Message.human(f"Answer by calling {FINAL_TOOL}.").to_dict()
+                    )
                     continue
                 return self._result(state, messages, response.content, "answer")
 
@@ -286,8 +298,12 @@ class Agent:
         )
 
     def _passthrough(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Without a model an Agent is inert - a placeholder node in a Graph."""
-        print(f"{self.name} is running...")
+        """Without a model an Agent is inert - a placeholder node in a Graph.
+
+        Returns the state untouched rather than announcing itself: printing from
+        inside the agent would make this path untestable without capturing
+        stdout, and a library has no business writing to a caller's console.
+        """
         return state
 
     def _schemas(self) -> list[dict[str, Any]] | None:
