@@ -16,6 +16,7 @@ from .base import (
     without_none,
 )
 from .client import HTTPClient
+from .rest import RestCompletions
 from .types import GeminiResponse
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -49,16 +50,36 @@ class Gemini(LLM):
     ):
         self._http = HTTPClient(_BASE_URL, client=client, sync_client=sync_client)
         self._api_key = api_key
+        self._rest = RestCompletions(self._http, self)
         self._model = model
         self._reasoning_effort = reasoning_effort
 
-    def _payload(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    def payload(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        *,
+        stream: bool = False,
     ) -> GeminiPayload:
         return _build_payload(messages, tools, self._reasoning_effort)
 
-    def _parse_response(self, response: httpx.Response) -> CompletionResponse:
+    def endpoint(self, *, stream: bool = False) -> str:
+        action = "streamGenerateContent" if stream else "generateContent"
+        return f"/models/{self._model}:{action}"
+
+    def request_args(self, *, stream: bool = False) -> dict[str, Any]:
+        """Gemini authenticates by query parameter, and needs alt=sse to stream."""
+        params = {"key": self._api_key}
+        if stream:
+            params["alt"] = "sse"
+        return {"params": params}
+
+    def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_gemini_response(GeminiResponse.from_json(response.json()))
+
+    def extract_delta(self, data: str) -> str | None:
+        parts = GeminiResponse.from_json(json.loads(data)).parts
+        return "".join(part.text for part in parts if part.text) or None
 
     async def agenerate(
         self,
@@ -66,13 +87,7 @@ class Gemini(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = self._payload(messages, tools)
-        response = await self._http.post(
-            f"/models/{self._model}:generateContent",
-            params={"key": self._api_key},
-            json=payload.to_json(),
-        )
-        return self._parse_response(response)
+        return await self._rest.agenerate(messages, tools)
 
     def generate(
         self,
@@ -80,13 +95,7 @@ class Gemini(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        payload = self._payload(messages, tools)
-        response = self._http.post_sync(
-            f"/models/{self._model}:generateContent",
-            params={"key": self._api_key},
-            json=payload.to_json(),
-        )
-        return self._parse_response(response)
+        return self._rest.generate(messages, tools)
 
     async def astream(
         self,
@@ -94,20 +103,8 @@ class Gemini(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
-        payload = self._payload(messages, tools)
-        async with self._http.stream(
-            "POST",
-            f"/models/{self._model}:streamGenerateContent",
-            params={"key": self._api_key, "alt": "sse"},
-            json=payload.to_json(),
-        ) as response:
-            async for line in response.aiter_lines():
-                data = _parse_sse_line(line)
-                if data is None:
-                    continue
-                delta = _extract_delta(data)
-                if delta:
-                    yield delta
+        async for delta in self._rest.astream(messages, tools):
+            yield delta
 
     def stream(
         self,
@@ -115,31 +112,7 @@ class Gemini(LLM):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
-        payload = self._payload(messages, tools)
-        with self._http.stream_sync(
-            "POST",
-            f"/models/{self._model}:streamGenerateContent",
-            params={"key": self._api_key, "alt": "sse"},
-            json=payload.to_json(),
-        ) as response:
-            for line in response.iter_lines():
-                data = _parse_sse_line(line)
-                if data is None:
-                    continue
-                delta = _extract_delta(data)
-                if delta:
-                    yield delta
-
-
-def _parse_sse_line(line: str) -> str | None:
-    if not line or not line.startswith("data:"):
-        return None
-    return line[len("data:") :].strip()
-
-
-def _extract_delta(data: str) -> str | None:
-    parts = GeminiResponse.from_json(json.loads(data)).parts
-    return "".join(part.text for part in parts if part.text) or None
+        yield from self._rest.stream(messages, tools)
 
 
 def _build_payload(
