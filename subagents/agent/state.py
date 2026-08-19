@@ -74,3 +74,15 @@ class AgentState:
             f"cannot build agent state from {type(value).__name__}; pass a prompt, "
             f"a list of messages, or an AgentState"
         )
+
+
+@dataclass(slots=True)
+class Finished:
+    """The run's final state, emitted once the last delta has gone out.
+
+    Streaming a run yields prose as it arrives, but a caller still needs the
+    stop reason and structured output at the end - and an async generator cannot
+    return a value, so the state comes through as the final event.
+    """
+
+    state: AgentState
