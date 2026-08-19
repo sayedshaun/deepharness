@@ -2,7 +2,16 @@ import asyncio
 
 import pytest
 
-from subagents.agent import Agent, TokenBudgetExceeded, tool
+from subagents.agent import (
+    Agent,
+    Budget,
+    Message,
+    PendingHumanInput,
+    TokenBudgetExceeded,
+    Toolbox,
+    tool,
+)
+from subagents.errors import ConfigurationError, HumanInputRequired
 from subagents.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 
 
@@ -30,13 +39,19 @@ class ScriptedProvider(LLM):
         yield  # pragma: no cover - makes this a generator
 
 
+@tool
+def confirm(question: str) -> str:
+    """Pause and ask a human to confirm."""
+    raise HumanInputRequired(question)
+
+
 def test_agent_stores_name():
-    agent = Agent("researcher")
+    agent = Agent(name="researcher")
     assert agent.name == "researcher"
 
 
 async def test_agent_run_returns_state():
-    agent = Agent("researcher")
+    agent = Agent(name="researcher")
     state = {"input": "topic"}
 
     result = await agent.arun(state)
@@ -46,7 +61,7 @@ async def test_agent_run_returns_state():
 
 async def test_returns_content_when_no_tool_call_needed():
     provider = ScriptedProvider([CompletionResponse(content="hello there")])
-    agent = Agent("assistant", provider)
+    agent = Agent(provider, name="assistant")
 
     state = await agent.arun({"messages": [{"role": "user", "content": "hi"}]})
 
@@ -56,7 +71,7 @@ async def test_returns_content_when_no_tool_call_needed():
 
 async def test_prepends_system_prompt_once():
     provider = ScriptedProvider([CompletionResponse(content="hello")])
-    agent = Agent("assistant", provider, system_prompt="be helpful")
+    agent = Agent(provider, name="assistant", system="be helpful")
 
     state = await agent.arun({"messages": []})
 
@@ -78,7 +93,7 @@ async def test_dispatches_tool_calls_and_continues_loop():
             CompletionResponse(content="the answer is 3"),
         ]
     )
-    agent = Agent("assistant", provider, tools=[add])
+    agent = Agent(provider, name="assistant", tools=[add])
 
     state = await agent.arun(
         {"messages": [{"role": "user", "content": "what is 1+2?"}]}
@@ -112,7 +127,7 @@ async def test_multiple_tool_calls_in_one_turn_run_concurrently():
             CompletionResponse(content="done"),
         ]
     )
-    agent = Agent("assistant", provider, tools=[slow])
+    agent = Agent(provider, name="assistant", tools=[slow])
 
     state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
 
@@ -128,7 +143,7 @@ async def test_multiple_tool_calls_in_one_turn_run_concurrently():
 
 def test_sync_run_returns_content_when_no_tool_call_needed():
     provider = ScriptedProvider([CompletionResponse(content="hello there")])
-    agent = Agent("assistant", provider)
+    agent = Agent(provider, name="assistant")
 
     state = agent.run({"messages": [{"role": "user", "content": "hi"}]})
 
@@ -151,7 +166,7 @@ def test_sync_run_dispatches_tool_calls():
             CompletionResponse(content="the answer is 3"),
         ]
     )
-    agent = Agent("assistant", provider, tools=[add])
+    agent = Agent(provider, name="assistant", tools=[add])
 
     state = agent.run({"messages": [{"role": "user", "content": "what is 1+2?"}]})
 
@@ -173,9 +188,9 @@ def test_sync_run_raises_for_async_tool():
             )
         ]
     )
-    agent = Agent("assistant", provider, tools=[slow])
+    agent = Agent(provider, name="assistant", tools=[slow])
 
-    with pytest.raises(RuntimeError, match="async"):
+    with pytest.raises(ConfigurationError, match="async"):
         agent.run({"messages": [{"role": "user", "content": "go"}]})
 
 
@@ -203,7 +218,7 @@ async def test_accumulates_usage_across_turns():
         """Do nothing."""
         return "noop"
 
-    agent = Agent("assistant", provider, tools=[noop])
+    agent = Agent(provider, name="assistant", tools=[noop])
 
     state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
 
@@ -226,7 +241,7 @@ async def test_raises_when_token_budget_exceeded():
             )
         ]
     )
-    agent = Agent("assistant", provider, token_budget=100)
+    agent = Agent(provider, name="assistant", budget=Budget(tokens=100))
 
     with pytest.raises(TokenBudgetExceeded) as exc_info:
         await agent.arun({"messages": [{"role": "user", "content": "go"}]})
@@ -234,6 +249,30 @@ async def test_raises_when_token_budget_exceeded():
     assert exc_info.value.agent_name == "assistant"
     assert exc_info.value.budget == 100
     assert exc_info.value.usage.total_tokens == 110
+
+
+async def test_token_budget_error_carries_partial_state():
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="partial answer",
+                usage=TokenUsage(
+                    prompt_tokens=50, completion_tokens=60, total_tokens=110
+                ),
+            )
+        ]
+    )
+    agent = Agent(provider, name="assistant", budget=Budget(tokens=100))
+
+    with pytest.raises(TokenBudgetExceeded) as exc_info:
+        await agent.arun({"messages": [{"role": "user", "content": "go"}]})
+
+    # the tokens were paid for, so the work must survive the exception
+    state = exc_info.value.state
+    assert state["stop_reason"] == "token_budget"
+    assert state["output"] == "partial answer"
+    assert state["messages"] == [{"role": "user", "content": "go"}]
+    assert state["usage"].total_tokens == 110
 
 
 def test_sync_run_also_accumulates_usage():
@@ -245,7 +284,7 @@ def test_sync_run_also_accumulates_usage():
             )
         ]
     )
-    agent = Agent("assistant", provider)
+    agent = Agent(provider, name="assistant")
 
     state = agent.run({"messages": [{"role": "user", "content": "hi"}]})
 
@@ -254,7 +293,7 @@ def test_sync_run_also_accumulates_usage():
     )
 
 
-async def test_stops_after_max_steps():
+async def test_stops_when_step_budget_is_spent():
     @tool
     def noop() -> str:
         """Do nothing."""
@@ -270,16 +309,18 @@ async def test_stops_after_max_steps():
             ),
         ]
     )
-    agent = Agent("assistant", provider, tools=[noop], max_steps=2)
+    agent = Agent(provider, name="assistant", tools=[noop], budget=Budget(steps=2))
 
     state = await agent.arun({"messages": [{"role": "user", "content": "loop"}]})
 
     assert len(provider.calls) == 2
-    assert state["output"] == "noop"
+    assert state["stop_reason"] == "step_budget"
+    # not the last tool's return value - the agent never actually answered
+    assert state["output"] == ""
 
 
 def test_as_tool_builds_schema_from_agent_name_and_prompt():
-    agent = Agent("researcher", system_prompt="Finds facts.")
+    agent = Agent(name="researcher", system="Finds facts.")
 
     researcher_tool = agent.as_tool()
 
@@ -294,7 +335,7 @@ def test_as_tool_builds_schema_from_agent_name_and_prompt():
 
 
 def test_as_tool_overrides_name_and_description():
-    agent = Agent("researcher", system_prompt="Finds facts.")
+    agent = Agent(name="researcher", system="Finds facts.")
 
     researcher_tool = agent.as_tool(name="lookup", description="Look things up.")
 
@@ -305,7 +346,7 @@ def test_as_tool_overrides_name_and_description():
 
 async def test_as_tool_delegates_to_sub_agent():
     sub_provider = ScriptedProvider([CompletionResponse(content="Paris")])
-    sub_agent = Agent("geo", sub_provider)
+    sub_agent = Agent(sub_provider, name="geo")
 
     main_provider = ScriptedProvider(
         [
@@ -318,7 +359,7 @@ async def test_as_tool_delegates_to_sub_agent():
             CompletionResponse(content="It's Paris."),
         ]
     )
-    main_agent = Agent("assistant", main_provider, tools=[sub_agent.as_tool()])
+    main_agent = Agent(main_provider, name="assistant", tools=[sub_agent.as_tool()])
 
     state = await main_agent.arun(
         {"messages": [{"role": "user", "content": "what's the capital of France?"}]}
@@ -331,3 +372,256 @@ async def test_as_tool_delegates_to_sub_agent():
     }
     tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
     assert tool_messages == [{"role": "tool", "name": "geo", "content": "Paris"}]
+
+
+async def test_pauses_when_a_tool_asks_for_a_human():
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="confirm",
+                        arguments={"question": "ok to proceed?"},
+                    )
+                ],
+            )
+        ]
+    )
+    agent = Agent(provider, name="assistant", tools=[confirm])
+
+    state = await agent.arun(
+        {"messages": [{"role": "user", "content": "delete the logs"}]}
+    )
+
+    assert state["stop_reason"] == "paused"
+    assert state["paused"] == [
+        PendingHumanInput(call_id="call_1", name="confirm", question="ok to proceed?")
+    ]
+    assert len(provider.calls) == 1
+
+
+async def test_resumes_after_human_answer():
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="confirm",
+                        arguments={"question": "ok to proceed?"},
+                    )
+                ],
+            ),
+            CompletionResponse(content="done, proceeded"),
+        ]
+    )
+    agent = Agent(provider, name="assistant", tools=[confirm])
+
+    state = await agent.arun(
+        {"messages": [{"role": "user", "content": "delete the logs"}]}
+    )
+    pending = state["paused"][0]
+    state["messages"].append(
+        Message.tool("yes", name=pending.name, call_id=pending.call_id)
+    )
+    state = await agent.arun(state)
+
+    assert state["output"] == "done, proceeded"
+    assert state["stop_reason"] == "answer"
+    assert state["paused"] is None
+
+
+async def test_other_tool_calls_still_run_when_one_asks_for_a_human():
+    @tool
+    def add(a: int, b: int) -> int:
+        """Add two numbers."""
+        return a + b
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id="call_1", name="add", arguments={"a": 1, "b": 2}),
+                    ToolCall(
+                        id="call_2", name="confirm", arguments={"question": "ok?"}
+                    ),
+                ],
+            )
+        ]
+    )
+    agent = Agent(provider, name="assistant", tools=[add, confirm])
+
+    state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
+
+    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    assert tool_messages == [
+        {"role": "tool", "name": "add", "content": "3", "tool_call_id": "call_1"}
+    ]
+    assert state["paused"] == [
+        PendingHumanInput(call_id="call_2", name="confirm", question="ok?")
+    ]
+
+
+async def test_failing_tool_is_reported_to_model_and_loop_continues():
+    @tool
+    def flaky() -> str:
+        """Always fails."""
+        raise ValueError("upstream is down")
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="", tool_calls=[ToolCall(name="flaky", arguments={})]
+            ),
+            CompletionResponse(content="I couldn't reach it, sorry"),
+        ]
+    )
+    agent = Agent(provider, name="assistant", tools=[flaky])
+
+    state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
+
+    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    assert "upstream is down" in tool_messages[0]["content"]
+    # the run survived and the model got a turn to recover
+    assert state["output"] == "I couldn't reach it, sorry"
+    assert state["stop_reason"] == "answer"
+    assert len(provider.calls) == 2
+
+
+async def test_one_failing_tool_does_not_discard_its_siblings_results():
+    @tool
+    def ok() -> str:
+        """Succeeds."""
+        return "fine"
+
+    @tool
+    def boom() -> str:
+        """Fails."""
+        raise RuntimeError("nope")
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(name="ok", arguments={}),
+                    ToolCall(name="boom", arguments={}),
+                ],
+            ),
+            CompletionResponse(content="done"),
+        ]
+    )
+    agent = Agent(provider, name="assistant", tools=[ok, boom])
+
+    state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
+
+    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    assert tool_messages[0]["content"] == "fine"
+    assert "nope" in tool_messages[1]["content"]
+    assert state["stop_reason"] == "answer"
+
+
+async def test_unknown_tool_name_is_reported_to_model():
+    @tool
+    def real() -> str:
+        """A registered tool."""
+        return "fine"
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="", tool_calls=[ToolCall(name="imaginary", arguments={})]
+            ),
+            CompletionResponse(content="my mistake"),
+        ]
+    )
+    agent = Agent(provider, name="assistant", tools=[real])
+
+    state = await agent.arun({"messages": [{"role": "user", "content": "go"}]})
+
+    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    assert "imaginary" in tool_messages[0]["content"]
+    assert state["output"] == "my mistake"
+
+
+def test_sync_run_reports_failing_tool_to_model():
+    @tool
+    def flaky() -> str:
+        """Always fails."""
+        raise ValueError("upstream is down")
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="", tool_calls=[ToolCall(name="flaky", arguments={})]
+            ),
+            CompletionResponse(content="recovered"),
+        ]
+    )
+    agent = Agent(provider, name="assistant", tools=[flaky])
+
+    state = agent.run({"messages": [{"role": "user", "content": "go"}]})
+
+    tool_messages = [m for m in state["messages"] if m["role"] == "tool"]
+    assert "upstream is down" in tool_messages[0]["content"]
+    assert state["output"] == "recovered"
+
+
+def test_sync_run_pauses_when_tool_asks_human():
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id="call_1", name="confirm", arguments={"question": "ok?"})
+                ],
+            )
+        ]
+    )
+    agent = Agent(provider, name="assistant", tools=[confirm])
+
+    state = agent.run({"messages": [{"role": "user", "content": "delete the logs"}]})
+
+    assert state["paused"] == [
+        PendingHumanInput(call_id="call_1", name="confirm", question="ok?")
+    ]
+    assert len(provider.calls) == 1
+
+
+async def test_raises_when_model_asks_for_tools_but_none_are_registered():
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="", tool_calls=[ToolCall(name="ghost", arguments={})]
+            )
+        ]
+    )
+    agent = Agent(provider, name="assistant")
+
+    with pytest.raises(ConfigurationError, match="no tools registered"):
+        await agent.arun({"messages": [{"role": "user", "content": "hi"}]})
+
+
+def test_tools_is_always_a_toolbox():
+    @tool
+    def add(a: int, b: int) -> int:
+        """Add."""
+        return a + b
+
+    assert len(Agent(tools=[add]).tools) == 1
+    assert not Agent().tools
+
+
+def test_an_existing_toolbox_is_used_as_is():
+    toolbox = Toolbox()
+    agent = Agent(tools=toolbox)
+
+    assert agent.tools is toolbox
+
+
+def test_defaults_to_a_generic_name():
+    assert Agent().name == "agent"
