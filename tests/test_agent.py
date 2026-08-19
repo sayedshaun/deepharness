@@ -1,4 +1,6 @@
 import asyncio
+import threading
+import time
 
 import pytest
 
@@ -632,3 +634,80 @@ def test_an_existing_toolbox_is_used_as_is():
 
 def test_defaults_to_a_generic_name():
     assert Agent().name == "agent"
+
+
+async def test_sync_tools_in_one_turn_run_concurrently():
+    """A blocking tool must not stall the others gathered alongside it.
+
+    The barrier is the assertion: it only releases once both tools are inside it
+    at the same time, so a serialized dispatch raises BrokenBarrierError.
+    """
+    gate = threading.Barrier(2, timeout=5)
+
+    @tool
+    def first() -> str:
+        """Wait for the second tool."""
+        gate.wait()
+        return "first"
+
+    @tool
+    def second() -> str:
+        """Wait for the first tool."""
+        gate.wait()
+        return "second"
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id="a", name="first", arguments={}),
+                    ToolCall(id="b", name="second", arguments={}),
+                ],
+            ),
+            CompletionResponse(content="both done"),
+        ]
+    )
+    agent = Agent(provider, tools=[first, second])
+
+    state = await agent.arun("go")
+
+    assert state.output == "both done"
+    assert [m["content"] for m in state.messages if m["role"] == "tool"] == [
+        "first",
+        "second",
+    ]
+
+
+async def test_a_sync_tool_does_not_block_the_event_loop():
+    ticks = 0
+
+    async def ticker() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.005)
+            ticks += 1
+
+    @tool
+    def slow_blocking() -> str:
+        """Block the calling thread for a moment."""
+        time.sleep(0.1)
+        return "done"
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[ToolCall(id="a", name="slow_blocking", arguments={})],
+            ),
+            CompletionResponse(content="finished"),
+        ]
+    )
+    agent = Agent(provider, tools=[slow_blocking])
+
+    heartbeat = asyncio.create_task(ticker())
+    state = await agent.arun("go")
+    heartbeat.cancel()
+
+    assert state.output == "finished"
+    assert ticks > 0, "the event loop never got a turn while the tool ran"
