@@ -16,7 +16,7 @@ from subagents.providers.base import (
 )
 from subagents.providers.client import HTTPClient
 from subagents.providers.rest import RestCompletions, RestLLM
-from subagents.providers.types import OpenAIChatCompletion, openai_stream_delta
+from subagents.providers.types import OpenAIChatCompletion, OpenAIStream
 
 _BASE_URL = "https://api.openai.com/v1"
 
@@ -94,8 +94,8 @@ class OpenAI(RestLLM):
     def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_openai_response(OpenAIChatCompletion.from_json(response.json()))
 
-    def extract_delta(self, data: str) -> str | None:
-        return openai_stream_delta(json.loads(data))
+    def accumulator(self) -> OpenAIStream:
+        return OpenAIStream()
 
 
 def _build_payload(
