@@ -48,6 +48,9 @@ class ToolSpec:
     ctx_params: tuple[str, ...] = ()
     """Parameters the runtime fills with a Ctx, hidden from the model."""
 
+    requires_approval: bool = False
+    """Whether a human must allow each call before it runs."""
+
     def to_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
@@ -61,14 +64,19 @@ def tool(
     *,
     name: str | None = None,
     description: str | None = None,
+    requires_approval: bool = False,
 ) -> Callable[..., Any]:
     """Mark a function as usable as an LLM tool.
 
     Can be used bare (`@tool`) or with overrides (`@tool(name=..., description=...)`).
+
+    requires_approval=True gates every call on a human: the agent pauses before
+    running it and only runs it once approved. The gate lives on the tool rather
+    than in the prompt so a model cannot skip it by not asking.
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        fn._tool_spec = _build_spec(fn, name, description)  # type: ignore[attr-defined]
+        fn._tool_spec = _build_spec(fn, name, description, requires_approval)  # type: ignore[attr-defined]
         return fn
 
     if func is not None:
@@ -80,6 +88,7 @@ def _build_spec(
     fn: Callable[..., Any],
     name: str | None,
     description: str | None,
+    requires_approval: bool = False,
 ) -> ToolSpec:
     ctx_params = _ctx_params(fn)
     return ToolSpec(
@@ -88,6 +97,7 @@ def _build_spec(
         parameters=_parameters(fn, skip=ctx_params),
         func=fn,
         ctx_params=ctx_params,
+        requires_approval=requires_approval,
     )
 
 
@@ -174,6 +184,10 @@ class Toolbox:
 
     def __len__(self) -> int:
         return len(self._tools)
+
+    def __contains__(self, name: object) -> bool:
+        """Whether a tool is registered, so callers can ask before get() raises."""
+        return name in self._tools
 
     def register(self, func: Callable[..., Any]) -> Callable[..., Any]:
         spec = getattr(func, "_tool_spec", None) or _build_spec(func, None, None)
