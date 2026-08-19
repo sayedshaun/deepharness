@@ -2,30 +2,31 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
 
 from subagents.providers.base import (
     LLM,
-    REASONING_EFFORT_BUDGET_TOKENS,
     CompletionResponse,
-    ReasoningEffort,
-    TokenUsage,
+    ReasoningLevel,
     ToolCall,
+    token_usage,
+    without_none,
 )
 from subagents.providers.client import HTTPClient
-from subagents.providers.types import AnthropicMessage, AnthropicStreamEvent
+from subagents.providers.types import AnthropicMessage, anthropic_stream_delta
 
 _BASE_URL = "https://api.anthropic.com/v1"
 _ANTHROPIC_VERSION = "2023-06-01"
 _DEFAULT_MAX_TOKENS = 4096
 
 
-class AnthropicPayload(BaseModel):
-    """Request body for POST /messages, serialized with exclude_none so unset
-    optional fields (system, tools, thinking, stream) never hit the wire."""
+@dataclass(slots=True)
+class AnthropicPayload:
+    """Request body for POST /messages, with unset optional fields
+    (system, tools, thinking, stream) dropped rather than sent as null."""
 
     model: str
     max_tokens: int
@@ -36,7 +37,7 @@ class AnthropicPayload(BaseModel):
     stream: bool | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return self.model_dump(exclude_none=True)
+        return without_none(self)
 
 
 class Anthropic(LLM):
@@ -58,7 +59,7 @@ class Anthropic(LLM):
         api_key: str | None = None,
         max_tokens: int = _DEFAULT_MAX_TOKENS,
         *,
-        reasoning_effort: ReasoningEffort | None = None,
+        reasoning_effort: ReasoningLevel | None = None,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
@@ -78,9 +79,7 @@ class Anthropic(LLM):
         )
 
     def _parse_response(self, response: httpx.Response) -> CompletionResponse:
-        return _from_anthropic_response(
-            AnthropicMessage.model_validate(response.json())
-        )
+        return _from_anthropic_response(AnthropicMessage.from_json(response.json()))
 
     async def agenerate(
         self,
@@ -148,14 +147,7 @@ def _parse_sse_line(line: str) -> str | None:
 
 
 def _extract_delta(data: str) -> str | None:
-    event = AnthropicStreamEvent.model_validate(json.loads(data))
-    if (
-        event.type == "content_block_delta"
-        and event.delta
-        and event.delta.type == "text_delta"
-    ):
-        return event.delta.text
-    return None
+    return anthropic_stream_delta(json.loads(data))
 
 
 def _build_payload(
@@ -163,12 +155,12 @@ def _build_payload(
     max_tokens: int,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
-    reasoning_effort: ReasoningEffort | None = None,
+    reasoning_effort: ReasoningLevel | None = None,
 ) -> AnthropicPayload:
     system, converted = _to_anthropic_messages(messages)
     thinking: dict[str, Any] | None = None
     if reasoning_effort:
-        budget = REASONING_EFFORT_BUDGET_TOKENS[reasoning_effort]
+        budget = ReasoningLevel(reasoning_effort).budget
         thinking = {"type": "enabled", "budget_tokens": budget}
         # Anthropic requires max_tokens to exceed the thinking budget.
         max_tokens = max(max_tokens, budget + 1024)
@@ -242,13 +234,6 @@ def _from_anthropic_response(message: AnthropicMessage) -> CompletionResponse:
         for block in message.content
         if block.type == "tool_use" and block.name
     ]
-    usage = (
-        TokenUsage(
-            prompt_tokens=message.usage.input_tokens,
-            completion_tokens=message.usage.output_tokens,
-            total_tokens=message.usage.input_tokens + message.usage.output_tokens,
-        )
-        if message.usage
-        else None
+    return CompletionResponse(
+        content=text, tool_calls=tool_calls, usage=token_usage(message.usage)
     )
-    return CompletionResponse(content=text, tool_calls=tool_calls, usage=usage)
