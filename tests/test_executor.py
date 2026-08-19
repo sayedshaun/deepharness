@@ -3,7 +3,13 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from subagents.graph import ExecutionError, Graph
+from subagents.graph import (
+    ConcurrentUpdateError,
+    ExecutionError,
+    Graph,
+    StepLimitExceeded,
+    concat,
+)
 
 
 @dataclass
@@ -12,6 +18,14 @@ class State:
     result_a: str = ""
     result_b: str = ""
     combined: str = ""
+
+
+@dataclass
+class MergedState:
+    """Separate from State so the reducer only applies where it's under test."""
+
+    trace: list = field(default_factory=list, metadata={"reducer": concat})
+    rounds: int = 0
 
 
 async def test_executes_single_start_end_node():
@@ -175,3 +189,189 @@ async def test_run_does_not_mutate_the_input_state():
     await executor.run(original)
 
     assert original.trace == []
+
+
+async def test_reducer_keeps_both_concurrent_writes():
+    graph = Graph(MergedState)
+
+    @graph.add(start=True)
+    def branch_a(state: MergedState) -> MergedState:
+        state.trace.append("a")
+        return state
+
+    @graph.add(start=True)
+    def branch_b(state: MergedState) -> MergedState:
+        state.trace.append("b")
+        return state
+
+    @graph.add(end=True)
+    def join(state: MergedState) -> MergedState:
+        state.trace.append("join")
+        return state
+
+    graph.connect(branch_a, join)
+    graph.connect(branch_b, join)
+
+    result = await graph.build().run(MergedState())
+
+    # without a reducer this used to keep only the last branch's append
+    assert sorted(result.trace[:2]) == ["a", "b"]
+    assert result.trace[2] == "join"
+
+
+async def test_concurrent_write_without_reducer_raises():
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def branch_a(state: State) -> State:
+        state.trace.append("a")
+        return state
+
+    @graph.add(start=True)
+    def branch_b(state: State) -> State:
+        state.trace.append("b")
+        return state
+
+    @graph.add(end=True)
+    def join(state: State) -> State:
+        return state
+
+    graph.connect(branch_a, join)
+    graph.connect(branch_b, join)
+
+    with pytest.raises(ConcurrentUpdateError) as exc_info:
+        await graph.build().run(State())
+
+    assert exc_info.value.field_name == "trace"
+    assert exc_info.value.writer_count == 2
+
+
+async def test_loop_edge_iterates_until_condition_flips():
+    graph = Graph(MergedState)
+
+    @graph.add(start=True)
+    def agent(state: MergedState) -> MergedState:
+        state.trace.append(f"agent{state.rounds}")
+        state.rounds += 1
+        return state
+
+    @graph.add()
+    def tools(state: MergedState) -> MergedState:
+        state.trace.append("tools")
+        return state
+
+    graph.connect(agent, tools, condition=lambda s: s.rounds < 3)
+    graph.connect(tools, agent, loop=True)
+
+    result = await graph.build().run(MergedState())
+
+    assert result.trace == ["agent0", "tools", "agent1", "tools", "agent2"]
+
+
+async def test_node_upstream_of_a_loop_runs_once():
+    graph = Graph(MergedState)
+
+    @graph.add(start=True)
+    def setup(state: MergedState) -> MergedState:
+        state.trace.append("setup")
+        return state
+
+    @graph.add()
+    def body(state: MergedState) -> MergedState:
+        state.trace.append(f"body{state.rounds}")
+        state.rounds += 1
+        return state
+
+    graph.connect(setup, body)
+    graph.connect(body, body, loop=True, condition=lambda s: s.rounds < 3)
+
+    result = await graph.build().run(MergedState())
+
+    # setup is outside the loop body, so it keeps its result instead of re-running
+    assert result.trace == ["setup", "body0", "body1", "body2"]
+
+
+async def test_conditional_node_in_loop_body_runs_only_on_matching_passes():
+    """A body branch that sits out one pass must still be reconsidered later."""
+    graph = Graph(MergedState)
+
+    @graph.add(start=True)
+    def head(state: MergedState) -> MergedState:
+        state.rounds += 1
+        state.trace.append(f"head{state.rounds}")
+        return state
+
+    @graph.add()
+    def always(state: MergedState) -> MergedState:
+        state.trace.append("always")
+        return state
+
+    @graph.add()
+    def odd_only(state: MergedState) -> MergedState:
+        state.trace.append(f"odd{state.rounds}")
+        return state
+
+    graph.connect(head, always)
+    graph.connect(head, odd_only, condition=lambda s: s.rounds % 2 == 1)
+    graph.connect(always, head, loop=True, condition=lambda s: s.rounds < 3)
+
+    result = await graph.build().run(MergedState())
+
+    # skipped on round 2, then reconsidered and taken again on round 3
+    assert [entry for entry in result.trace if entry.startswith("odd")] == [
+        "odd1",
+        "odd3",
+    ]
+    assert result.rounds == 3
+
+
+async def test_step_limit_raises_with_partial_state():
+    graph = Graph(MergedState)
+
+    @graph.add(start=True)
+    def forever(state: MergedState) -> MergedState:
+        state.trace.append("tick")
+        return state
+
+    graph.connect(forever, forever, loop=True)
+
+    with pytest.raises(StepLimitExceeded) as exc_info:
+        await graph.build().run(MergedState(), max_steps=5)
+
+    assert exc_info.value.limit == 5
+    # the work done before the limit survives the exception
+    assert exc_info.value.state.trace == ["tick"] * 5
+
+
+async def test_conditional_fan_out_into_join_still_works():
+    """Regression: a skipped branch must not wedge a downstream join."""
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def router(state: State) -> State:
+        state.result_a = "research"
+        return state
+
+    @graph.add()
+    def researcher(state: State) -> State:
+        state.trace.append("researcher")
+        return state
+
+    @graph.add()
+    def writer(state: State) -> State:
+        state.trace.append("writer")
+        return state
+
+    @graph.add(end=True)
+    def join(state: State) -> State:
+        state.trace.append("join")
+        return state
+
+    graph.connect(router, researcher, condition=lambda s: s.result_a == "research")
+    graph.connect(router, writer, condition=lambda s: s.result_a == "write")
+    graph.connect(researcher, join)
+    graph.connect(writer, join)
+
+    result = await graph.build().run(State())
+
+    assert result.trace == ["researcher", "join"]
