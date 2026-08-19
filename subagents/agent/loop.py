@@ -29,6 +29,15 @@ AgentEvent = TextDelta | Finished
 
 
 @dataclass(slots=True)
+class _ApprovedCall:
+    """A gated call the human allowed, replayed with the model's arguments."""
+
+    id: str | None
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(slots=True)
 class _Ask:
     """A model call the loop needs its driver to perform."""
 
@@ -284,7 +293,16 @@ class Agent:
         concurrent one, while everything they agree on (the step budget, stop
         reasons, pausing for a human, feeding a failed tool back to the model)
         lives here once instead of being maintained in two copies.
+
+        A run that starts from a paused state settles the approvals first: the
+        allowed calls run now, with the arguments the model originally sent, and
+        only then does the loop go back to the model with their results.
         """
+        approved = self._resume(state, messages)
+        if approved:
+            results = yield _Dispatch(approved)
+            self._record_tool_results(messages, approved, results)
+
         for _ in range(self._budget.steps):
             response = yield _Ask(messages)
             self._account_for_usage(response, state, messages)
@@ -321,15 +339,74 @@ class Agent:
                 )
 
             self._record_tool_call_request(messages, response)
-            dispatched = [
-                call for call in response.tool_calls if call.name != FINAL_TOOL
-            ]
-            results = yield _Dispatch(dispatched)
+            wanted = [call for call in response.tool_calls if call.name != FINAL_TOOL]
+            gated = self._gated(wanted)
+            if gated:
+                # Nothing in this turn runs until the human rules on the gated
+                # call: letting the rest run first would half-apply a turn the
+                # human may be about to refuse.
+                return self._result(state, messages, "", "paused", paused=gated)
+
+            results = yield _Dispatch(wanted)
+            dispatched = wanted
             pending = self._record_tool_results(messages, dispatched, results)
             if pending:
                 return self._result(state, messages, "", "paused", paused=pending)
 
         return self._result(state, messages, "", "step_budget")
+
+    def _gated(self, calls: list[Any]) -> list[PendingHumanInput]:
+        """Calls a human must allow first, carrying their arguments for later.
+
+        Checked before dispatch rather than inside the tool, so a tool marked
+        requires_approval cannot run by accident - and the model cannot route
+        around the gate by declining to ask.
+        """
+        gated: list[PendingHumanInput] = []
+        for call in calls:
+            if (
+                call.name in self._tools
+                and self._tools.get(call.name).requires_approval
+            ):
+                arguments = dict(call.arguments)
+                gated.append(
+                    PendingHumanInput(
+                        call_id=call.id,
+                        name=call.name,
+                        question=f"Run {call.name} with {arguments}?",
+                        arguments=arguments,
+                    )
+                )
+        return gated
+
+    def _resume(self, state: AgentState, messages: list[dict[str, Any]]) -> list[Any]:
+        """Approval decisions the caller made, as calls still to run.
+
+        Rejections are recorded here as that call's result, so the model learns
+        it was refused and can say so instead of retrying forever.
+        """
+        outstanding = [p for p in state.paused if p.needs_approval]
+        if not outstanding:
+            return []
+        if any(p.approved is None for p in outstanding):
+            raise ConfigurationError(
+                f"{self._name} is paused on {outstanding[0].name}; call "
+                f"state.approve() or state.reject() before running it again"
+            )
+        for pending in outstanding:
+            if not pending.approved:
+                messages.append(
+                    Message.tool(
+                        "Denied by the user.",
+                        name=pending.name,
+                        call_id=pending.call_id,
+                    ).to_dict()
+                )
+        return [
+            _ApprovedCall(pending.call_id, pending.name, pending.arguments or {})
+            for pending in outstanding
+            if pending.approved
+        ]
 
     def _find_final(self, response: Any) -> Any | None:
         if self._final_schema is None:
