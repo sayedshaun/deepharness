@@ -65,6 +65,37 @@ A dict of known fields still works, but a key the agent does not own raises
 `ConfigurationError` rather than being dropped silently — an agent owns its own state, so keep
 a graph's fields on the graph's state.
 
+## Streaming
+
+`astream()` yields the model's prose as it arrives, and tools still run:
+
+```python
+async for chunk in agent.astream("What is 17 * 23?"):
+    print(chunk, end="", flush=True)
+```
+
+Every turn is streamed, not just the answering one — an agent cannot know in advance whether a
+turn will answer or call a tool, so the provider hands back the assembled turn either way and a
+tool turn simply yields no text.
+
+When you need the result too, use `astream_events()`. It yields `TextDelta` as text arrives and
+one final `Finished` carrying the `AgentState`, because an async generator cannot return a
+value:
+
+```python
+from subagents import Finished, TextDelta
+
+async for event in agent.astream_events("What is 17 * 23?"):
+    match event:
+        case TextDelta(text):
+            print(text, end="", flush=True)
+        case Finished(state):
+            print(f"\nstopped because: {state.stop_reason}")
+```
+
+`stream()`/`stream_events()` are the synchronous counterparts. A provider that cannot stream
+raises `NotImplementedError` naming itself, rather than yielding nothing.
+
 ## Token usage and budgets
 
 Every provider normalizes the vendor's token counts into a `TokenUsage(prompt_tokens,
