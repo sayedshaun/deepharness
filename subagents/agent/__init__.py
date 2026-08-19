@@ -4,7 +4,7 @@ from .loop import Agent, TokenBudgetExceeded
 from .message import Message, as_dict
 from .output import FINAL_TOOL
 from .session import load_session, save_session
-from .state import AgentState, PendingHumanInput, StopReason
+from .state import AgentState, Finished, PendingHumanInput, StopReason
 
 __all__ = [
     "FINAL_TOOL",
@@ -12,6 +12,7 @@ __all__ = [
     "AgentState",
     "Budget",
     "Ctx",
+    "Finished",
     "Message",
     "PendingHumanInput",
     "StopReason",
