@@ -49,16 +49,16 @@ class HTTPClient:
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
-        self.async_client = client or httpx.AsyncClient(
+        self._async_client = client or httpx.AsyncClient(
             base_url=base_url, headers=headers
         )
-        self.sync_client = sync_client or httpx.Client(
+        self._sync_client = sync_client or httpx.Client(
             base_url=base_url, headers=headers
         )
 
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
         for attempt in range(_MAX_ATTEMPTS):
-            response = await self.async_client.post(url, **kwargs)
+            response = await self._async_client.post(url, **kwargs)
             if (
                 response.status_code not in _RETRYABLE_STATUS_CODES
                 or attempt == _MAX_RETRIES
@@ -70,7 +70,7 @@ class HTTPClient:
 
     def post_sync(self, url: str, **kwargs: Any) -> httpx.Response:
         for attempt in range(_MAX_ATTEMPTS):
-            response = self.sync_client.post(url, **kwargs)
+            response = self._sync_client.post(url, **kwargs)
             if (
                 response.status_code not in _RETRYABLE_STATUS_CODES
                 or attempt == _MAX_RETRIES
@@ -86,7 +86,7 @@ class HTTPClient:
     ) -> AsyncGenerator[httpx.Response]:
         for attempt in range(_MAX_ATTEMPTS):
             delay = None
-            async with self.async_client.stream(method, url, **kwargs) as response:
+            async with self._async_client.stream(method, url, **kwargs) as response:
                 if (
                     response.status_code in _RETRYABLE_STATUS_CODES
                     and attempt < _MAX_RETRIES
@@ -105,7 +105,7 @@ class HTTPClient:
     ) -> Generator[httpx.Response]:
         for attempt in range(_MAX_ATTEMPTS):
             delay = None
-            with self.sync_client.stream(method, url, **kwargs) as response:
+            with self._sync_client.stream(method, url, **kwargs) as response:
                 if (
                     response.status_code in _RETRYABLE_STATUS_CODES
                     and attempt < _MAX_RETRIES
