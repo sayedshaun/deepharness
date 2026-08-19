@@ -176,9 +176,9 @@ except ExecutionError as exc:
 
 ## Agents as nodes
 
-The graph engine is agent-agnostic: `Agent.arun()` speaks `dict` state, the graph speaks your
-dataclass, so a node is the adapter between them. One agent per node is the natural way to
-build a multi-agent system:
+The graph engine is agent-agnostic: `Agent.arun()` takes a prompt and returns an `AgentState`,
+the graph carries your dataclass, so a node is the adapter between them. One agent per node is
+the natural way to build a multi-agent system:
 
 ```python
 from subagents import Agent, Message
@@ -189,15 +189,15 @@ writer = Agent(llm, name="writer", system="You write short reports.")
 
 @graph.add(start=True)
 async def research(state: State) -> State:
-    out = await researcher.arun({"messages": [Message.human(state.topic)]})
-    state.research = out["output"]
+    out = await researcher.arun(state.topic)
+    state.research = out.output
     return state
 
 
 @graph.add(end=True)
 async def write(state: State) -> State:
-    out = await writer.arun({"messages": [Message.human(state.research)]})
-    state.draft = out["output"]
+    out = await writer.arun(state.research)
+    state.draft = out.output
     return state
 
 
