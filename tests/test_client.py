@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
+from subagents.errors import ProviderError
 from subagents.providers.client import HTTPClient
 
 
@@ -45,7 +46,7 @@ async def test_post_raises_after_exhausting_retries():
 
     http = HTTPClient("https://example.com", client=client)
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ProviderError):
         await http.post("/thing")
 
     assert client.post.await_count == 4  # initial attempt + 3 retries
@@ -57,7 +58,7 @@ async def test_post_does_not_retry_on_non_retryable_error():
 
     http = HTTPClient("https://example.com", client=client)
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ProviderError):
         await http.post("/thing")
 
     assert client.post.await_count == 1
