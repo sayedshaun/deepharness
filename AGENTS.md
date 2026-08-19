@@ -29,12 +29,63 @@ tools/      → built-in tool implementations
 
 Avoid large files, circular dependencies, and tightly coupled components.
 
+## Object-Oriented Design
+
+Object orientation is a tool for keeping boundaries clear, not a goal in itself.
+Use it where it earns its place, and follow these rules when you do.
+
+### Encapsulation
+
+- Keep state private (`_name`) and expose behaviour, not internals.
+- An object should enforce its own invariants in `__init__` (or `__post_init__`);
+  never rely on callers to keep it consistent.
+- Do not put IO — printing, logging, filesystem, network — inside a domain
+  object. Return a value or accept an injected callable instead.
+
+### Abstraction and dependencies
+
+- Depend on an interface, never on a concrete implementation. Core code
+  (`agent/`, `graph/`) must not import a vendor module.
+- Define interfaces with `abc.ABC` and `@abstractmethod`, and keep them narrow —
+  an interface is the smallest set of methods callers actually need.
+- One abstraction per seam. Do not add an interface until there is a second
+  implementation or a test that needs to substitute one.
+
+### Inheritance
+
+- **Prefer composition.** Inherit only to declare a subtype relationship, never
+  to reuse code — extract a function or collaborator for that.
+- A subclass must be substitutable for its base: same contract, no stricter
+  preconditions, no removed behaviour. A subclass that only overrides class-level
+  configuration (endpoint, credential key) is fine; one that changes what a
+  method means is not.
+- One level deep. If you need two, the design is wrong.
+- Do not subclass builtins (`dict`, `list`, `str`) for convenience — it inherits
+  an entire mutable API you cannot constrain. Wrap or use a dataclass, and add a
+  `to_dict()` where a plain mapping is required at a boundary.
+
+### Polymorphism over duplication
+
+- When two classes implement the same steps in the same order and differ only in
+  details, put the sequence in the base class and let subclasses override the
+  varying steps (template method). Do not copy the sequence per subclass.
+- Prefer overriding a method to branching on a type or a string tag.
+
+### Objects over loose dicts
+
+- Model data that crosses a public boundary as a typed object (`@dataclass`),
+  not a `dict[str, Any]` with string keys.
+- Keep `dict[str, Any]` for wire payloads and JSON schemas, where the untyped
+  shape is the format itself.
+
 ## Agents
 
 - Give each agent one clear responsibility.
 - Keep orchestration separate from agent implementation.
 - Prefer composition over complex inheritance.
 - Keep public APIs small and explicit.
+- Inject collaborators (model, toolbox, budget) through `__init__`; do not
+  construct them internally or read them from global state.
 
 ## Code Style
 
@@ -86,13 +137,18 @@ Do not scatter raw HTTP calls throughout the application. Reuse clients where ap
 - Over-engineering
 - Giant classes/modules
 - Deep inheritance
+- Inheritance used for code reuse
+- Subclassing builtins (`dict`, `list`, `str`)
+- Duplicated method bodies that differ only in a constant
+- Stringly-typed dicts on public APIs
 - Global mutable state
 - Premature abstractions
 - Pydantic for simple internal data
 
 ## Golden Rule
 
-> **Simple, modular, typed, dependency-light code.**
+> **Simple, modular, typed, dependency-light code — composed objects with
+> clear boundaries, not deep hierarchies.**
 
 ## Commit Rules
 
