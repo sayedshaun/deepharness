@@ -101,7 +101,13 @@ class LLM(ABC):
     implements these four methods and works everywhere. Vendors that do speak
     HTTP share their request sequence through RestCompletions (see rest.py)
     rather than through this class.
+
+    __slots__ is empty here rather than absent: a base class without it hands
+    every subclass a __dict__, which would make the providers' own __slots__
+    declarations save nothing.
     """
+
+    __slots__ = ()
 
     @abstractmethod
     async def agenerate(
