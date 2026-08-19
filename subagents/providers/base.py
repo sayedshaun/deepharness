@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field, fields
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
@@ -32,9 +32,9 @@ def without_none(payload: Any) -> dict[str, Any]:
     }
 
 
-class ReasoningLevel(str, Enum):
-    """Str subclass so members serialize as plain strings (JSON payloads,
-    dict keys) without extra conversion at the call sites."""
+class ReasoningLevel(StrEnum):
+    """StrEnum so members serialize as plain strings (JSON payloads, dict
+    keys) without extra conversion at the call sites."""
 
     LOW = "low"
     MEDIUM = "medium"
@@ -110,7 +110,7 @@ class LLM(ABC):
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResponse:
-        """Send messages (and optional tool schemas) and return a normalized response."""
+        """Send messages and optional tool schemas; return a normalized response."""
 
     @abstractmethod
     def generate(
