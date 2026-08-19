@@ -97,5 +97,6 @@ class TokenBudgetExceeded(SubagentsError):
         self.budget = budget
         self.state = state
         super().__init__(
-            f"{agent_name} used {usage.total_tokens} tokens, exceeding its budget of {budget}"
+            f"{agent_name} used {usage.total_tokens} tokens, "
+            f"exceeding its budget of {budget}"
         )
