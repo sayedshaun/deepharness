@@ -20,8 +20,8 @@ agent = Agent(
     tools=[get_weather],
 )
 
-result = await agent.arun({"messages": [Message.human("Weather in Oslo?")]})
-print(result["output"])
+result = await agent.arun("Weather in Oslo?")
+print(result.output)
 ```
 
 `tools=` accepts any number of functions — decorated with [`@tool`](tools.md) or plain — an
@@ -34,26 +34,48 @@ run **concurrently**. `run()` is a real synchronous path rather than a wrapper, 
 if a registered tool turns out to be `async def` — there's no event loop here to await it:
 
 ```python
-result = agent.run(
-    {"messages": [Message.human("Weather in Oslo?")]}
-)  # sync, sync tools only
-result = await agent.arun(
-    {"messages": [Message.human("Weather in Oslo?")]}
-)  # async, concurrent tool calls
+result = agent.run("Weather in Oslo?")  # sync, sync tools only
+result = await agent.arun("Weather in Oslo?")  # async, concurrent tool calls
 ```
+
+## State
+
+`arun`/`run` return an `AgentState` — a dataclass, not a dict:
+
+| Field | What it holds |
+| --- | --- |
+| `messages` | The transcript, as wire-form dicts. |
+| `output` | The answer: text, or an `output=` instance when one is set. |
+| `usage` | `TokenUsage` for this run. |
+| `stop_reason` | Why the loop ended: `"answer"`, `"step_budget"`, `"paused"`, `"token_budget"`. |
+| `paused` | Any `PendingHumanInput` waiting on a human; empty otherwise. |
+| `answered` | `True` only when `stop_reason == "answer"` — check this before trusting `output`. |
+
+For input, pass whatever is convenient — a prompt string, a list of messages, or an
+`AgentState` when you are resuming one:
+
+```python
+await agent.arun("Weather in Oslo?")
+await agent.arun([Message.human("Weather in Oslo?")])
+await agent.arun(previous_state)
+```
+
+A dict of known fields still works, but a key the agent does not own raises
+`ConfigurationError` rather than being dropped silently — an agent owns its own state, so keep
+a graph's fields on the graph's state.
 
 ## Token usage and budgets
 
 Every provider normalizes the vendor's token counts into a `TokenUsage(prompt_tokens,
 completion_tokens, total_tokens)`. `Agent` accumulates it across every model call on
-`agent.total_usage`, and the final `state["usage"]` reflects that running total:
+`agent.total_usage`, and the final `state.usage` reflects that running total:
 
 ```python
 agent = Agent(llm, name="assistant", budget=Budget(tokens=50_000))
 
-state = await agent.arun({"messages": [Message.human("...")]})
+state = await agent.arun("...")
 print(
-    state["usage"]
+    state.usage
 )  # TokenUsage(prompt_tokens=..., completion_tokens=..., total_tokens=...)
 print(agent.total_usage)  # same object — persists across multiple arun()/run() calls
 ```
@@ -70,7 +92,7 @@ rather than answering whenever it calls one.
 
 ## Structured output
 
-Pass `output=` a dataclass and `state["output"]` becomes a validated instance of it instead of
+Pass `output=` a dataclass and `state.output` becomes a validated instance of it instead of
 prose:
 
 ```python
@@ -85,8 +107,8 @@ class Weather:
 
 agent = Agent(llm, output=Weather, tools=[get_weather])
 
-state = await agent.arun({"messages": [Message.human("Weather in Oslo?")]})
-print(state["output"].celsius)  # 22
+state = await agent.arun("Weather in Oslo?")
+print(state.output.celsius)  # 22
 ```
 
 It works by offering the model one extra tool, `final_answer`, whose parameters are the
@@ -105,7 +127,7 @@ involved. Two consequences worth knowing:
 
 ## Session persistence
 
-`state["messages"]` is just a list of dicts, so `save_session`/`load_session` round-trip it
+`state.messages` is a list of wire-form dicts, so `save_session`/`load_session` round-trip it
 through JSON — resume a conversation across process runs:
 
 ```python
@@ -115,7 +137,7 @@ messages = load_session("session.json")  # [] if the file doesn't exist yet
 messages.append(Message.human("Continue where we left off."))
 
 state = await agent.arun({"messages": messages})
-save_session("session.json", state["messages"])
+save_session("session.json", state.messages)
 ```
 
 ## Messages
