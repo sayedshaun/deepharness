@@ -1,6 +1,10 @@
 from subagents.agent import (
+    FINAL_TOOL,
     Agent,
+    Budget,
     Message,
+    PendingHumanInput,
+    StopReason,
     TokenBudgetExceeded,
     Toolbox,
     ToolSpec,
@@ -10,11 +14,21 @@ from subagents.agent import (
 )
 from subagents.errors import (
     ConfigurationError,
+    HumanInputRequired,
     ProviderError,
     SubagentsError,
     ToolNotFoundError,
 )
-from subagents.graph import ExecutionError, Executor, Graph, NodeSpec
+from subagents.graph import (
+    ConcurrentUpdateError,
+    ExecutionError,
+    Executor,
+    Graph,
+    NodeSpec,
+    StepLimitExceeded,
+    concat,
+    merge_dicts,
+)
 from subagents.providers import (
     VLLM,
     XAI,
@@ -34,11 +48,14 @@ from subagents.providers import (
 )
 
 __all__ = [
+    "FINAL_TOOL",
     "VLLM",
     "XAI",
     "Agent",
     "Anthropic",
+    "Budget",
     "Cerebras",
+    "ConcurrentUpdateError",
     "ConfigurationError",
     "DeepSeek",
     "ExecutionError",
@@ -47,6 +64,7 @@ __all__ = [
     "Gemini",
     "Graph",
     "Groq",
+    "HumanInputRequired",
     "LMStudio",
     "Message",
     "Mistral",
@@ -54,7 +72,10 @@ __all__ = [
     "Ollama",
     "OpenAI",
     "OpenRouter",
+    "PendingHumanInput",
     "ProviderError",
+    "StepLimitExceeded",
+    "StopReason",
     "SubagentsError",
     "Together",
     "TokenBudgetExceeded",
@@ -62,7 +83,9 @@ __all__ = [
     "ToolNotFoundError",
     "ToolSpec",
     "Toolbox",
+    "concat",
     "load_session",
+    "merge_dicts",
     "save_session",
     "tool",
 ]
