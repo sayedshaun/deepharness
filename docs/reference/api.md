@@ -27,6 +27,9 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 | --- | --- | --- |
 | `arun` | `async def arun(state: Any = None, *, deps: Any = None) -> AgentState` | Async run. Tool calls in the same turn dispatch concurrently. |
 | `run` | `def run(state: Any = None, *, deps: Any = None) -> AgentState` | Sync run. Raises if a registered tool is `async def`. |
+| `astream` | `async def astream(state=None, *, deps=None) -> AsyncIterator[str]` | Text deltas as they arrive; tools still dispatch. |
+| `astream_events` | `async def astream_events(...) -> AsyncIterator[TextDelta \| Finished]` | Deltas plus a final `Finished(state)`. |
+| `stream` / `stream_events` | sync counterparts | Same, outside an event loop. |
 | `total_usage` | `TokenUsage` | Cumulative token usage across every call made by this agent instance. Read-only. |
 | `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. Read-only. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
@@ -190,10 +193,14 @@ Every provider below implements the same interface:
 | --- | --- |
 | `await agenerate(messages: list[dict], *, tools: list[dict] \| None = None)` | `CompletionResponse` |
 | `generate(messages: list[dict], *, tools: list[dict] \| None = None)` | `CompletionResponse` |
-| `async for chunk in astream(messages, *, tools=None)` | text deltas |
+| `async for event in astream_events(messages, *, tools=None)` | `TextDelta`, then `Completed(response)` |
+| `for event in stream_events(messages, *, tools=None)` | `TextDelta`, then `Completed(response)` |
+| `async for chunk in astream(messages, *, tools=None)` | text deltas (filters the above) |
 | `for chunk in stream(messages, *, tools=None)` | text deltas |
 
-`agenerate`/`generate` are the required pair — implement those two and a custom provider works
+A streaming turn ends with `Completed`, carrying the assembled `CompletionResponse` — tool
+calls included, reassembled from however the vendor fragmented them. `agenerate`/`generate` are
+the required pair — implement those two and a custom provider works
 everywhere, transport regardless. The streaming pair is optional: the base class raises
 `NotImplementedError` naming the provider, so a backend that cannot stream needs no stub.
 Vendors that speak REST share their request sequence through `RestCompletions` rather than by
