@@ -54,6 +54,8 @@ class Anthropic(LLM):
     alternation and will reject a request where that link is missing.
     """
 
+    __slots__ = ("_http", "_max_tokens", "_model", "_reasoning_effort", "_rest")
+
     def __init__(
         self,
         model: str,
