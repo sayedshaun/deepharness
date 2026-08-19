@@ -1,10 +1,10 @@
 # Agents
 
 An `Agent` runs a think/act loop against a model: ask for a response, dispatch any tool calls
-it requests, repeat until the model answers with no tool calls or `max_steps` is hit.
+it requests, repeat until the model answers with no tool calls or the step budget is spent.
 
 ```python
-from subagents import Agent, Message, tool
+from subagents import Agent, Budget, Message, tool
 from subagents import OpenAI
 
 
@@ -15,9 +15,8 @@ def get_weather(city: str) -> str:
 
 
 agent = Agent(
-    "assistant",
-    model=OpenAI(model="gpt-4o-mini", api_key="sk-..."),
-    system_prompt="You are a concise assistant.",
+    OpenAI(model="gpt-4o-mini", api_key="sk-..."),
+    system="You are a concise assistant.",
     tools=[get_weather],
 )
 
@@ -50,7 +49,7 @@ completion_tokens, total_tokens)`. `Agent` accumulates it across every model cal
 `agent.total_usage`, and the final `state["usage"]` reflects that running total:
 
 ```python
-agent = Agent("assistant", model=llm, token_budget=50_000)
+agent = Agent(llm, name="assistant", budget=Budget(tokens=50_000))
 
 state = await agent.arun({"messages": [Message.human("...")]})
 print(
@@ -59,9 +58,50 @@ print(
 print(agent.total_usage)  # same object — persists across multiple arun()/run() calls
 ```
 
-Pass `token_budget` to raise `TokenBudgetExceeded` the moment cumulative usage crosses it —
-checked right after each model response, so a run already over budget won't dispatch further
-tool calls or make another model call.
+`Budget` bounds a run two ways, and they fail differently. `Budget(tokens=...)` raises
+`TokenBudgetExceeded` the moment cumulative usage crosses it — checked right after each model
+response, so a run already over budget won't dispatch further tool calls or make another model
+call. `Budget(steps=...)` (default 10) caps think/act turns instead, and spending them returns
+normally with `stop_reason == "step_budget"` and an empty `output`.
+
+`Budget(steps=1)` is the single-shot case: one model call, no turn to react to a tool result.
+Handy for a classify-or-extract step, but an agent with tools will stop at `"step_budget"`
+rather than answering whenever it calls one.
+
+## Structured output
+
+Pass `output=` a dataclass and `state["output"]` becomes a validated instance of it instead of
+prose:
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class Weather:
+    city: str
+    celsius: int
+
+
+agent = Agent(llm, output=Weather, tools=[get_weather])
+
+state = await agent.arun({"messages": [Message.human("Weather in Oslo?")]})
+print(state["output"].celsius)  # 22
+```
+
+It works by offering the model one extra tool, `final_answer`, whose parameters are the
+model's schema — so it behaves the same on every provider, with no vendor-specific JSON mode
+involved. Two consequences worth knowing:
+
+- If the model replies with prose instead of calling `final_answer`, that is not treated as an
+  answer: the agent asks it to call the tool and keeps going, bounded by the step budget. A
+  model that never complies ends at `stop_reason == "step_budget"`.
+- If the arguments don't fit, an `OutputValidationError` goes back to the model as that call's
+  result — the same courtesy a failing tool gets — so it can try again with valid fields. Every
+  bad field is reported at once, so one round-trip fixes them all.
+- Fields are checked, not coerced from anything: `list[str]`, `Literal`, `Enum`, `X | None` and
+  nested dataclasses all validate, an `int` is accepted where a `float` is declared, and `true`
+  is rejected for an `int` field even though Python calls a bool an int.
 
 ## Session persistence
 
