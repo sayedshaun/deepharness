@@ -26,6 +26,8 @@ class Executor:
     so the graph can iterate. max_steps bounds that.
     """
 
+    __slots__ = ("_loops", "_nodes", "_predecessors")
+
     def __init__(
         self,
         nodes: dict[str, NodeSpec],
