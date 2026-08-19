@@ -130,35 +130,31 @@ graph.connect(critique, draft, loop=True, condition=lambda s: s.score < 0.8)
 
 See [loops](guide/graph.md#loops) for the re-entry rules and `max_steps`.
 
-## Pausing for a human
+## Gating a risky tool on a human
 
-Raise `HumanInputRequired` from inside a tool and the run stops with `stop_reason == "paused"`.
-The gate lives in the tool, so a model that decides not to ask still cannot move the money:
+Mark the tool and the agent pauses *before* running it, every time:
 
 ```python
-from subagents import HumanInputRequired, Message, tool
+from subagents import tool
 
 
-@tool
+@tool(requires_approval=True)
 def wire_transfer(amount_usd: int, to: str) -> str:
-    """Send money. Anything over $10k needs a human to sign off."""
-    if amount_usd > 10_000:
-        raise HumanInputRequired(f"Approve ${amount_usd:,} transfer to {to}?")
+    """Send money."""
     return f"sent ${amount_usd:,} to {to}"
 
 
 state = await agent.arun("Pay the Acme invoice")
-pending = state.paused[0]
-print(pending.question)  # Approve $50,000 transfer to Acme Corp?
+print(state.stop_reason)  # "paused"
+print(state.paused[0].question)  # Run wire_transfer with {'amount_usd': 50000, ...}?
 
-state.messages.append(
-    Message.tool("approved by CFO", name=pending.name, call_id=pending.call_id)
-)
-state = await agent.arun(state)
+state = await agent.arun(state.approve())  # now it runs
 ```
 
-The pause is an ordinary returned state, not an exception, so it can be persisted with
-`save_session` and resumed in another process.
+`reject()` instead of `approve()` records "Denied by the user." as the result, so the model can
+say so rather than retrying. The gate is on the tool, not in the prompt, so a model cannot skip
+it by not asking. The pause is an ordinary returned state, not an exception, so it can be
+persisted and resumed in another process.
 
 ## Streaming, with tools still working
 
