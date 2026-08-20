@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
+from subagents.errors import ProviderError
 from subagents.providers.base import (
     CompletionResponse,
     ReasoningLevel,
@@ -16,7 +17,7 @@ from subagents.providers.base import (
 )
 from subagents.providers.client import HTTPClient
 from subagents.providers.rest import RestCompletions, RestLLM
-from subagents.providers.types import OpenAIChatCompletion, OpenAIStream
+from subagents.providers.wire import Usage, clip, load_arguments, require, usage_from
 
 _BASE_URL = "https://api.openai.com/v1"
 
@@ -171,3 +172,110 @@ def _from_openai_response(completion: OpenAIChatCompletion) -> CompletionRespons
         tool_calls=tool_calls,
         usage=token_usage(completion.usage),
     )
+
+
+@dataclass(slots=True)
+class OpenAIToolCall:
+    id: str
+    name: str
+    arguments: str = "{}"
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> OpenAIToolCall:
+        function = require(data, "function", "OpenAI")
+        return cls(
+            id=require(data, "id", "OpenAI"),
+            name=require(function, "name", "OpenAI"),
+            arguments=function.get("arguments") or "{}",
+        )
+
+
+@dataclass(slots=True)
+class OpenAIMessage:
+    content: str | None = None
+    tool_calls: list[OpenAIToolCall] = field(default_factory=list)
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> OpenAIMessage:
+        return cls(
+            content=data.get("content"),
+            tool_calls=[
+                OpenAIToolCall.from_json(call) for call in data.get("tool_calls") or []
+            ],
+        )
+
+
+@dataclass(slots=True)
+class OpenAIChatCompletion:
+    message: OpenAIMessage
+    usage: Usage | None = None
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> OpenAIChatCompletion:
+        choices = require(data, "choices", "OpenAI")
+        if not choices:
+            raise ProviderError(f"OpenAI response has no choices: {clip(data)}")
+        return cls(
+            message=OpenAIMessage.from_json(require(choices[0], "message", "OpenAI")),
+            usage=usage_from(
+                data.get("usage"),
+                prompt="prompt_tokens",
+                completion="completion_tokens",
+                total="total_tokens",
+            ),
+        )
+
+
+class OpenAIStream:
+    """Folds OpenAI's chat-completion chunks into text plus tool calls.
+
+    Tool calls arrive spread over many chunks: the first carries an index, id and
+    function name, and later ones append fragments of the argument JSON. They are
+    keyed by index because that is the only field present on every fragment.
+    """
+
+    __slots__ = ("_calls", "_text", "_usage")
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._calls: dict[int, dict[str, Any]] = {}
+        self._usage: Usage | None = None
+
+    def feed(self, data: dict[str, Any]) -> str | None:
+        if usage := data.get("usage"):
+            self._usage = Usage(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+            )
+        choices = data.get("choices") or []
+        if not choices:
+            return None
+        delta = choices[0].get("delta") or {}
+        for fragment in delta.get("tool_calls") or []:
+            call = self._calls.setdefault(
+                fragment.get("index", 0), {"id": "", "name": "", "arguments": ""}
+            )
+            call["id"] = fragment.get("id") or call["id"]
+            function = fragment.get("function") or {}
+            call["name"] = function.get("name") or call["name"]
+            call["arguments"] += function.get("arguments") or ""
+        text = delta.get("content")
+        if text:
+            self._text.append(text)
+        return text
+
+    def response(self) -> CompletionResponse:
+        return CompletionResponse(
+            content="".join(self._text),
+            tool_calls=[
+                ToolCall(
+                    id=call["id"] or None,
+                    name=call["name"],
+                    arguments=load_arguments(call["arguments"]),
+                )
+                for call in self._calls.values()
+                if call["name"]
+            ],
+            usage=token_usage(self._usage),
+        )
