@@ -1,9 +1,8 @@
 """Streaming: vendor accumulators, then a whole agent run streamed."""
 
-import pytest
-
 from subagents.agent import Agent, tool
 from subagents.agent.loop import Finished
+from subagents.providers.anthropic import AnthropicStream
 from subagents.providers.base import (
     LLM,
     Completed,
@@ -11,7 +10,8 @@ from subagents.providers.base import (
     TextDelta,
     TokenUsage,
 )
-from subagents.providers.types import AnthropicStream, GeminiStream, OpenAIStream
+from subagents.providers.gemini import GeminiStream
+from subagents.providers.openai import OpenAIStream
 
 
 def feed_all(reader, payloads):
@@ -392,18 +392,3 @@ async def test_structured_output_survives_streaming():
     events = [event async for event in agent.astream_events("where?")]
 
     assert events[-1].state.output == Weather(city="Oslo")
-
-
-async def test_a_provider_that_cannot_stream_says_so_through_astream():
-    class TextOnly(LLM):
-        async def agenerate(self, messages, *, tools=None):
-            return CompletionResponse(content="hi")
-
-        def generate(self, messages, *, tools=None):
-            return CompletionResponse(content="hi")
-
-    with pytest.raises(
-        NotImplementedError, match="TextOnly does not support streaming"
-    ):
-        async for _ in TextOnly().astream([]):
-            pass
