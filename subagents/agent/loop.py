@@ -7,34 +7,29 @@ from typing import Any
 
 from subagents.providers.base import (
     LLM,
-    Completed,
     TextDelta,
     TokenUsage,
 )
 
 from ..errors import (
     ConfigurationError,
-    HumanInputRequired,
     OutputValidationError,
     TokenBudgetExceeded,
 )
 from ..tools.toolbox import Ctx, Toolbox, ToolSpec
-from .budget import Budget
-from .message import Message, as_dict
-from .output import FINAL_TOOL, coerce, final_tool_schema
-from .state import AgentState, Finished, PendingHumanInput, StopReason
+from . import turn
+from .output import FINAL_TOOL, coerce, final_tool_schema, find_final
+from .state import (
+    AgentState,
+    Budget,
+    Finished,
+    Message,
+    PendingHumanInput,
+    StopReason,
+)
 
 AgentEvent = TextDelta | Finished
 """What streaming a run emits: prose as it arrives, then the final state."""
-
-
-@dataclass(slots=True)
-class _ApprovedCall:
-    """A gated call the human allowed, replayed with the model's arguments."""
-
-    id: str | None
-    name: str
-    arguments: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -52,47 +47,32 @@ class _Dispatch:
 
 
 class Agent:
-    """Performs a unit of work, optionally reasoning and acting via an LLM model.
+    """A model plus tools, run as a think/act loop over an AgentState.
 
-    Without a model, run()/arun() are a no-op passthrough. With a model, they
-    run a think/act loop: ask the model for a response, dispatch any tool
-    calls it requests, and repeat until the model replies with no tool calls
-    or the Budget's step limit is reached.
+    Ask the model, dispatch whatever tools it requests, repeat until it answers
+    or the budget runs out. Without a model the run is a passthrough, which is
+    what makes an Agent usable as a placeholder node in a Graph.
 
-    arun() is fully async: tool calls requested in the same turn run
-    concurrently via asyncio.gather. run() is a real synchronous path (the
-    model's generate(), tools called directly) - it raises if a registered
-    tool turns out to be async, since there's no event loop here to await it.
+    The parts worth knowing before reading the loop:
 
-    tools accepts either an iterable of functions (a Toolbox is built for
-    you) or an existing Toolbox instance used as-is.
+    * Only stop_reason == "answer" means the model actually replied. Every other
+      reason leaves output empty or partial, so state.answered is the check to
+      make before trusting it.
+    * run() is a real synchronous path, not arun() wrapped in an event loop, so
+      it raises for a tool that turns out to be `async def`. arun() dispatches a
+      turn's tools concurrently, sync ones included - those go to threads.
+    * A failing tool does not end the run: the error becomes that call's result
+      so the model gets a turn to correct itself.
+    * total_usage accumulates across every model call this instance makes, not
+      per run, and Budget(tokens=...) turns crossing it into TokenBudgetExceeded
+      with the partial state attached.
+    * Every public entry point - arun, run, astream, stream - is the same loop;
+      only the I/O differs. See astream_events for the one async driver.
 
-    The returned state carries a "stop_reason" (see StopReason) saying why
-    the loop ended. Only "answer" means the model replied; "step_budget"
-    means it was still calling tools when it ran out of turns, and "output"
-    is "" rather than some arbitrary tool's return value. Check it before
-    trusting "output" - a truncated run is otherwise indistinguishable from a
-    finished one.
-
-    A failing tool does not end the run: the error is fed back to the model
-    as that call's result so it can correct itself.
-
-    budget bounds both turns and tokens (see Budget); the default allows 10
-    steps and unlimited tokens.
-
-    total_usage accumulates token counts across every model call this agent
-    makes (reset per Agent instance, not per run()/arun() call). Set
-    Budget(tokens=...) to raise TokenBudgetExceeded once cumulative usage
-    crosses it, checked right after each model response - so a run already
-    past budget won't dispatch further tool calls or make another model call.
-    The partial result rides along on the exception's .state.
-
-    A tool can raise HumanInputRequired to pause the loop instead of
-    returning a result. run()/arun() then return early with "paused" set to
-    a list of PendingHumanInput - any other tool calls in the same turn
-    still run and keep their results. To resume, append a Message.tool(...)
-    answer for each pending call (matching name and call_id) and call
-    run()/arun() again with the updated state.
+    Pausing has two flavours, and they resolve differently: a tool marked
+    requires_approval has not run yet (approve it and it runs), while a tool
+    raising HumanInputRequired is asking a question (your answer becomes its
+    result). See subagents/agent/turn.py.
     """
 
     __slots__ = (
@@ -192,31 +172,6 @@ class Agent:
         )
         return call
 
-    def _prepare_messages(self, state: AgentState) -> list[dict[str, Any]]:
-        """The transcript to send, as wire-form dicts.
-
-        Entries are normalized because a caller resuming a paused run appends a
-        Message of their own, and a provider must never be handed one.
-        """
-        messages = [as_dict(message) for message in state.messages]
-        if self._system and not any(m["role"] == "system" for m in messages):
-            messages.insert(0, Message.system(self._system).to_dict())
-        return messages
-
-    @staticmethod
-    def _record_tool_call_request(
-        messages: list[dict[str, Any]], response: Any
-    ) -> None:
-        messages.append(
-            Message.ai(
-                response.content,
-                tool_calls=[
-                    {"id": call.id, "name": call.name, "arguments": call.arguments}
-                    for call in response.tool_calls
-                ],
-            ).to_dict()
-        )
-
     def _account_for_usage(
         self,
         response: Any,
@@ -254,34 +209,6 @@ class Agent:
             paused=paused or [],
         )
 
-    @staticmethod
-    def _record_tool_results(
-        messages: list[dict[str, Any]],
-        calls: list[Any],
-        results: list[Any],
-    ) -> list[PendingHumanInput]:
-        """Turn one turn's tool outcomes into messages, returning any that
-        need a human.
-
-        Tools are arbitrary user code, so _call_tool catches broadly and
-        hands the exception here as a value: a failing tool becomes an error
-        message the model gets a turn to correct, instead of killing the run
-        and taking the whole message history with it. ConfigurationError is
-        the exception - that's a wiring mistake no amount of retrying fixes.
-        """
-        pending: list[PendingHumanInput] = []
-        for call, result in zip(calls, results, strict=True):
-            if isinstance(result, HumanInputRequired):
-                pending.append(PendingHumanInput(call.id, call.name, result.question))
-                continue
-            content = (
-                f"Error: {result!r}" if isinstance(result, Exception) else str(result)
-            )
-            messages.append(
-                Message.tool(content, name=call.name, call_id=call.id).to_dict()
-            )
-        return pending
-
     def _turns(
         self, state: AgentState, messages: list[dict[str, Any]]
     ) -> Generator[_Ask | _Dispatch, Any, AgentState]:
@@ -298,18 +225,18 @@ class Agent:
         allowed calls run now, with the arguments the model originally sent, and
         only then does the loop go back to the model with their results.
         """
-        approved = self._resume(state, messages)
+        approved = turn.settle(state, messages, self._name)
         if approved:
             results = yield _Dispatch(approved)
-            self._record_tool_results(messages, approved, results)
+            turn.record_results(messages, approved, results)
 
         for _ in range(self._budget.steps):
             response = yield _Ask(messages)
             self._account_for_usage(response, state, messages)
 
-            final = self._find_final(response)
+            final = find_final(response) if self._final_schema else None
             if final is not None:
-                self._record_tool_call_request(messages, response)
+                turn.record_request(messages, response)
                 try:
                     answer = coerce(self._output, final.arguments)
                 except OutputValidationError as exc:
@@ -338,9 +265,9 @@ class Agent:
                     f"{self._name} received tool calls but has no tools registered"
                 )
 
-            self._record_tool_call_request(messages, response)
+            turn.record_request(messages, response)
             wanted = [call for call in response.tool_calls if call.name != FINAL_TOOL]
-            gated = self._gated(wanted)
+            gated = turn.gated(self._tools, wanted)
             if gated:
                 # Nothing in this turn runs until the human rules on the gated
                 # call: letting the rest run first would half-apply a turn the
@@ -349,71 +276,11 @@ class Agent:
 
             results = yield _Dispatch(wanted)
             dispatched = wanted
-            pending = self._record_tool_results(messages, dispatched, results)
+            pending = turn.record_results(messages, dispatched, results)
             if pending:
                 return self._result(state, messages, "", "paused", paused=pending)
 
         return self._result(state, messages, "", "step_budget")
-
-    def _gated(self, calls: list[Any]) -> list[PendingHumanInput]:
-        """Calls a human must allow first, carrying their arguments for later.
-
-        Checked before dispatch rather than inside the tool, so a tool marked
-        requires_approval cannot run by accident - and the model cannot route
-        around the gate by declining to ask.
-        """
-        gated: list[PendingHumanInput] = []
-        for call in calls:
-            if (
-                call.name in self._tools
-                and self._tools.get(call.name).requires_approval
-            ):
-                arguments = dict(call.arguments)
-                gated.append(
-                    PendingHumanInput(
-                        call_id=call.id,
-                        name=call.name,
-                        question=f"Run {call.name} with {arguments}?",
-                        arguments=arguments,
-                    )
-                )
-        return gated
-
-    def _resume(self, state: AgentState, messages: list[dict[str, Any]]) -> list[Any]:
-        """Approval decisions the caller made, as calls still to run.
-
-        Rejections are recorded here as that call's result, so the model learns
-        it was refused and can say so instead of retrying forever.
-        """
-        outstanding = [p for p in state.paused if p.needs_approval]
-        if not outstanding:
-            return []
-        if any(p.approved is None for p in outstanding):
-            raise ConfigurationError(
-                f"{self._name} is paused on {outstanding[0].name}; call "
-                f"state.approve() or state.reject() before running it again"
-            )
-        for pending in outstanding:
-            if not pending.approved:
-                messages.append(
-                    Message.tool(
-                        "Denied by the user.",
-                        name=pending.name,
-                        call_id=pending.call_id,
-                    ).to_dict()
-                )
-        return [
-            _ApprovedCall(pending.call_id, pending.name, pending.arguments or {})
-            for pending in outstanding
-            if pending.approved
-        ]
-
-    def _find_final(self, response: Any) -> Any | None:
-        if self._final_schema is None:
-            return None
-        return next(
-            (call for call in response.tool_calls if call.name == FINAL_TOOL), None
-        )
 
     def _passthrough(self, state: AgentState) -> AgentState:
         """Without a model an Agent is inert - a placeholder node in a Graph.
@@ -431,62 +298,28 @@ class Agent:
         return schemas or None
 
     async def arun(self, state: Any = None, *, deps: Any = None) -> AgentState:
-        state = AgentState.of(state)
-        if self._model is None:
-            return self._passthrough(state)
-
-        ctx = Ctx(state=state, deps=deps)
-        turns = self._turns(state, self._prepare_messages(state))
-        schemas = self._schemas()
-        outcome: Any = None
-        try:
-            while True:
-                request = turns.send(outcome)
-                if isinstance(request, _Ask):
-                    outcome = await self._model.agenerate(
-                        request.messages, tools=schemas
-                    )
-                else:
-                    outcome = await asyncio.gather(
-                        *(
-                            self._call_tool(call.name, call.arguments, ctx)
-                            for call in request.calls
-                        )
-                    )
-        except StopIteration as done:
-            return done.value
+        """Run to completion. Tool calls in the same turn dispatch concurrently."""
+        async for event in self.astream_events(state, deps=deps):
+            if isinstance(event, Finished):
+                return event.state
+        raise AssertionError("a run always ends with Finished")  # pragma: no cover
 
     def run(self, state: Any = None, *, deps: Any = None) -> AgentState:
-        state = AgentState.of(state)
-        if self._model is None:
-            return self._passthrough(state)
-
-        ctx = Ctx(state=state, deps=deps)
-        turns = self._turns(state, self._prepare_messages(state))
-        schemas = self._schemas()
-        outcome: Any = None
-        try:
-            while True:
-                request = turns.send(outcome)
-                if isinstance(request, _Ask):
-                    outcome = self._model.generate(request.messages, tools=schemas)
-                else:
-                    outcome = [
-                        self._call_tool_sync(call.name, call.arguments, ctx)
-                        for call in request.calls
-                    ]
-        except StopIteration as done:
-            return done.value
+        """Synchronous counterpart to arun(). Raises if a tool is `async def`."""
+        for event in self.stream_events(state, deps=deps):
+            if isinstance(event, Finished):
+                return event.state
+        raise AssertionError("a run always ends with Finished")  # pragma: no cover
 
     async def astream_events(
         self, state: Any = None, *, deps: Any = None
     ) -> AsyncIterator[AgentEvent]:
-        """Run while streaming, emitting prose as it arrives then the state.
+        """Drive one run, emitting prose as it arrives then the final state.
 
-        Every turn is streamed, not just the answering one: the agent cannot know
-        in advance whether a turn will answer or ask for tools, so the provider
-        hands back the assembled response either way and a tool turn simply
-        yields no text.
+        The only async driver: arun() consumes this and keeps the last event, so
+        the loop's mechanics - budget, approvals, tool dispatch - exist once
+        rather than once per public method. Providers that cannot really stream
+        still work here; their turn simply arrives as a single delta.
         """
         state = AgentState.of(state)
         if self._model is None:
@@ -494,7 +327,7 @@ class Agent:
             return
 
         ctx = Ctx(state=state, deps=deps)
-        turns = self._turns(state, self._prepare_messages(state))
+        turns = self._turns(state, turn.prepare(state, self._system))
         schemas = self._schemas()
         outcome: Any = None
         try:
@@ -506,7 +339,7 @@ class Agent:
                     ):
                         if isinstance(event, TextDelta):
                             yield event
-                        elif isinstance(event, Completed):
+                        else:
                             outcome = event.response
                 else:
                     outcome = await asyncio.gather(
@@ -518,14 +351,6 @@ class Agent:
         except StopIteration as done:
             yield Finished(done.value)
 
-    async def astream(
-        self, state: Any = None, *, deps: Any = None
-    ) -> AsyncIterator[str]:
-        """Just the text, for the common "print as it types" case."""
-        async for event in self.astream_events(state, deps=deps):
-            if isinstance(event, TextDelta):
-                yield event.text
-
     def stream_events(
         self, state: Any = None, *, deps: Any = None
     ) -> Iterator[AgentEvent]:
@@ -536,7 +361,7 @@ class Agent:
             return
 
         ctx = Ctx(state=state, deps=deps)
-        turns = self._turns(state, self._prepare_messages(state))
+        turns = self._turns(state, turn.prepare(state, self._system))
         schemas = self._schemas()
         outcome: Any = None
         try:
@@ -548,7 +373,7 @@ class Agent:
                     ):
                         if isinstance(event, TextDelta):
                             yield event
-                        elif isinstance(event, Completed):
+                        else:
                             outcome = event.response
                 else:
                     outcome = [
@@ -557,6 +382,14 @@ class Agent:
                     ]
         except StopIteration as done:
             yield Finished(done.value)
+
+    async def astream(
+        self, state: Any = None, *, deps: Any = None
+    ) -> AsyncIterator[str]:
+        """Just the text, for the common "print as it types" case."""
+        async for event in self.astream_events(state, deps=deps):
+            if isinstance(event, TextDelta):
+                yield event.text
 
     def stream(self, state: Any = None, *, deps: Any = None) -> Iterator[str]:
         """Synchronous counterpart to astream()."""
@@ -569,7 +402,7 @@ class Agent:
             return await self._tools.call(name, ctx=ctx, **arguments)
         except ConfigurationError:
             raise
-        except Exception as exc:  # noqa: BLE001 - see _record_tool_results
+        except Exception as exc:  # noqa: BLE001 - see transcript.record_results
             return exc
 
     def _call_tool_sync(self, name: str, arguments: dict[str, Any], ctx: Ctx) -> Any:
@@ -577,5 +410,5 @@ class Agent:
             return self._tools.call_sync(name, ctx=ctx, **arguments)
         except ConfigurationError:
             raise
-        except Exception as exc:  # noqa: BLE001 - see _record_tool_results
+        except Exception as exc:  # noqa: BLE001 - see transcript.record_results
             return exc
