@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
+from ..errors import ProviderError
 from .base import (
     CompletionResponse,
     ReasoningLevel,
@@ -14,7 +15,7 @@ from .base import (
 )
 from .client import HTTPClient
 from .rest import RestCompletions, RestLLM
-from .types import GeminiResponse, GeminiStream
+from .wire import Usage, clip, usage_from
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _ROLE_MAP = {"assistant": "model", "system": "user", "user": "user"}
@@ -152,3 +153,80 @@ def _from_gemini_response(response: GeminiResponse) -> CompletionResponse:
     return CompletionResponse(
         content=text, tool_calls=tool_calls, usage=token_usage(response.usage)
     )
+
+
+class GeminiStream:
+    """Folds Gemini's stream into text plus tool calls.
+
+    Simpler than the others: every chunk is a complete GenerateContentResponse,
+    so a functionCall arrives whole rather than in fragments - nothing to
+    reassemble, only to collect.
+    """
+
+    __slots__ = ("_calls", "_text", "_usage")
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._calls: list[ToolCall] = []
+        self._usage: Usage | None = None
+
+    def feed(self, data: dict[str, Any]) -> str | None:
+        chunk = GeminiResponse.from_json(data)
+        if chunk.usage is not None:
+            self._usage = chunk.usage
+        self._calls.extend(
+            ToolCall(name=part.name, arguments=dict(part.args))
+            for part in chunk.parts
+            if part.name
+        )
+        text = "".join(part.text for part in chunk.parts if part.text)
+        if text:
+            self._text.append(text)
+        return text or None
+
+    def response(self) -> CompletionResponse:
+        return CompletionResponse(
+            content="".join(self._text),
+            tool_calls=list(self._calls),
+            usage=token_usage(self._usage),
+        )
+
+
+@dataclass(slots=True)
+class GeminiPart:
+    text: str | None = None
+    name: str | None = None
+    args: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> GeminiPart:
+        call = data.get("functionCall") or {}
+        return cls(
+            text=data.get("text"),
+            name=call.get("name"),
+            args=call.get("args") or {},
+        )
+
+
+@dataclass(slots=True)
+class GeminiResponse:
+    parts: list[GeminiPart] = field(default_factory=list)
+    usage: Usage | None = None
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> GeminiResponse:
+        candidates = data.get("candidates")
+        if candidates is None:
+            raise ProviderError(f"Gemini response has no candidates: {clip(data)}")
+        content = candidates[0].get("content") if candidates else None
+        return cls(
+            parts=[
+                GeminiPart.from_json(part) for part in (content or {}).get("parts", [])
+            ],
+            usage=usage_from(
+                data.get("usageMetadata"),
+                prompt="promptTokenCount",
+                completion="candidatesTokenCount",
+                total="totalTokenCount",
+            ),
+        )
