@@ -33,6 +33,11 @@ def final_tool_schema(output: type) -> dict[str, Any]:
     }
 
 
+def find_final(response: Any) -> Any | None:
+    """The FINAL_TOOL call in a response, if the model made one."""
+    return next((call for call in response.tool_calls if call.name == FINAL_TOOL), None)
+
+
 def dataclass_schema(output: type) -> dict[str, Any]:
     """JSON Schema for a dataclass, reusing the same converter tools use."""
     if not dataclasses.is_dataclass(output):
