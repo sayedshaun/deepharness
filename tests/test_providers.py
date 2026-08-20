@@ -1,9 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from subagents.providers.anthropic import Anthropic
-from subagents.providers.base import LLM, CompletionResponse
+from subagents.providers.base import LLM, CompletionResponse, ToolCall
 from subagents.providers.gemini import Gemini
 from subagents.providers.openai import OpenAI
 
@@ -633,7 +631,9 @@ async def test_gemini_reconstructs_assistant_function_call_turn_and_result():
     }
 
 
-async def test_a_provider_that_cannot_stream_says_so():
+async def test_a_text_only_provider_still_streams_in_one_piece():
+    """No stub needed: the default turns one completion into one delta."""
+
     class TextOnly(LLM):
         async def agenerate(self, messages, *, tools=None):
             return CompletionResponse(content="hi")
@@ -643,13 +643,21 @@ async def test_a_provider_that_cannot_stream_says_so():
 
     provider = TextOnly()
 
-    assert (await provider.agenerate([])).content == "hi"
-    with pytest.raises(
-        NotImplementedError, match="TextOnly does not support streaming"
-    ):
-        async for _ in provider.astream([]):
-            pass
-    with pytest.raises(
-        NotImplementedError, match="TextOnly does not support streaming"
-    ):
-        next(iter(provider.stream([])))
+    assert [chunk async for chunk in provider.astream([])] == ["hi"]
+    assert list(provider.stream([])) == ["hi"]
+
+
+async def test_a_text_only_provider_still_reports_tool_calls_when_streaming():
+    class ToolOnly(LLM):
+        async def agenerate(self, messages, *, tools=None):
+            return CompletionResponse(
+                content="", tool_calls=[ToolCall(id="1", name="add", arguments={})]
+            )
+
+        def generate(self, messages, *, tools=None):
+            raise NotImplementedError
+
+    events = [event async for event in ToolOnly().astream_events([])]
+
+    assert len(events) == 1
+    assert events[0].response.tool_calls[0].name == "add"
