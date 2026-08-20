@@ -158,12 +158,15 @@ class LLM(ABC):
     ) -> AsyncIterator[StreamEvent]:
         """Stream a turn as TextDeltas, ending with a Completed.
 
-        Optional, unlike agenerate/generate: not every backend can stream, and a
-        provider that cannot should not be forced to write a stub. Callers get a
-        clear error rather than an empty iterator.
+        The default is the whole turn in one delta, because a backend that cannot
+        stream still has to be usable here: callers - Agent included - then need
+        one code path instead of two, and get the text either way rather than an
+        error or an empty iterator. Providers that really stream override this.
         """
-        raise NotImplementedError(f"{type(self).__name__} does not support streaming")
-        yield  # pragma: no cover - marks this as an async generator for type checkers
+        response = await self.agenerate(messages, tools=tools)
+        if response.content:
+            yield TextDelta(response.content)
+        yield Completed(response)
 
     def stream_events(
         self,
@@ -172,8 +175,10 @@ class LLM(ABC):
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[StreamEvent]:
         """Synchronous counterpart to astream_events()."""
-        raise NotImplementedError(f"{type(self).__name__} does not support streaming")
-        yield  # pragma: no cover - marks this as a generator for type checkers
+        response = self.generate(messages, tools=tools)
+        if response.content:
+            yield TextDelta(response.content)
+        yield Completed(response)
 
     async def astream(
         self,
