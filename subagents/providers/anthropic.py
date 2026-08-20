@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -14,7 +14,7 @@ from subagents.providers.base import (
 )
 from subagents.providers.client import HTTPClient
 from subagents.providers.rest import RestCompletions, RestLLM
-from subagents.providers.types import AnthropicMessage, AnthropicStream
+from subagents.providers.wire import Usage, load_arguments, require, usage_from
 
 _BASE_URL = "https://api.anthropic.com/v1"
 _ANTHROPIC_VERSION = "2023-06-01"
@@ -182,3 +182,112 @@ def _from_anthropic_response(message: AnthropicMessage) -> CompletionResponse:
     return CompletionResponse(
         content=text, tool_calls=tool_calls, usage=token_usage(message.usage)
     )
+
+
+@dataclass(slots=True)
+class AnthropicContentBlock:
+    type: str
+    text: str | None = None
+    id: str | None = None
+    name: str | None = None
+    input: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> AnthropicContentBlock:
+        return cls(
+            type=require(data, "type", "Anthropic"),
+            text=data.get("text"),
+            id=data.get("id"),
+            name=data.get("name"),
+            input=data.get("input") or {},
+        )
+
+
+@dataclass(slots=True)
+class AnthropicMessage:
+    content: list[AnthropicContentBlock] = field(default_factory=list)
+    usage: Usage | None = None
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> AnthropicMessage:
+        blocks = require(data, "content", "Anthropic")
+        return cls(
+            content=[AnthropicContentBlock.from_json(block) for block in blocks],
+            usage=usage_from(
+                data.get("usage"), prompt="input_tokens", completion="output_tokens"
+            ),
+        )
+
+
+class AnthropicStream:
+    """Folds Anthropic's block events into text plus tool calls.
+
+    Anthropic streams content as numbered blocks: content_block_start announces a
+    block's type (text or tool_use), the deltas that follow belong to whichever
+    block is open, and tool arguments arrive as partial_json fragments.
+    """
+
+    __slots__ = ("_blocks", "_text", "_usage")
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._blocks: dict[int, dict[str, Any]] = {}
+        self._usage: Usage | None = None
+
+    def feed(self, data: dict[str, Any]) -> str | None:
+        event = data.get("type")
+        index = data.get("index", 0)
+
+        if event == "content_block_start":
+            block = data.get("content_block") or {}
+            if block.get("type") == "tool_use":
+                self._blocks[index] = {
+                    "id": block.get("id"),
+                    "name": block.get("name", ""),
+                    "arguments": "",
+                }
+            return None
+
+        if event == "content_block_delta":
+            delta = data.get("delta") or {}
+            if delta.get("type") == "text_delta":
+                text = delta.get("text")
+                if text:
+                    self._text.append(text)
+                return text
+            if delta.get("type") == "input_json_delta" and index in self._blocks:
+                self._blocks[index]["arguments"] += delta.get("partial_json") or ""
+            return None
+
+        if event == "message_delta" and (usage := data.get("usage")):
+            self._usage = Usage(
+                prompt_tokens=usage.get("input_tokens", 0),
+                completion_tokens=usage.get("output_tokens", 0),
+                total_tokens=usage.get("input_tokens", 0)
+                + usage.get("output_tokens", 0),
+            )
+        elif event == "message_start":
+            message = data.get("message") or {}
+            if usage := message.get("usage"):
+                self._usage = Usage(
+                    prompt_tokens=usage.get("input_tokens", 0),
+                    completion_tokens=usage.get("output_tokens", 0),
+                    total_tokens=usage.get("input_tokens", 0)
+                    + usage.get("output_tokens", 0),
+                )
+        return None
+
+    def response(self) -> CompletionResponse:
+        return CompletionResponse(
+            content="".join(self._text),
+            tool_calls=[
+                ToolCall(
+                    id=block["id"],
+                    name=block["name"],
+                    arguments=load_arguments(block["arguments"]),
+                )
+                for block in self._blocks.values()
+                if block["name"]
+            ],
+            usage=token_usage(self._usage),
+        )
