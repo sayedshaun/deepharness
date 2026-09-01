@@ -10,3 +10,4 @@ experiment.py
 test.py
 temp.py
 site/
+dist/
