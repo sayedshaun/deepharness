@@ -1,5 +1,5 @@
-from subagents.providers.anthropic import Anthropic
-from subagents.providers.base import (
+from deepharness.providers.anthropic import Anthropic
+from deepharness.providers.base import (
     LLM,
     Completed,
     CompletionResponse,
@@ -9,7 +9,7 @@ from subagents.providers.base import (
     TokenUsage,
     ToolCall,
 )
-from subagents.providers.gateways import (
+from deepharness.providers.gateways import (
     VLLM,
     XAI,
     Cerebras,
@@ -22,8 +22,8 @@ from subagents.providers.gateways import (
     OpenRouter,
     Together,
 )
-from subagents.providers.gemini import Gemini
-from subagents.providers.openai import OpenAI
+from deepharness.providers.gemini import Gemini
+from deepharness.providers.openai import OpenAI
 
 __all__ = [
     "LLM",

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/logo.svg" width="160" alt="Subagents logo">
+<img src="docs/assets/logo.svg" width="160" alt="DeepHarness logo">
 
-# Subagents
+# DeepHarness
 
 **Compose LLM agents into typed, concurrent workflows.**
 
@@ -10,13 +10,13 @@ A lightweight framework for wiring plain Python functions — and the agents ins
 graph that runs branches in parallel, routes on conditions, and threads one typed state
 object through the whole thing.
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/subagents/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
 
 </div>
 
 ---
 
-## Why Subagents
+## Why DeepHarness
 
 - **One dependency. That's it.** `httpx`. Providers talk to vendor REST APIs
   directly — no vendor SDKs, no transitive dependency sprawl.
@@ -33,13 +33,13 @@ object through the whole thing.
 ## Install
 
 ```bash
-pip install subagents
+pip install deepharness
 ```
 
 Or install from source:
 
 ```bash
-pip install git+https://github.com/sayedshaun/subagents.git
+pip install git+https://github.com/sayedshaun/deepharness.git
 ```
 
 ## Quickstart
@@ -48,7 +48,7 @@ An `Agent` runs a think/act loop against a model: ask for a response, dispatch a
 it requests, repeat until the model answers with no tool calls.
 
 ```python
-from subagents import Agent, Message, OpenAI, tool
+from deepharness import Agent, Message, OpenAI, tool
 
 
 @tool
@@ -88,7 +88,7 @@ functions (or agents) into a `Graph` instead:
 import asyncio
 from dataclasses import dataclass
 
-from subagents import Graph
+from deepharness import Graph
 
 
 @dataclass
@@ -137,7 +137,7 @@ for both before running.
 which sub-agent to call. Reach for `Graph` when the workflow's shape — which steps, which run
 in parallel, in what order — is known ahead of time.
 
-See the **[full documentation](https://sayedshaun.github.io/subagents/)** for graphs, agents,
+See the **[full documentation](https://sayedshaun.github.io/deepharness/)** for graphs, agents,
 tools, providers, and the API reference.
 
 ## Development

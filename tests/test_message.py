@@ -1,4 +1,4 @@
-from subagents.agent import Message, as_dict
+from deepharness.agent import Message, as_dict
 
 
 def test_system_message():

@@ -1,8 +1,8 @@
 import pytest
 
-from subagents.agent import Agent, Budget, tool
-from subagents.errors import ConfigurationError
-from subagents.providers.base import CompletionResponse, ToolCall
+from deepharness.agent import Agent, Budget, tool
+from deepharness.errors import ConfigurationError
+from deepharness.providers.base import CompletionResponse, ToolCall
 
 from .test_agent import ScriptedProvider
 

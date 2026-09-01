@@ -5,16 +5,16 @@ from typing import Any
 
 import httpx
 
-from subagents.providers.base import (
+from deepharness.providers.base import (
     CompletionResponse,
     ReasoningLevel,
     ToolCall,
     token_usage,
     without_none,
 )
-from subagents.providers.client import HTTPClient
-from subagents.providers.rest import RestCompletions, RestLLM
-from subagents.providers.wire import Usage, load_arguments, require, usage_from
+from deepharness.providers.client import HTTPClient
+from deepharness.providers.rest import RestCompletions, RestLLM
+from deepharness.providers.wire import Usage, load_arguments, require, usage_from
 
 _BASE_URL = "https://api.anthropic.com/v1"
 _ANTHROPIC_VERSION = "2023-06-01"

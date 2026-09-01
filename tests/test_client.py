@@ -3,14 +3,14 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from subagents.errors import ProviderError
-from subagents.providers.client import HTTPClient
+from deepharness.errors import ProviderError
+from deepharness.providers.client import HTTPClient
 
 
 @pytest.fixture(autouse=True)
 def _no_real_sleep(monkeypatch):
-    monkeypatch.setattr("subagents.providers.client.asyncio.sleep", AsyncMock())
-    monkeypatch.setattr("subagents.providers.client.time.sleep", MagicMock())
+    monkeypatch.setattr("deepharness.providers.client.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("deepharness.providers.client.time.sleep", MagicMock())
 
 
 def make_response(status_code, headers=None):
@@ -70,7 +70,7 @@ async def test_post_honors_retry_after_header(monkeypatch):
     client = AsyncMock()
     client.post = AsyncMock(side_effect=[rate_limited, ok_response])
     sleep_mock = AsyncMock()
-    monkeypatch.setattr("subagents.providers.client.asyncio.sleep", sleep_mock)
+    monkeypatch.setattr("deepharness.providers.client.asyncio.sleep", sleep_mock)
 
     http = HTTPClient("https://example.com", client=client)
     await http.post("/thing")

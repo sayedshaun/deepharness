@@ -3,14 +3,14 @@
 ## Install
 
 ```bash
-pip install subagents
+pip install deepharness
 ```
 
 Or from a clone, for local development:
 
 ```bash
-git clone https://github.com/sayedshaun/subagents.git
-cd subagents
+git clone https://github.com/sayedshaun/deepharness.git
+cd deepharness
 pip install -e .
 ```
 
@@ -24,7 +24,7 @@ Two lookups run at the same time, then a third node joins their results:
 import asyncio
 from dataclasses import dataclass
 
-from subagents import Graph
+from deepharness import Graph
 
 
 @dataclass
@@ -74,8 +74,8 @@ incoming edges, so it waits for **both** before running — a join, expressed by
 Drop an [`Agent`](guide/agents.md) inside any node and the graph handles sequencing around it:
 
 ```python
-from subagents import Agent, Message
-from subagents import OpenAI
+from deepharness import Agent, Message
+from deepharness import OpenAI
 
 writer = Agent(OpenAI("gpt-4o-mini"), name="writer", system="You are concise.")
 

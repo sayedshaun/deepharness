@@ -1,17 +1,17 @@
 """Streaming: vendor accumulators, then a whole agent run streamed."""
 
-from subagents.agent import Agent, tool
-from subagents.agent.loop import Finished
-from subagents.providers.anthropic import AnthropicStream
-from subagents.providers.base import (
+from deepharness.agent import Agent, tool
+from deepharness.agent.loop import Finished
+from deepharness.providers.anthropic import AnthropicStream
+from deepharness.providers.base import (
     LLM,
     Completed,
     CompletionResponse,
     TextDelta,
     TokenUsage,
 )
-from subagents.providers.gemini import GeminiStream
-from subagents.providers.openai import OpenAIStream
+from deepharness.providers.gemini import GeminiStream
+from deepharness.providers.openai import OpenAIStream
 
 
 def feed_all(reader, payloads):
@@ -311,7 +311,7 @@ async def test_astream_yields_text_as_it_arrives():
 
 
 async def test_a_streamed_run_still_dispatches_tools():
-    from subagents.providers.base import ToolCall
+    from deepharness.providers.base import ToolCall
 
     @tool
     def add(a: int, b: int) -> int:
@@ -367,8 +367,8 @@ async def test_streaming_a_model_less_agent_just_finishes():
 async def test_structured_output_survives_streaming():
     from dataclasses import dataclass
 
-    from subagents.agent.output import FINAL_TOOL
-    from subagents.providers.base import ToolCall
+    from deepharness.agent.output import FINAL_TOOL
+    from deepharness.providers.base import ToolCall
 
     @dataclass
     class Weather:

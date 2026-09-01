@@ -1,10 +1,10 @@
 """OpenAI-compatible endpoints.
 
-Every class here is the same wire format as :class:`~subagents.providers.OpenAI`
+Every class here is the same wire format as :class:`~deepharness.providers.OpenAI`
 with a different base URL and credential. That is the entire difference, which is
 why each one fits in four lines::
 
-    from subagents import Groq
+    from deepharness import Groq
 
     model = Groq("llama-3.3-70b-versatile", temperature=0)
 

@@ -10,7 +10,7 @@ The think/act loop at its smallest: one model, one tool, one answer.
 ```python
 import asyncio
 
-from subagents import Agent, OpenAI, tool
+from deepharness import Agent, OpenAI, tool
 
 
 @tool
@@ -36,7 +36,7 @@ The clearest way to see what nodes, state, and edges are — no LLM involved.
 import asyncio
 from dataclasses import dataclass
 
-from subagents import Graph
+from deepharness import Graph
 
 
 @dataclass
@@ -105,7 +105,7 @@ overwriting (see [state merging](guide/graph.md#parallel-execution-and-state-mer
 ```python
 from dataclasses import dataclass, field
 
-from subagents import concat
+from deepharness import concat
 
 
 @dataclass
@@ -135,7 +135,7 @@ See [loops](guide/graph.md#loops) for the re-entry rules and `max_steps`.
 Mark the tool and the agent pauses *before* running it, every time:
 
 ```python
-from subagents import tool
+from deepharness import tool
 
 
 @tool(requires_approval=True)
@@ -173,7 +173,7 @@ A parameter annotated `Ctx` is filled by the runtime and hidden from the model, 
 per-request dependencies without a global:
 
 ```python
-from subagents import Ctx, tool
+from deepharness import Ctx, tool
 
 
 @tool

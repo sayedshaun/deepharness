@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
-from subagents.agent import Agent, Message, tool
-from subagents.providers.base import CompletionResponse, ToolCall
-from subagents.tools import Ctx, Toolbox
+from deepharness.agent import Agent, Message, tool
+from deepharness.providers.base import CompletionResponse, ToolCall
+from deepharness.tools import Ctx, Toolbox
 
 from .test_agent import ScriptedProvider
 

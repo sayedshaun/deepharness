@@ -1,6 +1,6 @@
 # API reference
 
-The public surface, importable from `subagents` unless noted otherwise. This page covers
+The public surface, importable from `deepharness` unless noted otherwise. This page covers
 signatures and behavior only — see the [guide](../guide/agents.md) for narrative
 explanations and examples.
 

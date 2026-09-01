@@ -1,8 +1,8 @@
 import pytest
 
-from subagents.agent import AgentState, Message
-from subagents.errors import ConfigurationError
-from subagents.providers.base import TokenUsage
+from deepharness.agent import AgentState, Message
+from deepharness.errors import ConfigurationError
+from deepharness.providers.base import TokenUsage
 
 
 def test_a_fresh_state_is_empty_and_unanswered():

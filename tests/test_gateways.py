@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock
 
-from subagents.providers.gateways import Groq, Ollama
-from subagents.providers.openai import _build_payload
+from deepharness.providers.gateways import Groq, Ollama
+from deepharness.providers.openai import _build_payload
 
 
 def test_groq_uses_its_own_base_url_and_env_key(monkeypatch):

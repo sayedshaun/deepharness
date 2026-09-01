@@ -1,12 +1,12 @@
 ---
-title: Subagents
+title: DeepHarness
 ---
 
 <div class="sa-hero" markdown>
 
-![Subagents logo](assets/logo.svg)
+![DeepHarness logo](assets/logo.svg)
 
-# Subagents
+# DeepHarness
 
 <p class="sa-tagline">Compose LLM agents into typed, concurrent workflows.</p>
 
@@ -17,7 +17,7 @@ object through the whole thing.
 </p>
 
 [Get started :octicons-arrow-right-24:](getting-started.md){ .md-button .md-button--primary }
-[View on GitHub](https://github.com/sayedshaun/subagents){ .md-button }
+[View on GitHub](https://github.com/sayedshaun/deepharness){ .md-button }
 
 <p class="sa-badges">
 <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
@@ -27,7 +27,7 @@ object through the whole thing.
 
 </div>
 
-## Why Subagents
+## Why DeepHarness
 
 - **One dependency. That's it.** `httpx`. Providers talk to vendor REST APIs
   directly — no OpenAI SDK, no `google-genai`, no transitive dependency sprawl.
@@ -43,7 +43,7 @@ object through the whole thing.
 ## Install
 
 ```bash
-pip install subagents
+pip install deepharness
 ```
 
 Requires Python 3.11+.

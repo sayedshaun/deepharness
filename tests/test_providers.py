@@ -1,9 +1,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
-from subagents.providers.anthropic import Anthropic
-from subagents.providers.base import LLM, CompletionResponse, ToolCall
-from subagents.providers.gemini import Gemini
-from subagents.providers.openai import OpenAI
+from deepharness.providers.anthropic import Anthropic
+from deepharness.providers.base import LLM, CompletionResponse, ToolCall
+from deepharness.providers.gemini import Gemini
+from deepharness.providers.openai import OpenAI
 
 
 def make_client(json_body):

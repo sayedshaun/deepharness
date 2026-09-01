@@ -2,9 +2,9 @@
 
 import pytest
 
-from subagents.agent import Agent, tool
-from subagents.errors import ConfigurationError
-from subagents.providers.base import CompletionResponse, ToolCall
+from deepharness.agent import Agent, tool
+from deepharness.errors import ConfigurationError
+from deepharness.providers.base import CompletionResponse, ToolCall
 
 from .test_agent import ScriptedProvider
 
@@ -112,7 +112,7 @@ async def test_resuming_without_deciding_is_an_error():
 
 
 def test_approving_a_call_that_is_not_paused_is_an_error():
-    from subagents.agent import AgentState
+    from deepharness.agent import AgentState
 
     with pytest.raises(ConfigurationError, match="no paused call"):
         AgentState().approve()

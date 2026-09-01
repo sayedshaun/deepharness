@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from subagents.graph import Graph
+from deepharness.graph import Graph
 
 
 @dataclass

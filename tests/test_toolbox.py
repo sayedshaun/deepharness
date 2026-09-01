@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 import pytest
 
-from subagents.agent import Toolbox, tool
+from deepharness.agent import Toolbox, tool
 
 
 def test_bare_decorator_builds_spec_from_signature_and_docstring():
