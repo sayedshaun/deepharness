@@ -4,8 +4,8 @@ An `Agent` runs a think/act loop against a model: ask for a response, dispatch a
 it requests, repeat until the model answers with no tool calls or the step budget is spent.
 
 ```python
-from subagents import Agent, Budget, Message, tool
-from subagents import OpenAI
+from deepharness import Agent, Budget, Message, tool
+from deepharness import OpenAI
 
 
 @tool
@@ -83,7 +83,7 @@ one final `Finished` carrying the `AgentState`, because an async generator canno
 value:
 
 ```python
-from subagents import Finished, TextDelta
+from deepharness import Finished, TextDelta
 
 async for event in agent.astream_events("What is 17 * 23?"):
     match event:
@@ -214,7 +214,7 @@ The difference matters: an approval defers execution, a question substitutes a r
 through JSON — resume a conversation across process runs:
 
 ```python
-from subagents import Agent, Message, load_session, save_session
+from deepharness import Agent, Message, load_session, save_session
 
 messages = load_session("session.json")  # [] if the file doesn't exist yet
 messages.append(Message.human("Continue where we left off."))
@@ -229,7 +229,7 @@ save_session("session.json", state.messages)
 `{"role": ..., "content": ...}` everywhere a message is expected:
 
 ```python
-from subagents import Message
+from deepharness import Message
 
 Message.system("You are a concise assistant.")  # {"role": "system", "content": "..."}
 Message.human("What's the weather in Oslo?")  # {"role": "user", "content": "..."}

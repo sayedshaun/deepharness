@@ -6,19 +6,19 @@ if TYPE_CHECKING:
     from .providers.base import TokenUsage
 
 
-class SubagentsError(Exception):
-    """Base class for all errors raised by subagents."""
+class DeepHarnessError(Exception):
+    """Base class for all errors raised by deepharness."""
 
 
-class ConfigurationError(SubagentsError):
+class ConfigurationError(DeepHarnessError):
     """Raised when an Agent or Toolbox is used in an invalid configuration."""
 
 
-class ToolNotFoundError(SubagentsError, KeyError):
+class ToolNotFoundError(DeepHarnessError, KeyError):
     """Raised when a Toolbox is asked for a tool that isn't registered."""
 
 
-class OutputValidationError(SubagentsError):
+class OutputValidationError(DeepHarnessError):
     """Raised when a model's structured answer does not fit the output= shape.
 
     Handed back to the model as the failing call's result rather than ending
@@ -26,11 +26,11 @@ class OutputValidationError(SubagentsError):
     """
 
 
-class ProviderError(SubagentsError):
+class ProviderError(DeepHarnessError):
     """Raised when an LLM provider request fails after retries."""
 
 
-class HumanInputRequired(SubagentsError):
+class HumanInputRequired(DeepHarnessError):
     """Raised by a tool to pause the agent and wait for a human answer."""
 
     def __init__(self, question: str):
@@ -38,7 +38,7 @@ class HumanInputRequired(SubagentsError):
         super().__init__(question)
 
 
-class ExecutionError(SubagentsError):
+class ExecutionError(DeepHarnessError):
     """Raised when a node function raises during graph execution."""
 
     def __init__(self, node_name: str, original: Exception):
@@ -47,7 +47,7 @@ class ExecutionError(SubagentsError):
         super().__init__(f"Node '{node_name}' failed: {original!r}")
 
 
-class ConcurrentUpdateError(SubagentsError):
+class ConcurrentUpdateError(DeepHarnessError):
     """Raised when parallel branches write the same state field with no reducer.
 
     Silently picking a winner would drop one branch's work, so the graph
@@ -65,7 +65,7 @@ class ConcurrentUpdateError(SubagentsError):
         )
 
 
-class StepLimitExceeded(SubagentsError):
+class StepLimitExceeded(DeepHarnessError):
     """Raised when a graph run exceeds max_steps, usually a loop that never exits.
 
     state carries the partial result so a run that hits the limit can still
@@ -78,7 +78,7 @@ class StepLimitExceeded(SubagentsError):
         super().__init__(f"Graph exceeded its limit of {limit} steps")
 
 
-class TokenBudgetExceeded(SubagentsError):
+class TokenBudgetExceeded(DeepHarnessError):
     """Raised when an Agent's cumulative token usage exceeds its Budget.tokens.
 
     state carries the agent's partial result, so the tokens already paid for

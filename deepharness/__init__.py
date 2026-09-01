@@ -1,4 +1,4 @@
-from subagents.agent import (
+from deepharness.agent import (
     FINAL_TOOL,
     Agent,
     AgentState,
@@ -15,14 +15,14 @@ from subagents.agent import (
     save_session,
     tool,
 )
-from subagents.errors import (
+from deepharness.errors import (
     ConfigurationError,
+    DeepHarnessError,
     HumanInputRequired,
     ProviderError,
-    SubagentsError,
     ToolNotFoundError,
 )
-from subagents.graph import (
+from deepharness.graph import (
     ConcurrentUpdateError,
     ExecutionError,
     Executor,
@@ -32,7 +32,7 @@ from subagents.graph import (
     concat,
     merge_dicts,
 )
-from subagents.providers import (
+from deepharness.providers import (
     VLLM,
     XAI,
     Anthropic,
@@ -65,6 +65,7 @@ __all__ = [
     "ConcurrentUpdateError",
     "ConfigurationError",
     "Ctx",
+    "DeepHarnessError",
     "DeepSeek",
     "ExecutionError",
     "Executor",
@@ -85,7 +86,6 @@ __all__ = [
     "ProviderError",
     "StepLimitExceeded",
     "StopReason",
-    "SubagentsError",
     "TextDelta",
     "Together",
     "TokenBudgetExceeded",

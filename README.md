@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/logo.svg" width="160" alt="Subagents logo">
+<img src="docs/assets/logo.svg" width="160" alt="DeepHarness logo">
 
-# Subagents
+# DeepHarness
 
 **Compose LLM agents into typed, concurrent workflows.**
 
@@ -16,7 +16,7 @@ object through the whole thing.
 
 ---
 
-## Why Subagents
+## Why DeepHarness
 
 - **One dependency. That's it.** `httpx`. Providers talk to vendor REST APIs
   directly — no vendor SDKs, no transitive dependency sprawl.
@@ -33,7 +33,7 @@ object through the whole thing.
 ## Install
 
 ```bash
-pip install subagents
+pip install deepharness
 ```
 
 Or install from source:
@@ -48,7 +48,7 @@ An `Agent` runs a think/act loop against a model: ask for a response, dispatch a
 it requests, repeat until the model answers with no tool calls.
 
 ```python
-from subagents import Agent, Message, OpenAI, tool
+from deepharness import Agent, Message, OpenAI, tool
 
 
 @tool
@@ -88,7 +88,7 @@ functions (or agents) into a `Graph` instead:
 import asyncio
 from dataclasses import dataclass
 
-from subagents import Graph
+from deepharness import Graph
 
 
 @dataclass

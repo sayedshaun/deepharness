@@ -1,6 +1,6 @@
 # Guide
 
-The guide covers each part of Subagents in depth. Read them in order, or jump straight to what
+The guide covers each part of DeepHarness in depth. Read them in order, or jump straight to what
 you need.
 
 <div class="grid cards" markdown>

@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Callable, Generator, Iterable, Iterat
 from dataclasses import dataclass
 from typing import Any
 
-from subagents.providers.base import (
+from deepharness.providers.base import (
     LLM,
     TextDelta,
     TokenUsage,
@@ -72,7 +72,7 @@ class Agent:
     Pausing has two flavours, and they resolve differently: a tool marked
     requires_approval has not run yet (approve it and it runs), while a tool
     raising HumanInputRequired is asking a question (your answer becomes its
-    result). See subagents/agent/turn.py.
+    result). See deepharness/agent/turn.py.
     """
 
     __slots__ = (

@@ -1,4 +1,4 @@
-site_name: Subagents
+site_name: DeepHarness
 site_description: Compose LLM agents into typed, concurrent workflows.
 site_url: https://sayedshaun.github.io/subagents/
 repo_name: subagents

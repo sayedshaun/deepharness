@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from subagents.graph import (
+from deepharness.graph import (
     ConcurrentUpdateError,
     ExecutionError,
     Graph,

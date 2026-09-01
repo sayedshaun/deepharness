@@ -10,7 +10,7 @@ Every provider implements the same interface, so swapping vendors is a one-line 
 | `for chunk in stream(messages, tools=None)`      | text deltas           |
 
 ```python
-from subagents import Anthropic, Gemini, OpenAI
+from deepharness import Anthropic, Gemini, OpenAI
 
 llm = OpenAI(model="gpt-4o-mini", api_key="sk-...")
 llm = Gemini(model="gemini-2.0-flash", api_key="...")  # same interface
@@ -45,7 +45,7 @@ just a different base URL and API key. Each one is a ready-to-use class that rea
 API key from the environment automatically:
 
 ```python
-from subagents import Groq
+from deepharness import Groq
 
 model = Groq(
     "llama-3.3-70b-versatile", temperature=0
@@ -55,7 +55,7 @@ model = Groq(
 For a gateway that isn't listed, construct `OpenAI` directly with an explicit `base_url`:
 
 ```python
-from subagents import OpenAI
+from deepharness import OpenAI
 
 model = OpenAI("llama-3.3-70b", base_url="https://llm.internal/v1", api_key=key)
 ```

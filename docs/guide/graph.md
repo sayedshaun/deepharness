@@ -10,7 +10,7 @@ One dataclass, threaded through every node. A node receives it, mutates it, retu
 
 ```python
 from dataclasses import dataclass
-from subagents import Graph
+from deepharness import Graph
 
 
 @dataclass
@@ -78,7 +78,7 @@ Declare a reducer in the field's `metadata`, so the merge policy lives with the 
 ```python
 from dataclasses import dataclass, field
 
-from subagents import concat
+from deepharness import concat
 
 
 @dataclass
@@ -123,7 +123,7 @@ scheduler still only ever sees a DAG. An *undeclared* cycle is a build error.
 inspectable:
 
 ```python
-from subagents import StepLimitExceeded
+from deepharness import StepLimitExceeded
 
 try:
     result = await executor.run(State(), max_steps=20)
@@ -166,7 +166,7 @@ A node that raises is wrapped in `ExecutionError`, carrying the node name and th
 exception:
 
 ```python
-from subagents import ExecutionError
+from deepharness import ExecutionError
 
 try:
     await executor.run(State())
@@ -181,7 +181,7 @@ the graph carries your dataclass, so a node is the adapter between them. One age
 the natural way to build a multi-agent system:
 
 ```python
-from subagents import Agent, Message
+from deepharness import Agent, Message
 
 researcher = Agent(llm, name="researcher", system="You research topics.")
 writer = Agent(llm, name="writer", system="You write short reports.")

@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from subagents.agent import (
+from deepharness.agent import (
     Agent,
     Budget,
     Message,
@@ -13,8 +13,8 @@ from subagents.agent import (
     Toolbox,
     tool,
 )
-from subagents.errors import ConfigurationError, HumanInputRequired
-from subagents.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
+from deepharness.errors import ConfigurationError, HumanInputRequired
+from deepharness.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 
 
 class ScriptedProvider(LLM):

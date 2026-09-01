@@ -7,17 +7,17 @@ from typing import Any
 
 import httpx
 
-from subagents.errors import ProviderError
-from subagents.providers.base import (
+from deepharness.errors import ProviderError
+from deepharness.providers.base import (
     CompletionResponse,
     ReasoningLevel,
     ToolCall,
     token_usage,
     without_none,
 )
-from subagents.providers.client import HTTPClient
-from subagents.providers.rest import RestCompletions, RestLLM
-from subagents.providers.wire import Usage, clip, load_arguments, require, usage_from
+from deepharness.providers.client import HTTPClient
+from deepharness.providers.rest import RestCompletions, RestLLM
+from deepharness.providers.wire import Usage, clip, load_arguments, require, usage_from
 
 _BASE_URL = "https://api.openai.com/v1"
 

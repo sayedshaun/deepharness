@@ -1,4 +1,4 @@
-from subagents.agent import Message, load_session, save_session
+from deepharness.agent import Message, load_session, save_session
 
 
 def test_save_and_load_round_trip(tmp_path):

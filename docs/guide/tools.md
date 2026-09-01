@@ -4,7 +4,7 @@ A tool is just a Python function. `@tool` derives a JSON schema from its signatu
 docstring, so a model can call it.
 
 ```python
-from subagents import tool
+from deepharness import tool
 
 
 @tool
@@ -34,7 +34,7 @@ model — it never appears in the schema and the model cannot pass it — so a t
 run without a module-level global:
 
 ```python
-from subagents import Agent, Ctx, tool
+from deepharness import Agent, Ctx, tool
 
 
 @tool

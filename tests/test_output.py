@@ -4,10 +4,10 @@ from typing import Literal
 
 import pytest
 
-from subagents.agent import Agent, Budget
-from subagents.agent.output import FINAL_TOOL, coerce, final_tool_schema
-from subagents.errors import ConfigurationError, OutputValidationError
-from subagents.providers.base import CompletionResponse, ToolCall
+from deepharness.agent import Agent, Budget
+from deepharness.agent.output import FINAL_TOOL, coerce, final_tool_schema
+from deepharness.errors import ConfigurationError, OutputValidationError
+from deepharness.providers.base import CompletionResponse, ToolCall
 
 from .test_agent import ScriptedProvider
 
