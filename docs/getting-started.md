@@ -9,7 +9,7 @@ pip install deepharness
 Or from a clone, for local development:
 
 ```bash
-git clone https://github.com/sayedshaun/subagents.git
+git clone https://github.com/sayedshaun/deepharness.git
 cd deepharness
 pip install -e .
 ```

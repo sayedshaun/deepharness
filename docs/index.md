@@ -17,7 +17,7 @@ object through the whole thing.
 </p>
 
 [Get started :octicons-arrow-right-24:](getting-started.md){ .md-button .md-button--primary }
-[View on GitHub](https://github.com/sayedshaun/subagents){ .md-button }
+[View on GitHub](https://github.com/sayedshaun/deepharness){ .md-button }
 
 <p class="sa-badges">
 <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">

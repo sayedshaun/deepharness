@@ -25,10 +25,10 @@ classifiers = [
 dependencies = ["httpx"]
 
 [project.urls]
-Homepage = "https://github.com/sayedshaun/subagents"
-Documentation = "https://sayedshaun.github.io/subagents/"
-Repository = "https://github.com/sayedshaun/subagents"
-Issues = "https://github.com/sayedshaun/subagents/issues"
+Homepage = "https://github.com/sayedshaun/deepharness"
+Documentation = "https://sayedshaun.github.io/deepharness/"
+Repository = "https://github.com/sayedshaun/deepharness"
+Issues = "https://github.com/sayedshaun/deepharness/issues"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "ruff"]
