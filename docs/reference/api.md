@@ -247,8 +247,11 @@ CompletionResponse(content: str, tool_calls: list[ToolCall] = [], usage: TokenUs
 | `OpenAI` | `OpenAI(model: str, api_key: str \| None = None, *, base_url: str \| None = None, temperature: float \| None = None)` |
 | `Gemini` | `Gemini(model: str, api_key: str \| None = None)` |
 
-`api_key` falls back to the vendor's standard environment variable (e.g. `OPENAI_API_KEY`)
-when omitted.
+`api_key` falls back to the vendor's standard environment variable when omitted:
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY` (or `GOOGLE_API_KEY`).
+
+Each provider holds an HTTP connection pool. Call `await model.aclose()` — or
+`model.close()` from synchronous code — when you are done with one.
 
 ### OpenAI-compatible gateways
 
