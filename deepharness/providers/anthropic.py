@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +20,7 @@ from deepharness.providers.wire import Usage, load_arguments, require, usage_fro
 _BASE_URL = "https://api.anthropic.com/v1"
 _ANTHROPIC_VERSION = "2023-06-01"
 _DEFAULT_MAX_TOKENS = 4096
+_ENV_KEY = "ANTHROPIC_API_KEY"
 
 
 @dataclass(slots=True)
@@ -63,6 +65,8 @@ class Anthropic(RestLLM):
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
+        if api_key is None:
+            api_key = os.environ.get(_ENV_KEY)
         headers = {"x-api-key": api_key or "", "anthropic-version": _ANTHROPIC_VERSION}
         self._http = HTTPClient(
             _BASE_URL, headers=headers, client=client, sync_client=sync_client
@@ -259,23 +263,29 @@ class AnthropicStream:
                 self._blocks[index]["arguments"] += delta.get("partial_json") or ""
             return None
 
-        if event == "message_delta" and (usage := data.get("usage")):
-            self._usage = Usage(
-                prompt_tokens=usage.get("input_tokens", 0),
-                completion_tokens=usage.get("output_tokens", 0),
-                total_tokens=usage.get("input_tokens", 0)
-                + usage.get("output_tokens", 0),
-            )
-        elif event == "message_start":
-            message = data.get("message") or {}
-            if usage := message.get("usage"):
-                self._usage = Usage(
-                    prompt_tokens=usage.get("input_tokens", 0),
-                    completion_tokens=usage.get("output_tokens", 0),
-                    total_tokens=usage.get("input_tokens", 0)
-                    + usage.get("output_tokens", 0),
-                )
+        if event == "message_start":
+            self._record_usage((data.get("message") or {}).get("usage"))
+        elif event == "message_delta":
+            self._record_usage(data.get("usage"))
         return None
+
+    def _record_usage(self, usage: dict[str, Any] | None) -> None:
+        """Fold in one event's counts, keeping the ones it left out.
+
+        Anthropic splits them across the stream: input_tokens comes with
+        message_start and the final output_tokens with message_delta. Replacing
+        rather than merging would drop the prompt half - the expensive one.
+        """
+        if not usage:
+            return
+        current = self._usage or Usage()
+        prompt = usage.get("input_tokens", current.prompt_tokens)
+        completion = usage.get("output_tokens", current.completion_tokens)
+        self._usage = Usage(
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=prompt + completion,
+        )
 
     def response(self) -> CompletionResponse:
         return CompletionResponse(
