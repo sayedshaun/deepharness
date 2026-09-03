@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
-from deepharness.providers.anthropic import Anthropic
-from deepharness.providers.base import LLM, CompletionResponse, ToolCall
+from deepharness.providers.anthropic import Anthropic, AnthropicStream
+from deepharness.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 from deepharness.providers.gemini import Gemini
 from deepharness.providers.openai import OpenAI
 
@@ -207,7 +207,6 @@ async def test_gemini_complete_returns_content():
     assert result.tool_calls == []
     client.post.assert_awaited_once_with(
         "/models/gemini-test:generateContent",
-        params={"key": None},
         json={"contents": [{"role": "user", "parts": [{"text": "hi"}]}]},
     )
 
@@ -258,7 +257,6 @@ def test_gemini_generate_returns_content_sync():
     assert result.content == "hello"
     sync_client.post.assert_called_once_with(
         "/models/gemini-test:generateContent",
-        params={"key": None},
         json={"contents": [{"role": "user", "parts": [{"text": "hi"}]}]},
     )
 
@@ -316,7 +314,7 @@ async def test_gemini_astream_yields_content_deltas():
     sent_args = client.stream.call_args.args
     sent_kwargs = client.stream.call_args.kwargs
     assert sent_args == ("POST", "/models/gemini-test:streamGenerateContent")
-    assert sent_kwargs["params"] == {"key": None, "alt": "sse"}
+    assert sent_kwargs["params"] == {"alt": "sse"}
 
 
 def test_gemini_stream_yields_content_deltas_sync():
@@ -661,3 +659,112 @@ async def test_a_text_only_provider_still_reports_tool_calls_when_streaming():
 
     assert len(events) == 1
     assert events[0].response.tool_calls[0].name == "add"
+
+
+async def test_openai_asks_for_usage_when_streaming():
+    """Without stream_options a streamed turn reports no usage at all, which
+    leaves an Agent's token budget unenforceable."""
+    client = make_async_stream_client(
+        ['data: {"choices":[{"delta":{"content":"hi"}}]}']
+    )
+    provider = OpenAI(model="gpt-test", api_key="k", client=client)
+
+    [chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])]
+
+    body = client.stream.call_args.kwargs["json"]
+    assert body["stream"] is True
+    assert body["stream_options"] == {"include_usage": True}
+
+
+async def test_openai_omits_stream_options_when_not_streaming():
+    client = make_client({"choices": [{"message": {"content": "hello"}}]})
+    provider = OpenAI(model="gpt-test", api_key="k", client=client)
+
+    await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    body = client.post.await_args.kwargs["json"]
+    assert "stream_options" not in body
+    assert "stream" not in body
+
+
+async def test_openai_tolerates_truncated_tool_arguments():
+    """A cut-off response should reach the tool as missing arguments, which the
+    model can correct, rather than killing the run with a JSON error."""
+    client = make_client(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {"name": "search", "arguments": '{"q": '},
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+    )
+    provider = OpenAI(model="gpt-test", api_key="k", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.tool_calls == [ToolCall(name="search", arguments={}, id="call_1")]
+
+
+def test_anthropic_stream_keeps_prompt_tokens_from_message_start():
+    """Anthropic splits usage across the stream: input_tokens arrives with
+    message_start and the final output_tokens with message_delta."""
+    stream = AnthropicStream()
+
+    stream.feed(
+        {
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 1000, "output_tokens": 1}},
+        }
+    )
+    stream.feed(
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "hi"},
+        }
+    )
+    stream.feed({"type": "message_delta", "usage": {"output_tokens": 50}})
+
+    assert stream.response().usage == TokenUsage(
+        prompt_tokens=1000, completion_tokens=50, total_tokens=1050
+    )
+
+
+def test_anthropic_reads_its_api_key_from_the_environment(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
+
+    provider = Anthropic(model="claude-test", client=AsyncMock())
+
+    assert provider._http._sync_client.headers["x-api-key"] == "from-env"
+
+
+async def test_gemini_sends_its_api_key_as_a_header(monkeypatch):
+    """Not as ?key=: httpx puts the whole URL in its error messages, so a
+    query-string credential lands in every ProviderError."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    client = make_client({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]})
+
+    provider = Gemini(model="gemini-test", api_key="secret", client=client)
+
+    assert provider._http._sync_client.headers["x-goog-api-key"] == "secret"
+    await provider.agenerate([{"role": "user", "content": "hi"}])
+    assert "params" not in client.post.await_args.kwargs
+
+
+def test_gemini_reads_its_api_key_from_the_environment(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "from-env")
+
+    provider = Gemini(model="gemini-test", client=AsyncMock())
+
+    assert provider._http._sync_client.headers["x-goog-api-key"] == "from-env"
