@@ -33,6 +33,7 @@ class OpenAIPayload:
     temperature: float | None = None
     reasoning_effort: ReasoningLevel | None = None
     stream: bool | None = None
+    stream_options: dict[str, Any] | None = None
 
     def to_json(self) -> dict[str, Any]:
         return without_none(self)
@@ -87,6 +88,9 @@ class OpenAI(RestLLM):
             self._model, messages, tools, self._temperature, self._reasoning_effort
         )
         payload.stream = stream or None
+        # A streamed turn reports no usage unless it is asked for, and without
+        # usage an Agent's token budget silently never fires.
+        payload.stream_options = {"include_usage": True} if stream else None
         return payload
 
     def endpoint(self, *, stream: bool = False) -> str:
@@ -164,7 +168,7 @@ def _to_openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
 
 def _from_openai_response(completion: OpenAIChatCompletion) -> CompletionResponse:
     tool_calls = [
-        ToolCall(id=call.id, name=call.name, arguments=json.loads(call.arguments))
+        ToolCall(id=call.id, name=call.name, arguments=load_arguments(call.arguments))
         for call in completion.message.tool_calls
     ]
     return CompletionResponse(
