@@ -17,8 +17,10 @@ from typing import Any, Protocol
 
 import httpx
 
+from ..errors import ProviderError
 from .base import LLM, Completed, CompletionResponse, StreamEvent, TextDelta
 from .client import HTTPClient
+from .wire import clip
 
 _SSE_DONE = "[DONE]"
 """Sentinel some vendors send to close a stream; others just end the body."""
@@ -72,6 +74,12 @@ class RestCompletions:
     def __init__(self, http: HTTPClient, wire: Wire):
         self._http = http
         self._wire = wire
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+    def close(self) -> None:
+        self._http.close()
 
     async def agenerate(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
@@ -134,7 +142,11 @@ def _feed(reader: StreamAccumulator, line: str) -> Iterator[StreamEvent]:
     data = line[len("data:") :].strip()
     if not data or data == _SSE_DONE:
         return
-    text = reader.feed(json.loads(data))
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        raise ProviderError(f"unparseable stream payload: {clip(data)}") from None
+    text = reader.feed(payload)
     if text:
         yield TextDelta(text)
 
@@ -150,6 +162,14 @@ class RestLLM(LLM):
     __slots__ = ()
 
     _rest: RestCompletions
+
+    async def aclose(self) -> None:
+        """Release the connection pools this provider opened."""
+        await self._rest.aclose()
+
+    def close(self) -> None:
+        """Release the sync connection pool; see HTTPClient.close()."""
+        self._rest.close()
 
     def request_args(self, *, stream: bool = False) -> dict[str, Any]:
         """No extra arguments; most vendors authenticate with a header set once."""
