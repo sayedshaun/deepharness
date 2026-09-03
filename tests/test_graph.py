@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from deepharness.errors import ConfigurationError, DeepHarnessError
 from deepharness.graph import Graph
 
 
@@ -173,3 +174,45 @@ def test_build_with_declared_loop_succeeds():
     graph.connect(func2, func1, loop=True)
 
     assert graph.build() is not None
+
+
+def test_build_rejects_a_state_that_is_not_a_dataclass():
+    class NotAState:
+        pass
+
+    graph = Graph(NotAState)
+
+    @graph.add(start=True, end=True)
+    def only(state):
+        return state
+
+    with pytest.raises(ConfigurationError, match="must be a dataclass"):
+        graph.build()
+
+
+async def test_run_rejects_a_state_of_the_wrong_type():
+    """Otherwise the mismatch surfaces as an AttributeError from whichever node
+    happened to touch a missing field first."""
+
+    @dataclass
+    class Other:
+        value: int = 0
+
+    graph = Graph(Other)
+
+    @graph.add(start=True, end=True)
+    def only(state):
+        return state
+
+    executor = graph.build()
+
+    with pytest.raises(ConfigurationError, match="runs on Other, got int"):
+        await executor.run(42)
+
+
+def test_builder_errors_are_deepharness_errors():
+    """They were bare ValueErrors, so ConfigurationError stays one too."""
+    graph = Graph(State)
+
+    with pytest.raises(DeepHarnessError):
+        graph.connect("nope", "nowhere")

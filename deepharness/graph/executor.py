@@ -6,7 +6,12 @@ import dataclasses
 import inspect
 from typing import Any
 
-from ..errors import ConcurrentUpdateError, ExecutionError, StepLimitExceeded
+from ..errors import (
+    ConcurrentUpdateError,
+    ConfigurationError,
+    ExecutionError,
+    StepLimitExceeded,
+)
 from .builder import Condition, NodeSpec
 
 Loop = tuple[str, str, Condition | None, frozenset[str]]
@@ -26,19 +31,32 @@ class Executor:
     so the graph can iterate. max_steps bounds that.
     """
 
-    __slots__ = ("_loops", "_nodes", "_predecessors")
+    __slots__ = ("_loops", "_nodes", "_predecessors", "_state_type")
 
     def __init__(
         self,
         nodes: dict[str, NodeSpec],
         predecessors: dict[str, list[tuple[str, Condition | None]]],
         loops: list[Loop] | None = None,
+        state_type: type | None = None,
     ):
         self._nodes = nodes
         self._predecessors = predecessors
         self._loops = loops or []
+        self._state_type = state_type
 
     async def run(self, state: Any, *, max_steps: int = 50) -> Any:
+        """Run the graph over one state object, returning it once no node is ready.
+
+        The state is checked against the type the Graph was declared with before
+        anything runs: the wrong shape otherwise surfaces as an AttributeError
+        from whichever node happened to touch a missing field first.
+        """
+        if self._state_type is not None and not isinstance(state, self._state_type):
+            raise ConfigurationError(
+                f"this graph runs on {self._state_type.__name__}, got "
+                f"{type(state).__name__}"
+            )
         current = copy.deepcopy(state)
         finished: set[str] = set()
         ready = [name for name, spec in self._nodes.items() if spec.start]

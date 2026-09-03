@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
+
+from ..errors import ConfigurationError
 
 if TYPE_CHECKING:
     from .executor import Executor
@@ -51,7 +54,7 @@ class Graph:
         def decorator(func: NodeFunc) -> NodeFunc:
             node_name = name or func.__name__
             if node_name in self.nodes:
-                raise ValueError(f"Node already exists: {node_name}")
+                raise ConfigurationError(f"Node already exists: {node_name}")
             self.nodes[node_name] = NodeSpec(node_name, func, start=start, end=end)
             self.edges[node_name] = []
             return func
@@ -79,19 +82,25 @@ class Graph:
     def _name_of(self, ref: NodeFunc | str) -> str:
         if isinstance(ref, str):
             if ref not in self.nodes:
-                raise ValueError(f"Unknown node: {ref}")
+                raise ConfigurationError(f"Unknown node: {ref}")
             return ref
 
         for name, spec in self.nodes.items():
             if spec.func is ref:
                 return name
-        raise ValueError(f"Function is not registered as a node: {ref!r}")
+        raise ConfigurationError(f"Function is not registered as a node: {ref!r}")
 
     def build(self) -> Executor:
         from .executor import Executor
 
+        if not dataclasses.is_dataclass(self.state_type):
+            raise ConfigurationError(
+                f"Graph state must be a dataclass, got {self.state_type!r}. Merging "
+                f"concurrent branches works field by field, which needs declared "
+                f"fields to walk"
+            )
         if not any(spec.start for spec in self.nodes.values()):
-            raise ValueError("Graph has no start node")
+            raise ConfigurationError("Graph has no start node")
 
         forward = {
             name: [(target, condition) for target, condition, loop in edges if not loop]
@@ -109,7 +118,7 @@ class Graph:
 
         for name, spec in self.nodes.items():
             if not spec.start and not self._has_incoming(name):
-                raise ValueError(
+                raise ConfigurationError(
                     f"Node '{name}' is unreachable: no start flag and no incoming edges"
                 )
 
@@ -122,7 +131,7 @@ class Graph:
             if loop
         ]
 
-        return Executor(self.nodes, predecessors, loops)
+        return Executor(self.nodes, predecessors, loops, self.state_type)
 
     def _has_incoming(self, name: str) -> bool:
         return any(
@@ -180,7 +189,7 @@ def _check_acyclic(
                 queue.append(target_name)
 
     if visited != len(nodes):
-        raise ValueError(
+        raise ConfigurationError(
             "Graph contains a cycle; declare the back-edge with "
             "connect(..., loop=True) if the iteration is intentional"
         )
