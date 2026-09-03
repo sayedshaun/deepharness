@@ -45,13 +45,26 @@ class OpenAI(RestLLM):
     Also the base for any OpenAI-compatible gateway (see providers/gateways.py):
     a subclass overriding default_base_url/env_key gets that endpoint and
     reads its API key from that environment variable with no other code.
+
+    stream_usage asks a streamed turn to report its token counts, which OpenAI
+    only sends when asked and without which an Agent's token budget can never
+    fire. It defaults on; pass stream_usage=False for a gateway that rejects
+    the field outright rather than ignoring it, at the cost of an unenforceable
+    Budget(tokens=...) against that endpoint.
     """
 
     provider: str = "openai"
     default_base_url: str = _BASE_URL
     env_key: str = "OPENAI_API_KEY"
 
-    __slots__ = ("_http", "_model", "_reasoning_effort", "_rest", "_temperature")
+    __slots__ = (
+        "_http",
+        "_model",
+        "_reasoning_effort",
+        "_rest",
+        "_stream_usage",
+        "_temperature",
+    )
 
     def __init__(
         self,
@@ -61,6 +74,7 @@ class OpenAI(RestLLM):
         base_url: str | None = None,
         temperature: float | None = None,
         reasoning_effort: ReasoningLevel | None = None,
+        stream_usage: bool = True,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
@@ -76,6 +90,7 @@ class OpenAI(RestLLM):
         self._model = model
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
+        self._stream_usage = stream_usage
 
     def payload(
         self,
@@ -88,9 +103,9 @@ class OpenAI(RestLLM):
             self._model, messages, tools, self._temperature, self._reasoning_effort
         )
         payload.stream = stream or None
-        # A streamed turn reports no usage unless it is asked for, and without
-        # usage an Agent's token budget silently never fires.
-        payload.stream_options = {"include_usage": True} if stream else None
+        payload.stream_options = (
+            {"include_usage": True} if stream and self._stream_usage else None
+        )
         return payload
 
     def endpoint(self, *, stream: bool = False) -> str:
