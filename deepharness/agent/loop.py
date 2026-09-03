@@ -275,8 +275,7 @@ class Agent:
                 return self._result(state, messages, "", "paused", paused=gated)
 
             results = yield _Dispatch(wanted)
-            dispatched = wanted
-            pending = turn.record_results(messages, dispatched, results)
+            pending = turn.record_results(messages, wanted, results)
             if pending:
                 return self._result(state, messages, "", "paused", paused=pending)
 
@@ -402,7 +401,7 @@ class Agent:
             return await self._tools.call(name, ctx=ctx, **arguments)
         except ConfigurationError:
             raise
-        except Exception as exc:  # noqa: BLE001 - see transcript.record_results
+        except Exception as exc:  # noqa: BLE001 - see turn.record_results
             return exc
 
     def _call_tool_sync(self, name: str, arguments: dict[str, Any], ctx: Ctx) -> Any:
@@ -410,5 +409,5 @@ class Agent:
             return self._tools.call_sync(name, ctx=ctx, **arguments)
         except ConfigurationError:
             raise
-        except Exception as exc:  # noqa: BLE001 - see transcript.record_results
+        except Exception as exc:  # noqa: BLE001 - see turn.record_results
             return exc
