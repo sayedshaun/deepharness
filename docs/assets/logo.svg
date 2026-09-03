@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="660" viewBox="0 0 820 660" role="img" aria-label="DeepHarness">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="760" viewBox="0 0 760 760" role="img" aria-label="DeepHarness">
   <defs>
     <linearGradient id="nodeCenter" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#6E63F5"/>
@@ -11,24 +11,32 @@
     </linearGradient>
   </defs>
 
-  <!-- links: drawn first so the hexagons cover the endpoints -->
-  <g stroke="#4B3FE0" stroke-width="26" stroke-linecap="round">
-    <line x1="400" y1="340" x2="504" y2="82"/>
-    <line x1="400" y1="340" x2="719" y2="218"/>
-    <line x1="400" y1="340" x2="725" y2="470"/>
-    <line x1="400" y1="340" x2="504" y2="580"/>
-    <line x1="400" y1="340" x2="94" y2="465"/>
+  <!-- edges: one source fanning out to parallel branches, then merging back -->
+  <g stroke="#4B3FE0" stroke-width="24" stroke-linecap="butt">
+    <line x1="322.504" y1="171.06" x2="206.649" y2="298.126"/>
+    <line x1="179.699" y1="432.315" x2="295.554" y2="559.382"/>
+    <line x1="380" y1="189.746" x2="380" y2="272.11"/>
+    <line x1="380" y1="447.89" x2="380" y2="530.254"/>
+    <line x1="437.496" y1="171.06" x2="553.351" y2="298.126"/>
+    <line x1="580.301" y1="432.315" x2="464.446" y2="559.382"/>
+  </g>
+  <g fill="#4B3FE0">
+    <path d="M179.699,327.685 190.392,283.304 222.906,312.949 Z"/>
+    <path d="M322.504,588.94 279.297,574.204 311.811,544.559 Z"/>
+    <path d="M380,312.11 358,272.11 402,272.11 Z"/>
+    <path d="M380,570.254 358,530.254 402,530.254 Z"/>
+    <path d="M580.301,327.685 537.094,312.949 569.608,283.304 Z"/>
+    <path d="M437.496,588.94 448.189,544.559 480.703,574.204 Z"/>
   </g>
 
-  <!-- satellite nodes -->
+  <!-- parallel branches -->
   <g fill="url(#nodeSat)">
-    <path d="M576,82 540,144.35 468,144.35 432,82 468,19.65 540,19.65 Z"/>
-    <path d="M784,218 751.5,274.29 686.5,274.29 654,218 686.5,161.71 751.5,161.71 Z"/>
-    <path d="M793,470 759,528.89 691,528.89 657,470 691,411.11 759,411.11 Z"/>
-    <path d="M572,580 538,638.89 470,638.89 436,580 470,521.11 538,521.11 Z"/>
-    <path d="M174,465 134,534.28 54,534.28 14,465 54,395.72 134,395.72 Z"/>
+    <path d="M200,380 166,438.89 98,438.89 64,380 98,321.11 166,321.11 Z"/>
+    <path d="M448,380 414,438.89 346,438.89 312,380 346,321.11 414,321.11 Z"/>
+    <path d="M696,380 662,438.89 594,438.89 560,380 594,321.11 662,321.11 Z"/>
   </g>
 
-  <!-- root node -->
-  <path d="M520,340 460,443.92 340,443.92 280,340 340,236.08 460,236.08 Z" fill="url(#nodeCenter)"/>
+  <!-- source and merge -->
+  <path d="M464,108 422,180.746 338,180.746 296,108 338,35.2539 422,35.2539 Z" fill="url(#nodeCenter)"/>
+  <path d="M464,652 422,724.746 338,724.746 296,652 338,579.254 422,579.254 Z" fill="url(#nodeCenter)"/>
 </svg>
