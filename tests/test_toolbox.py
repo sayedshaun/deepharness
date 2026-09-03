@@ -4,6 +4,7 @@ from typing import Any, Literal
 import pytest
 
 from deepharness.agent import Toolbox, tool
+from deepharness.errors import ConfigurationError
 
 
 def test_bare_decorator_builds_spec_from_signature_and_docstring():
@@ -199,3 +200,33 @@ def test_undescribable_parameters_stay_unconstrained():
     props = fn._tool_spec.parameters["properties"]
 
     assert props["a"] == {} and props["b"] == {} and props["c"] == {}
+
+
+def test_register_refuses_to_shadow_a_different_tool_of_the_same_name():
+    """The model picks a tool by name, so a collision makes one unreachable."""
+
+    @tool(name="search")
+    def search_web(query: str) -> str:
+        return "web"
+
+    @tool(name="search")
+    def search_docs(query: str) -> str:
+        return "docs"
+
+    toolbox = Toolbox([search_web])
+
+    with pytest.raises(ConfigurationError, match="already registered"):
+        toolbox.register(search_docs)
+
+    assert toolbox.get("search").func is search_web
+
+
+def test_register_accepts_the_same_tool_twice():
+    @tool
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    toolbox = Toolbox([add])
+    toolbox.register(add)
+
+    assert len(toolbox) == 1

@@ -190,7 +190,19 @@ class Toolbox:
         return name in self._tools
 
     def register(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        """Add a tool, refusing to shadow a different one of the same name.
+
+        The model picks a tool by name, so two of them under one name means one
+        is unreachable - a typo the caller should hear about rather than a tool
+        that quietly never runs. Registering the same function twice is fine.
+        """
         spec = getattr(func, "_tool_spec", None) or _build_spec(func, None, None)
+        existing = self._tools.get(spec.name)
+        if existing is not None and existing.func is not spec.func:
+            raise ConfigurationError(
+                f"a different tool named {spec.name!r} is already registered; "
+                f"rename one with @tool(name=...)"
+            )
         self._tools[spec.name] = spec
         return func
 

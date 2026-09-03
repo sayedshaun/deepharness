@@ -10,8 +10,12 @@ class DeepHarnessError(Exception):
     """Base class for all errors raised by deepharness."""
 
 
-class ConfigurationError(DeepHarnessError):
-    """Raised when an Agent or Toolbox is used in an invalid configuration."""
+class ConfigurationError(DeepHarnessError, ValueError):
+    """Raised when a component is built or used in an invalid configuration.
+
+    Also a ValueError - an invalid argument is what this is, and graph/ raised
+    bare ValueErrors before it existed.
+    """
 
 
 class ToolNotFoundError(DeepHarnessError, KeyError):

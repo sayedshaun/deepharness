@@ -19,6 +19,7 @@ from deepharness.errors import (
     ConfigurationError,
     DeepHarnessError,
     HumanInputRequired,
+    OutputValidationError,
     ProviderError,
     ToolNotFoundError,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "Ollama",
     "OpenAI",
     "OpenRouter",
+    "OutputValidationError",
     "PendingHumanInput",
     "ProviderError",
     "StepLimitExceeded",

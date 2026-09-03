@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +20,7 @@ from .wire import Usage, clip, usage_from
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _ROLE_MAP = {"assistant": "model", "system": "user", "user": "user"}
+_ENV_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 
 
 @dataclass(slots=True)
@@ -37,7 +39,7 @@ class GeminiPayload:
 class Gemini(RestLLM):
     """Provider backed by Google's Gemini REST API."""
 
-    __slots__ = ("_api_key", "_http", "_model", "_reasoning_effort", "_rest")
+    __slots__ = ("_http", "_model", "_reasoning_effort", "_rest")
 
     def __init__(
         self,
@@ -48,8 +50,19 @@ class Gemini(RestLLM):
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
     ):
-        self._http = HTTPClient(_BASE_URL, client=client, sync_client=sync_client)
-        self._api_key = api_key
+        if api_key is None:
+            api_key = next(
+                (key for name in _ENV_KEYS if (key := os.environ.get(name))), None
+            )
+        # In a header rather than the documented ?key= query parameter: httpx
+        # puts the full URL in its error messages, so a query-string credential
+        # ends up in every ProviderError a failed request raises.
+        self._http = HTTPClient(
+            _BASE_URL,
+            headers={"x-goog-api-key": api_key or ""},
+            client=client,
+            sync_client=sync_client,
+        )
         self._rest = RestCompletions(self._http, self)
         self._model = model
         self._reasoning_effort = reasoning_effort
@@ -68,11 +81,8 @@ class Gemini(RestLLM):
         return f"/models/{self._model}:{action}"
 
     def request_args(self, *, stream: bool = False) -> dict[str, Any]:
-        """Gemini authenticates by query parameter, and needs alt=sse to stream."""
-        params = {"key": self._api_key}
-        if stream:
-            params["alt"] = "sse"
-        return {"params": params}
+        """Gemini needs alt=sse to send a stream as server-sent events."""
+        return {"params": {"alt": "sse"}} if stream else {}
 
     def parse_response(self, response: httpx.Response) -> CompletionResponse:
         return _from_gemini_response(GeminiResponse.from_json(response.json()))
