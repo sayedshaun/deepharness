@@ -1,34 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="410" viewBox="0 0 400 410" role="img" aria-label="DeepHarness">
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-label="DeepHarness">
   <defs>
     <linearGradient id="nodeCenter" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#6E63F5"/>
       <stop offset="100%" stop-color="#3B2FCB"/>
     </linearGradient>
-    <linearGradient id="nodeSat" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#A29CF8"/>
-      <stop offset="100%" stop-color="#7C74EF"/>
-    </linearGradient>
   </defs>
-
-  <!-- links: drawn first so the hexagons cover the endpoints -->
-  <g stroke="#4B3FE0" stroke-width="16" stroke-linecap="round">
-    <line x1="200" y1="215" x2="222" y2="62"/>
-    <line x1="200" y1="215" x2="300" y2="128"/>
-    <line x1="200" y1="215" x2="300" y2="300"/>
-    <line x1="200" y1="215" x2="205" y2="350"/>
-    <line x1="200" y1="215" x2="90" y2="290"/>
+  <path d="M390,200 295,364.545 105,364.545 10,200 105,35.4552 295,35.4552 Z" fill="url(#nodeCenter)"/>
+  <g stroke="#FFFFFF" stroke-width="44" stroke-linecap="round" fill="none">
+    <path d="M104,200 172,200"/>
+    <path d="M172,200 266,120"/>
+    <path d="M172,200 266,280"/>
   </g>
-
-  <!-- satellite nodes -->
-  <g fill="url(#nodeSat)">
-    <path d="M268,62 245,101.84 199,101.84 176,62 199,22.16 245,22.16 Z"/>
-    <path d="M342,128 321,164.37 279,164.37 258,128 279,91.63 321,91.63 Z"/>
-    <path d="M344,300 322,338.1 278,338.1 256,300 278,261.9 322,261.9 Z"/>
-    <path d="M249,350 227,388.1 183,388.1 161,350 183,311.9 227,311.9 Z"/>
-    <path d="M134,290 112,328.1 68,328.1 46,290 68,251.9 112,251.9 Z"/>
+  <g fill="#FFFFFF">
+    <circle cx="286" cy="104" r="34"/>
+    <circle cx="286" cy="296" r="34"/>
   </g>
-
-  <!-- root node -->
-  <path d="M272,215 236,277.35 164,277.35 128,215 164,152.65 236,152.65 Z" fill="url(#nodeCenter)"/>
 </svg>
