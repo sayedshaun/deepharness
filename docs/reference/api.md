@@ -244,7 +244,7 @@ CompletionResponse(content: str, tool_calls: list[ToolCall] = [], usage: TokenUs
 | Class | Signature |
 | --- | --- |
 | `Anthropic` | `Anthropic(model: str, api_key: str \| None = None, max_tokens: int = 4096)` |
-| `OpenAI` | `OpenAI(model: str, api_key: str \| None = None, *, base_url: str \| None = None, temperature: float \| None = None)` |
+| `OpenAI` | `OpenAI(model: str, api_key: str \| None = None, *, base_url: str \| None = None, temperature: float \| None = None, stream_usage: bool = True)` |
 | `Gemini` | `Gemini(model: str, api_key: str \| None = None)` |
 
 `api_key` falls back to the vendor's standard environment variable when omitted:

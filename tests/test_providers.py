@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from deepharness.providers.anthropic import Anthropic, AnthropicStream
 from deepharness.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
+from deepharness.providers.gateways import Groq
 from deepharness.providers.gemini import Gemini
 from deepharness.providers.openai import OpenAI
 
@@ -768,3 +769,26 @@ def test_gemini_reads_its_api_key_from_the_environment(monkeypatch):
     provider = Gemini(model="gemini-test", client=AsyncMock())
 
     assert provider._http._sync_client.headers["x-goog-api-key"] == "from-env"
+
+
+async def test_openai_can_stop_asking_for_streamed_usage():
+    """An OpenAI-compatible gateway that rejects the field outright needs a way
+    out; the cost is an unenforceable token budget against that endpoint."""
+    client = make_async_stream_client(
+        ['data: {"choices":[{"delta":{"content":"hi"}}]}']
+    )
+    provider = OpenAI(
+        model="local-model", api_key="k", stream_usage=False, client=client
+    )
+
+    [chunk async for chunk in provider.astream([{"role": "user", "content": "hi"}])]
+
+    body = client.stream.call_args.kwargs["json"]
+    assert body["stream"] is True
+    assert "stream_options" not in body
+
+
+def test_gateways_ask_for_streamed_usage_by_default():
+    assert Groq("llama-test", api_key="k").payload(
+        [], None, stream=True
+    ).stream_options == {"include_usage": True}
