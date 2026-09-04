@@ -10,7 +10,9 @@ A lightweight framework for wiring plain Python functions — and the agents ins
 graph that runs branches in parallel, routes on conditions, and threads one typed state
 object through the whole thing.
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
+
+[Install](#install) · [Quickstart](#quickstart) · [Graphs](#graphs) · [Providers](#providers) · [Docs](https://sayedshaun.github.io/deepharness/) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -36,11 +38,13 @@ object through the whole thing.
 pip install deepharness
 ```
 
-Or install from source:
+Or from source:
 
 ```bash
 pip install git+https://github.com/sayedshaun/deepharness.git
 ```
+
+Requires Python 3.11 or newer.
 
 ## Quickstart
 
@@ -48,7 +52,7 @@ An `Agent` runs a think/act loop against a model: ask for a response, dispatch a
 it requests, repeat until the model answers with no tool calls.
 
 ```python
-from deepharness import Agent, Message, OpenAI, tool
+from deepharness import Agent, OpenAI, tool
 
 
 @tool
@@ -58,22 +62,31 @@ def get_weather(city: str) -> str:
 
 
 agent = Agent(
-    OpenAI(model="gpt-4o-mini", api_key="sk-..."),
+    OpenAI(model="gpt-4o-mini"),  # reads OPENAI_API_KEY from the environment
     tools=[get_weather],
 )
 
-result = await agent.arun("Weather in Oslo?")
+result = agent.run("Weather in Oslo?")
 print(result.output)
 ```
+
+Every entry point comes in both flavours — `run()` / `arun()` and `stream()` / `astream()` —
+so the same agent drops into a script or an event loop unchanged:
+
+```python
+result = await agent.arun("Weather in Oslo?")
+```
+
+### Agents as tools
 
 An `Agent` can itself be handed to another agent as a tool via `as_tool()`, so one agent can
 delegate a task to another:
 
 ```python
-researcher = Agent(OpenAI(model="gpt-4o-mini", api_key="sk-..."), name="researcher")
+researcher = Agent(OpenAI(model="gpt-4o-mini"), name="researcher")
 
 editor = Agent(
-    OpenAI(model="gpt-4o-mini", api_key="sk-..."),
+    OpenAI(model="gpt-4o-mini"),
     name="editor",
     tools=[researcher.as_tool(description="Look up facts on a topic.")],
 )
@@ -133,27 +146,48 @@ print(result.summary)  # Sales up 12% QoQ. Churn down to 4%.
 `fetch_sales` and `fetch_churn` both run in the first wave, concurrently. `summarize` waits
 for both before running.
 
-**Agent or Graph?** Reach for `as_tool()` when an LLM should decide at runtime whether and
-which sub-agent to call. Reach for `Graph` when the workflow's shape — which steps, which run
-in parallel, in what order — is known ahead of time.
+### Agent or Graph?
 
-See the **[full documentation](https://sayedshaun.github.io/deepharness/)** for graphs, agents,
-tools, providers, and the API reference.
+Reach for `as_tool()` when an LLM should decide at runtime whether and which sub-agent to
+call. Reach for `Graph` when the workflow's shape — which steps, which run in parallel, in
+what order — is known ahead of time.
 
-## Development
+## Providers
 
-```bash
-pip install -e ".[dev]"
-pytest -q
-ruff format . && ruff check .
+Pass `api_key=` explicitly, or leave it out and let the provider read its own environment
+variable:
+
+| Provider | Environment variable |
+| --- | --- |
+| `OpenAI` | `OPENAI_API_KEY` |
+| `Anthropic` | `ANTHROPIC_API_KEY` |
+| `Gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
+
+OpenAI-compatible gateways each read their own key — `GROQ_API_KEY`, `TOGETHER_API_KEY`,
+`DEEPSEEK_API_KEY`, and so on — and local runtimes (`Ollama`, `LMStudio`, `VLLM`) need no key
+at all. Swapping vendors means swapping the constructor; nothing else changes:
+
+```python
+from deepharness import Anthropic, Gemini, Groq, Ollama
+
+Anthropic(model="claude-sonnet-4-5")
+Gemini(model="gemini-2.5-flash")
+Groq(model="llama-3.3-70b-versatile")
+Ollama(model="llama3.2")  # no key needed
 ```
 
-Docs are built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/):
+## Documentation
 
-```bash
-pip install -e ".[docs]"
-mkdocs serve
-```
+The **[full documentation](https://sayedshaun.github.io/deepharness/)** covers graphs, agents,
+tools, providers, and the complete API reference.
+
+## Contributing
+
+Setup, commands, and conventions live in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 
