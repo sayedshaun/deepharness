@@ -59,13 +59,21 @@
   );
 }
 
+/* The logo is wrapped in a paragraph by Markdown; its margin would otherwise
+   stack with the h1's and open a gap under the mark. */
+.sa-hero > p:first-child {
+  margin: 0;
+}
+
 .sa-hero img {
+  display: block;
   width: 180px;
+  margin: 0 auto;
   filter: drop-shadow(0 8px 20px rgba(110, 99, 245, 0.35));
 }
 
 .sa-hero h1 {
-  margin: 1.2rem 0 0.4rem;
+  margin: 0.4rem 0 0.4rem;
   font-size: 2.2rem;
 }
 
