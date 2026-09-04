@@ -7,7 +7,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  logo: assets/mark.svg
+  logo: assets/logo.svg
   favicon: assets/mark.svg
   icon:
     repo: fontawesome/brands/github
