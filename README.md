@@ -135,7 +135,7 @@ graph.connect(fetch_sales, summarize)
 graph.connect(fetch_churn, summarize)
 
 executor = graph.build()
-result = asyncio.run(executor.run(State()))
+result = asyncio.run(executor.run())
 
 print(result.summary)  # Sales up 12% QoQ. Churn down to 4%.
 ```
