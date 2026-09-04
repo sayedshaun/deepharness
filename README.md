@@ -176,11 +176,35 @@ Ollama(model="llama3.2")  # no key needed
 
 ## Contributing
 
-Setup, commands, and conventions live in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+Issues and pull requests are welcome. To get a working checkout:
+
+```bash
+git clone https://github.com/sayedshaun/deepharness.git
+cd deepharness
+pip install -e ".[dev]"
+make test
+```
+
+Two conventions are worth knowing before you open a pull request:
+
+- **The dependency budget is one.** `httpx`, and nothing else at runtime. A feature that needs
+  a third-party library almost always has a standard-library shape — reach for that instead.
+- **Tests must not touch the network.** Inject an `httpx` client or transport so the suite stays
+  deterministic and offline.
+
+Run `make fmt` and `make test` before pushing; CI runs the same checks on Python 3.11, 3.12 and
+3.13. Keep each commit focused on a single change, with a one-line message prefixed by a
+Conventional Commits type (`feat:`, `fix:`, `docs:`, and so on).
+
+Full setup, commands, and design conventions live in **[CONTRIBUTING.md](CONTRIBUTING.md)**; the
+rules the code itself is held to are in **[AGENTS.md](AGENTS.md)**.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Released under the **[MIT License](LICENSE)** — Copyright (c) 2026 Sayed Shaun.
+
+You may use, modify, distribute, and sell this software, in open-source or commercial work,
+provided the copyright notice and licence text travel with it. It comes with no warranty.
 
 ---
 
