@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/sayedshaun/deepharness/main/docs/assets/logo.png" width="160" alt="DeepHarness logo">
+<img src="https://raw.githubusercontent.com/sayedshaun/deepharness/main/docs/assets/logo.png" width="220" alt="DeepHarness logo">
 
 # DeepHarness
 
