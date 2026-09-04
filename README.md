@@ -1,8 +1,6 @@
 <div align="center">
-
 <img src="https://raw.githubusercontent.com/sayedshaun/deepharness/main/docs/assets/logo.png" width="220" alt="DeepHarness logo">
-
-# DeepHarness
+<h1>DeepHarness</h1>
 
 **Compose LLM agents into typed, concurrent workflows.**
 
