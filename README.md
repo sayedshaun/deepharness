@@ -174,11 +174,6 @@ Groq(model="llama-3.3-70b-versatile")
 Ollama(model="llama3.2")  # no key needed
 ```
 
-## Documentation
-
-The **[full documentation](https://sayedshaun.github.io/deepharness/)** covers graphs, agents,
-tools, providers, and the complete API reference.
-
 ## Contributing
 
 Setup, commands, and conventions live in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
