@@ -3,9 +3,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from deepharness.errors import ConfigurationError
 from deepharness.graph import (
     ConcurrentUpdateError,
     ExecutionError,
+    Executor,
     Graph,
     StepLimitExceeded,
     concat,
@@ -375,3 +377,39 @@ async def test_conditional_fan_out_into_join_still_works():
     result = await graph.build().run(State())
 
     assert result.trace == ["researcher", "join"]
+
+
+async def test_run_without_a_state_builds_the_declared_type():
+    graph = Graph(State)
+
+    @graph.add(start=True, end=True)
+    def touch(state: State) -> State:
+        state.combined = "built"
+        return state
+
+    result = await graph.build().run()
+
+    assert isinstance(result, State)
+    assert result.combined == "built"
+
+
+async def test_run_without_a_state_and_without_a_declared_type_raises():
+    executor = Executor(nodes={}, predecessors={}, state_type=None)
+
+    with pytest.raises(ConfigurationError, match="needs a state"):
+        await executor.run()
+
+
+async def test_run_still_rejects_a_state_of_the_wrong_type():
+    @dataclass
+    class Other:
+        value: str = ""
+
+    graph = Graph(State)
+
+    @graph.add(start=True, end=True)
+    def touch(state: State) -> State:
+        return state
+
+    with pytest.raises(ConfigurationError, match="runs on State"):
+        await graph.build().run(Other())
