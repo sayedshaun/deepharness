@@ -118,15 +118,17 @@ graph.connect(critique, draft, loop=True, condition=lambda s: s.score < 0.8)
 Requiring the flag is deliberate: it keeps loops visible in the wiring, and it means the
 scheduler still only ever sees a DAG. An *undeclared* cycle is a build error.
 
-`run()` takes `max_steps` (default 50) as the termination guard. Exceeding it raises
-`StepLimitExceeded`, with the partial state on `.state` so a runaway loop is still
+`run()` builds the state from the type the graph was declared with when you omit it, so a
+state whose fields all have defaults needs no argument; pass an instance when a run starts
+with real input. It also takes `max_steps` (default 50) as the termination guard. Exceeding
+it raises `StepLimitExceeded`, with the partial state on `.state` so a runaway loop is still
 inspectable:
 
 ```python
 from deepharness import StepLimitExceeded
 
 try:
-    result = await executor.run(State(), max_steps=20)
+    result = await executor.run(max_steps=20)
 except StepLimitExceeded as exc:
     print(exc.state)
 ```
@@ -169,7 +171,7 @@ exception:
 from deepharness import ExecutionError
 
 try:
-    await executor.run(State())
+    await executor.run()
 except ExecutionError as exc:
     print(exc.node_name, exc.original)
 ```

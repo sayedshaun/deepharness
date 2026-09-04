@@ -61,7 +61,7 @@ def add_one(state: State) -> State:
 
 graph.connect(double, add_one)
 
-print(asyncio.run(graph.build().run(State())))  # State(total=22)
+print(asyncio.run(graph.build().run()))  # State(total=22)
 ```
 
 ## Tools that fail, and tools that run together

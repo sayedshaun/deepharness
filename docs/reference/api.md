@@ -180,10 +180,12 @@ Graph(state_type: type)
 ### `Executor`
 
 ```python
-async def run(state: Any, *, max_steps: int = 50) -> Any
+async def run(state: Any = None, *, max_steps: int = 50) -> Any
 ```
 
-Runs the graph wave by wave: each wave's ready nodes execute concurrently, results merge back
+Omitting `state` builds one from the type the `Graph` was declared with, so a state whose
+fields all have defaults needs no argument. Runs the graph wave by wave: each wave's ready
+nodes execute concurrently, results merge back
 into the state field-by-field, and the next wave is whichever nodes now have all predecessors
 satisfied. A field written by two or more concurrent branches is combined by its
 [reducer](../guide/graph.md#reducers), or raises `ConcurrentUpdateError` if it declares none.
