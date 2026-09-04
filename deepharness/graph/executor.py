@@ -45,13 +45,21 @@ class Executor:
         self._loops = loops or []
         self._state_type = state_type
 
-    async def run(self, state: Any, *, max_steps: int = 50) -> Any:
+    async def run(self, state: Any = None, *, max_steps: int = 50) -> Any:
         """Run the graph over one state object, returning it once no node is ready.
 
-        The state is checked against the type the Graph was declared with before
-        anything runs: the wrong shape otherwise surfaces as an AttributeError
-        from whichever node happened to touch a missing field first.
+        Omitting the state builds one from the type the Graph was declared with,
+        so a graph whose fields all have defaults needs no argument at all. The
+        state is checked against that type before anything runs: the wrong shape
+        otherwise surfaces as an AttributeError from whichever node happened to
+        touch a missing field first.
         """
+        if state is None:
+            if self._state_type is None:
+                raise ConfigurationError(
+                    "this graph has no declared state type, so run() needs a state"
+                )
+            state = self._state_type()
         if self._state_type is not None and not isinstance(state, self._state_type):
             raise ConfigurationError(
                 f"this graph runs on {self._state_type.__name__}, got "
