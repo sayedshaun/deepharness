@@ -13,6 +13,7 @@ from ..errors import (
     StepLimitExceeded,
 )
 from .builder import Condition, NodeSpec
+from .diagram import to_text
 
 Loop = tuple[str, str, Condition | None, frozenset[str]]
 """(source, target, condition, body) - see Graph.connect(loop=True)."""
@@ -44,6 +45,14 @@ class Executor:
         self._predecessors = predecessors
         self._loops = loops or []
         self._state_type = state_type
+
+    def diagram(self) -> str:
+        """A box-drawing picture of the graph, laid out top to bottom by wave.
+
+        Returns the text rather than printing it: where the drawing goes is the
+        caller's business, not this object's.
+        """
+        return to_text(self._nodes, self._predecessors, self._loops)
 
     async def run(self, state: Any = None, *, max_steps: int = 50) -> Any:
         """Run the graph over one state object, returning it once no node is ready.
