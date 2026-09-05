@@ -1,5 +1,4 @@
 import unicodedata
-import unicodedata
 from dataclasses import dataclass, field
 
 import pytest
@@ -148,30 +147,6 @@ def test_edge_spanning_layers_is_routed_past_the_layer_between():
 def test_no_unresolved_glyphs(build):
     """`·` is the fallback for a stroke combination with no box-drawing char."""
     assert "·" not in build().build().diagram()
-
-
-def _columns(text: str) -> int:
-    """Terminal columns the line occupies, not characters."""
-    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
-
-
-@pytest.mark.parametrize("name", ["取得データ", "ship 🚀", "plain"])
-def test_box_borders_line_up_with_double_width_names(name):
-    graph = Graph(State)
-    graph.add(start=True, name=name)(_node)
-    top, middle, bottom = graph.build().diagram().splitlines()[:3]
-    assert _columns(top) == _columns(middle) == _columns(bottom)
-
-
-def test_a_wide_name_does_not_shift_its_neighbour():
-    graph = Graph(State)
-    graph.add(start=True, name="取得")(_node)
-    graph.add(start=True, name="plain")(_node)
-    graph.add(end=True, name="done")(_node)
-    graph.connect("取得", "done")
-    graph.connect("plain", "done")
-    top, middle, _ = graph.build().diagram().splitlines()[:3]
-    assert _columns(top) == _columns(middle)
 
 
 def _columns(text: str) -> int:
