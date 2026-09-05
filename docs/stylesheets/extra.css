@@ -1,7 +1,35 @@
 :root {
-  --sa-brand: #6e63f5;
-  --sa-brand-dark: #3b2fcb;
-  --sa-brand-light: #a29cf8;
+  /* Desaturated variants of the logo's violet (#6e63f5). The mark's hue at full
+     strength is too loud once it fills the header and every link on the page,
+     so the site keeps the hue and drops the saturation. */
+  --sa-accent-deep: #37327b;
+  --sa-accent-dark: #4a45a8;
+  --sa-accent: #756ed8;
+  --sa-accent-light: #9e99e6;
+}
+
+/* Material's built-in palettes have no purple that matches the logo, so the
+   theme is set to `primary: custom` / `accent: custom` and wired up here. */
+
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color: var(--sa-accent-dark);
+  --md-primary-fg-color--light: var(--sa-accent);
+  --md-primary-fg-color--dark: var(--sa-accent-deep);
+  --md-primary-bg-color: #fff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color: var(--sa-accent);
+  --md-accent-fg-color--transparent: rgba(117, 110, 216, 0.1);
+  --md-accent-bg-color: #fff;
+  --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+/* Material lightens the link colour per built-in primary under slate; `custom`
+   gets no such rule, so link text would inherit the dark header tone. */
+[data-md-color-scheme="slate"][data-md-color-primary="custom"] {
+  --md-typeset-a-color: var(--sa-accent-light);
 }
 
 /* ---------- Typography & layout polish ---------- */
@@ -28,7 +56,7 @@
 }
 
 .md-typeset table:not([class]) th {
-  background-color: var(--sa-brand);
+  background-color: var(--sa-accent-dark);
   color: white;
 }
 
@@ -49,14 +77,8 @@
 
 .sa-hero {
   text-align: center;
-  padding: 3rem 1rem 2.5rem;
-  margin: -0.8rem -0.8rem 2rem;
-  border-radius: 0 0 20px 20px;
-  background: radial-gradient(
-    circle at 50% -20%,
-    rgba(110, 99, 245, 0.18),
-    rgba(110, 99, 245, 0) 60%
-  );
+  padding: 3rem 0 2.5rem;
+  margin: 0 0 2rem;
 }
 
 /* The logo is wrapped in a paragraph by Markdown; its margin would otherwise
@@ -65,26 +87,32 @@
   margin: 0;
 }
 
-.sa-hero img {
+.sa-hero > p:first-child img {
   display: block;
   width: 180px;
   margin: 0 auto;
-  filter: drop-shadow(0 8px 20px rgba(110, 99, 245, 0.35));
 }
 
 .sa-hero h1 {
   margin: 0.4rem 0 0.4rem;
   font-size: 2.2rem;
+  color: var(--md-default-fg-color);
 }
 
 .sa-hero p.sa-tagline {
   font-size: 1.2rem;
   font-weight: 600;
-  background: linear-gradient(120deg, var(--sa-brand-dark), var(--sa-brand));
+  background: linear-gradient(120deg, var(--sa-accent-dark), var(--sa-accent));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   margin: 0;
+}
+
+[data-md-color-scheme="slate"] .sa-hero p.sa-tagline {
+  background: linear-gradient(120deg, var(--sa-accent-light), var(--sa-accent));
+  background-clip: text;
+  -webkit-background-clip: text;
 }
 
 .sa-hero p.sa-subtitle {
@@ -96,16 +124,6 @@
 .sa-hero .md-button {
   margin: 0.25rem;
   border-radius: 8px;
-}
-
-.sa-hero .md-button--primary {
-  background-color: var(--sa-brand);
-  border-color: var(--sa-brand);
-}
-
-.sa-hero .md-button--primary:hover {
-  background-color: var(--sa-brand-dark);
-  border-color: var(--sa-brand-dark);
 }
 
 .sa-badges img {
@@ -127,8 +145,8 @@
 .md-typeset .grid.cards > ul > li:hover,
 .md-typeset .grid.cards > ol > li:hover {
   transform: translateY(-3px);
-  box-shadow: 0 10px 24px rgba(110, 99, 245, 0.18);
-  border-color: var(--sa-brand-light);
+  box-shadow: 0 10px 24px rgba(74, 69, 168, 0.18);
+  border-color: var(--sa-accent-light);
 }
 
 .md-typeset .grid.cards > ul > li:first-child,
@@ -138,7 +156,7 @@
 
 .md-typeset .grid.cards svg,
 .md-typeset .grid.cards .twemoji {
-  color: var(--sa-brand);
+  color: var(--sa-accent);
 }
 
 /* ---------- Admonitions ---------- */
@@ -154,10 +172,16 @@
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
 }
 
+/* The header fill sits close to the mark's own violet, so the logo would fade
+   into it; flatten the header copy to white. The hero keeps the gradient. */
+.md-header__button.md-logo img {
+  filter: brightness(0) invert(1);
+}
+
 .md-nav__link--active,
 .md-nav__link:focus,
 .md-nav__link:hover {
-  color: var(--sa-brand);
+  color: var(--sa-accent);
 }
 
 .md-typeset a {

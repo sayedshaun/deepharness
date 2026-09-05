@@ -181,6 +181,7 @@ Graph(state_type: type)
 
 ```python
 async def run(state: Any = None, *, max_steps: int = 50) -> Any
+def diagram() -> str
 ```
 
 Omitting `state` builds one from the type the `Graph` was declared with, so a state whose
@@ -192,6 +193,11 @@ satisfied. A field written by two or more concurrent branches is combined by its
 Taking a `loop=True` edge re-runs the loop head and everything downstream of it; exceeding
 `max_steps` raises `StepLimitExceeded`. Returned by `Graph.build()` — not constructed
 directly.
+
+`diagram()` returns a box-drawing picture of the graph as text — layers top to bottom by
+wave, `═` for start and end nodes, `▽` for a conditional edge, and back-edges routed up the
+right margin. It returns the string rather than printing it. See
+[Seeing the shape](../guide/graph.md#seeing-the-shape).
 
 ### `concat` / `merge_dicts`
 

@@ -3,9 +3,8 @@
 
 **Compose LLM agents into typed, concurrent workflows.**
 
-A lightweight framework for wiring plain Python functions — and the agents inside them — into a
-graph that runs branches in parallel, routes on conditions, and threads one typed state
-object through the whole thing.
+Build agent workflows as a graph of plain Python functions: parallel branches,
+typed state, and 14 LLM providers behind one interface.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
 
@@ -98,7 +97,7 @@ functions (or agents) into a `Graph` instead:
 import asyncio
 from dataclasses import dataclass
 
-from deepharness import Graph
+from deepharness import Agent, Graph, OpenAI
 
 
 @dataclass
@@ -109,6 +108,11 @@ class State:
 
 
 graph = Graph(State)
+
+analyst = Agent(
+    OpenAI(model="gpt-4o-mini"),
+    system="Summarise the quarter in one sentence for an exec audience.",
+)
 
 
 @graph.add(start=True)
@@ -126,8 +130,9 @@ async def fetch_churn(state: State) -> State:
 
 
 @graph.add(end=True)
-def summarize(state: State) -> State:
-    state.summary = f"{state.sales} {state.churn}"
+async def summarize(state: State) -> State:
+    result = await analyst.arun(f"{state.sales} {state.churn}")
+    state.summary = result.output
     return state
 
 
@@ -137,11 +142,26 @@ graph.connect(fetch_churn, summarize)
 executor = graph.build()
 result = asyncio.run(executor.run())
 
-print(result.summary)  # Sales up 12% QoQ. Churn down to 4%.
+print(result.summary)
 ```
 
 `fetch_sales` and `fetch_churn` both run in the first wave, concurrently. `summarize` waits
-for both before running.
+for both before running, then hands the merged state to an `Agent` — a node is just a
+function, so an LLM call inside one needs no special wiring.
+
+`executor.diagram()` draws the wiring, with nodes that run in the same wave side by side:
+
+```text
+╭═════════════╮   ╭═════════════╮
+│ fetch_sales │   │ fetch_churn │
+╰═════════════╯   ╰═════════════╯
+       ╰────────╮        │
+                ├────────╯
+                ▼
+          ╭═══════════╮
+          │ summarize │
+          ╰═══════════╯
+```
 
 ### Agent or Graph?
 
