@@ -97,7 +97,7 @@ functions (or agents) into a `Graph` instead:
 import asyncio
 from dataclasses import dataclass
 
-from deepharness import Graph
+from deepharness import Agent, Graph, OpenAI
 
 
 @dataclass
@@ -108,6 +108,11 @@ class State:
 
 
 graph = Graph(State)
+
+analyst = Agent(
+    OpenAI(model="gpt-4o-mini"),
+    system="Summarise the quarter in one sentence for an exec audience.",
+)
 
 
 @graph.add(start=True)
@@ -125,8 +130,9 @@ async def fetch_churn(state: State) -> State:
 
 
 @graph.add(end=True)
-def summarize(state: State) -> State:
-    state.summary = f"{state.sales} {state.churn}"
+async def summarize(state: State) -> State:
+    result = await analyst.arun(f"{state.sales} {state.churn}")
+    state.summary = result.output
     return state
 
 
@@ -136,11 +142,12 @@ graph.connect(fetch_churn, summarize)
 executor = graph.build()
 result = asyncio.run(executor.run())
 
-print(result.summary)  # Sales up 12% QoQ. Churn down to 4%.
+print(result.summary)
 ```
 
 `fetch_sales` and `fetch_churn` both run in the first wave, concurrently. `summarize` waits
-for both before running.
+for both before running, then hands the merged state to an `Agent` — a node is just a
+function, so an LLM call inside one needs no special wiring.
 
 ### Agent or Graph?
 
