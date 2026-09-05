@@ -133,6 +133,52 @@ except StepLimitExceeded as exc:
     print(exc.state)
 ```
 
+## Seeing the shape
+
+`executor.diagram()` returns a picture of the wiring, laid out top to bottom by wave, so
+nodes drawn side by side are the ones that actually run concurrently:
+
+```python
+graph.connect(load_rubric, critique)
+graph.connect(draft, critique)
+graph.connect(critique, publish, condition=lambda s: s.score >= 0.8)
+graph.connect(critique, draft, loop=True, condition=needs_work)
+
+print(graph.build().diagram())
+```
+
+```text
+╭═════════════╮   ╭═══════╮
+│ load_rubric │   │ draft │◀─╮
+╰═════════════╯   ╰═══════╯  │
+       ╰─────╮        │      │
+             ├────────╯      │
+             ▼               │
+       ╭──────────╮          │
+       │ critique │──────────╯
+       ╰──────────╯
+             │
+             ▽
+        ╭═════════╮
+        │ publish │
+        ╰═════════╯
+
+  ↺ critique → draft when needs_work
+  ▽ conditional edge
+```
+
+A double rule (`═`) marks a `start` or `end` node, `▼` an unconditional edge and `▽` a
+conditional one. A back-edge is routed up the right margin and named after its condition,
+which is why giving the condition a `def` rather than a `lambda` reads better here.
+
+It returns the text rather than printing it, so it is yours to route — a terminal, a log
+line, or a test asserting on the shape of a graph you built dynamically.
+
+Two limits worth knowing. A back-edge whose source or target has a sibling to its right
+would have to cross that node's box, which would read as an edge that does not exist; rather
+than draw a lie it falls back to `(not drawn: no clear margin)` in the notes. And a wide wave
+produces a wide drawing — there is no wrapping or truncation to fit a terminal.
+
 ## Validation
 
 `graph.build()` fails fast on structural mistakes, before anything runs:
