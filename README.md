@@ -149,6 +149,20 @@ print(result.summary)
 for both before running, then hands the merged state to an `Agent` — a node is just a
 function, so an LLM call inside one needs no special wiring.
 
+`executor.diagram()` draws the wiring, with nodes that run in the same wave side by side:
+
+```text
+╭═════════════╮   ╭═════════════╮
+│ fetch_sales │   │ fetch_churn │
+╰═════════════╯   ╰═════════════╯
+       ╰────────╮        │
+                ├────────╯
+                ▼
+          ╭═══════════╮
+          │ summarize │
+          ╰═══════════╯
+```
+
 ### Agent or Graph?
 
 Reach for `as_tool()` when an LLM should decide at runtime whether and which sub-agent to
