@@ -11,9 +11,8 @@ title: DeepHarness
 <p class="sa-tagline">Compose LLM agents into typed, concurrent workflows.</p>
 
 <p class="sa-subtitle">
-A small framework for wiring plain Python functions — and the agents inside them — into a
-graph that runs branches in parallel, routes on conditions, and threads one typed state
-object through the whole thing.
+Build agent workflows as a graph of plain Python functions: parallel branches,
+typed state, and 14 LLM providers behind one interface.
 </p>
 
 [Get started :octicons-arrow-right-24:](getting-started.md){ .md-button .md-button--primary }
