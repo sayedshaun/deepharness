@@ -233,10 +233,24 @@ class GeminiResponse:
             parts=[
                 GeminiPart.from_json(part) for part in (content or {}).get("parts", [])
             ],
-            usage=usage_from(
-                data.get("usageMetadata"),
-                prompt="promptTokenCount",
-                completion="candidatesTokenCount",
-                total="totalTokenCount",
-            ),
+            usage=_usage(data.get("usageMetadata")),
         )
+
+
+def _usage(metadata: dict[str, Any] | None) -> Usage | None:
+    """Token counts, with thinking tokens counted as completion.
+
+    Gemini reports reasoning tokens only in thoughtsTokenCount: they are inside
+    totalTokenCount but absent from candidatesTokenCount, so taking that field
+    at face value under-reports what a thinking model actually generated - and
+    leaves the three numbers not adding up.
+    """
+    usage = usage_from(
+        metadata,
+        prompt="promptTokenCount",
+        completion="candidatesTokenCount",
+        total="totalTokenCount",
+    )
+    if usage is not None and metadata:
+        usage.completion_tokens += metadata.get("thoughtsTokenCount", 0)
+    return usage

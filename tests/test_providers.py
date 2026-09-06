@@ -792,3 +792,27 @@ def test_gateways_ask_for_streamed_usage_by_default():
     assert Groq("llama-test", api_key="k").payload(
         [], None, stream=True
     ).stream_options == {"include_usage": True}
+
+
+async def test_gemini_counts_thinking_tokens_as_completion():
+    client = make_client(
+        {
+            "candidates": [{"content": {"parts": [{"text": "hello"}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 89,
+                "candidatesTokenCount": 19,
+                "totalTokenCount": 164,
+                "thoughtsTokenCount": 56,
+            },
+        }
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    # 89 + 19 does not reach 164; the missing 56 are the model's reasoning.
+    assert result.usage.completion_tokens == 75
+    assert (
+        result.usage.prompt_tokens + result.usage.completion_tokens
+        == result.usage.total_tokens
+    )
