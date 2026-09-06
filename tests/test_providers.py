@@ -902,3 +902,27 @@ async def test_a_gateway_inherits_the_finish_reason_mapping():
     result = await provider.agenerate([{"role": "user", "content": "hi"}])
 
     assert result.finish_reason == "length"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("end_turn", "stop"),
+        ("tool_use", "stop"),
+        ("stop_sequence", "stop"),
+        ("max_tokens", "length"),
+        ("refusal", "filtered"),
+        ("pause_turn", "other"),
+        (None, "stop"),
+    ],
+)
+async def test_anthropic_normalizes_its_stop_reason(raw, expected):
+    client = make_client(
+        {"content": [{"type": "text", "text": "half a sen"}], "stop_reason": raw}
+    )
+    provider = Anthropic(model="claude-test", api_key="k", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == expected
+    assert result.content == "half a sen"

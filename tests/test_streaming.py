@@ -442,3 +442,46 @@ def test_openai_stream_defaults_to_stop():
     feed_all(reader, [{"choices": [{"delta": {"content": "done"}}]}])
 
     assert reader.response().finish_reason == "stop"
+
+
+def test_anthropic_stream_carries_a_cut_short_stop_reason():
+    reader = AnthropicStream()
+
+    feed_all(
+        reader,
+        [
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "half a sen"},
+            },
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "max_tokens"},
+                "usage": {"output_tokens": 9},
+            },
+        ],
+    )
+
+    response = reader.response()
+
+    assert response.content == "half a sen"
+    assert response.finish_reason == "length"
+
+
+def test_anthropic_stream_defaults_to_stop():
+    reader = AnthropicStream()
+
+    feed_all(
+        reader,
+        [
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "done"},
+            },
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
+        ],
+    )
+
+    assert reader.response().finish_reason == "stop"
