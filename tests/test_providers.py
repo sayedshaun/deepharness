@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from deepharness.providers.anthropic import Anthropic, AnthropicStream
 from deepharness.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 from deepharness.providers.gateways import Groq
@@ -816,3 +818,53 @@ async def test_gemini_counts_thinking_tokens_as_completion():
         result.usage.prompt_tokens + result.usage.completion_tokens
         == result.usage.total_tokens
     )
+
+
+async def test_gemini_reports_a_finished_answer_as_stop():
+    client = make_client(
+        {
+            "candidates": [
+                {"content": {"parts": [{"text": "hi"}]}, "finishReason": "STOP"}
+            ]
+        }
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == "stop"
+
+
+async def test_gemini_response_without_a_finish_reason_defaults_to_stop():
+    client = make_client({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]})
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == "stop"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("MAX_TOKENS", "length"),
+        ("RECITATION", "filtered"),
+        ("SAFETY", "filtered"),
+        ("PROHIBITED_CONTENT", "filtered"),
+        ("SOMETHING_NEW", "other"),
+    ],
+)
+async def test_gemini_normalizes_a_cut_short_answer(raw, expected):
+    client = make_client(
+        {
+            "candidates": [
+                {"content": {"parts": [{"text": "half a sen"}]}, "finishReason": raw}
+            ]
+        }
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == expected
+    assert result.content == "half a sen"  # the partial text is kept

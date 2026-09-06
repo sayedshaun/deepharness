@@ -48,7 +48,7 @@ result = await agent.arun("Weather in Oslo?")  # async, concurrent tool calls
 | `messages` | The transcript, as wire-form dicts. |
 | `output` | The answer: text, or an `output=` instance when one is set. |
 | `usage` | `TokenUsage` for this run. |
-| `stop_reason` | Why the loop ended: `"answer"`, `"step_budget"`, `"paused"`, `"token_budget"`. |
+| `stop_reason` | Why the loop ended: `"answer"`, `"step_budget"`, `"paused"`, `"token_budget"`, `"truncated"`. |
 | `paused` | Any `PendingHumanInput` waiting on a human; empty otherwise. |
 | `answered` | `True` only when `stop_reason == "answer"` — check this before trusting `output`. |
 

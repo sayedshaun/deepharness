@@ -9,6 +9,7 @@ import httpx
 from ..errors import ProviderError
 from .base import (
     CompletionResponse,
+    FinishReason,
     ReasoningLevel,
     ToolCall,
     token_usage,
@@ -21,6 +22,19 @@ from .wire import Usage, clip, usage_from
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _ROLE_MAP = {"assistant": "model", "system": "user", "user": "user"}
 _ENV_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+_FINISH_REASONS: dict[str, FinishReason] = {
+    "STOP": "stop",
+    "MAX_TOKENS": "length",
+    "SAFETY": "filtered",
+    "RECITATION": "filtered",
+    "BLOCKLIST": "filtered",
+    "PROHIBITED_CONTENT": "filtered",
+    "SPII": "filtered",
+    "IMAGE_SAFETY": "filtered",
+}
+"""Gemini's finishReason values, normalized. An unlisted one maps to "other":
+new reasons get added over time and every one of them still means the answer
+stopped for a reason that is not "the model was done"."""
 
 
 @dataclass(slots=True)
@@ -161,7 +175,10 @@ def _from_gemini_response(response: GeminiResponse) -> CompletionResponse:
         if part.name
     ]
     return CompletionResponse(
-        content=text, tool_calls=tool_calls, usage=token_usage(response.usage)
+        content=text,
+        tool_calls=tool_calls,
+        usage=token_usage(response.usage),
+        finish_reason=response.finish_reason or "stop",
     )
 
 
@@ -173,17 +190,20 @@ class GeminiStream:
     reassemble, only to collect.
     """
 
-    __slots__ = ("_calls", "_text", "_usage")
+    __slots__ = ("_calls", "_finish_reason", "_text", "_usage")
 
     def __init__(self) -> None:
         self._text: list[str] = []
         self._calls: list[ToolCall] = []
         self._usage: Usage | None = None
+        self._finish_reason: FinishReason = "stop"
 
     def feed(self, data: dict[str, Any]) -> str | None:
         chunk = GeminiResponse.from_json(data)
         if chunk.usage is not None:
             self._usage = chunk.usage
+        if chunk.finish_reason is not None:
+            self._finish_reason = chunk.finish_reason
         self._calls.extend(
             ToolCall(name=part.name, arguments=dict(part.args))
             for part in chunk.parts
@@ -199,6 +219,7 @@ class GeminiStream:
             content="".join(self._text),
             tool_calls=list(self._calls),
             usage=token_usage(self._usage),
+            finish_reason=self._finish_reason,
         )
 
 
@@ -222,18 +243,25 @@ class GeminiPart:
 class GeminiResponse:
     parts: list[GeminiPart] = field(default_factory=list)
     usage: Usage | None = None
+    finish_reason: FinishReason | None = None
+    """None while the stream is still running; set on the chunk that ends it."""
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> GeminiResponse:
         candidates = data.get("candidates")
         if candidates is None:
             raise ProviderError(f"Gemini response has no candidates: {clip(data)}")
-        content = candidates[0].get("content") if candidates else None
+        candidate = candidates[0] if candidates else {}
+        raw_finish = candidate.get("finishReason")
         return cls(
             parts=[
-                GeminiPart.from_json(part) for part in (content or {}).get("parts", [])
+                GeminiPart.from_json(part)
+                for part in (candidate.get("content") or {}).get("parts", [])
             ],
             usage=_usage(data.get("usageMetadata")),
+            finish_reason=(
+                _FINISH_REASONS.get(raw_finish, "other") if raw_finish else None
+            ),
         )
 
 

@@ -711,3 +711,32 @@ async def test_a_sync_tool_does_not_block_the_event_loop():
 
     assert state.output == "finished"
     assert ticks > 0, "the event loop never got a turn while the tool ran"
+
+
+async def test_a_cut_short_answer_does_not_count_as_answered():
+    """A truncated reply arrives in the same shape as a whole one, so the stop
+    reason is the only thing that can tell them apart."""
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="Some of their most recent", finish_reason="length"
+            )
+        ]
+    )
+    agent = Agent(provider)
+
+    result = await agent.arun("what shipped?")
+
+    assert result.stop_reason == "truncated"
+    assert result.answered is False
+    assert result.output == "Some of their most recent"  # partial text is kept
+
+
+async def test_a_complete_answer_is_still_an_answer():
+    provider = ScriptedProvider([CompletionResponse(content="all done")])
+    agent = Agent(provider)
+
+    result = await agent.arun("what shipped?")
+
+    assert result.stop_reason == "answer"
+    assert result.answered is True

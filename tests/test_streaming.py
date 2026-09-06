@@ -392,3 +392,28 @@ async def test_structured_output_survives_streaming():
     events = [event async for event in agent.astream_events("where?")]
 
     assert events[-1].state.output == Weather(city="Oslo")
+
+
+def test_gemini_stream_carries_a_cut_short_finish_reason():
+    reader = GeminiStream()
+
+    feed_all(
+        reader,
+        [
+            {"candidates": [{"content": {"parts": [{"text": "half a sen"}]}}]},
+            {"candidates": [{"finishReason": "RECITATION"}]},
+        ],
+    )
+
+    response = reader.response()
+
+    assert response.content == "half a sen"
+    assert response.finish_reason == "filtered"
+
+
+def test_gemini_stream_defaults_to_stop_when_no_chunk_says_otherwise():
+    reader = GeminiStream()
+
+    feed_all(reader, [{"candidates": [{"content": {"parts": [{"text": "done"}]}}]}])
+
+    assert reader.response().finish_reason == "stop"
