@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from deepharness.providers.anthropic import Anthropic, AnthropicStream
 from deepharness.providers.base import LLM, CompletionResponse, TokenUsage, ToolCall
 from deepharness.providers.gateways import Groq
@@ -792,3 +794,151 @@ def test_gateways_ask_for_streamed_usage_by_default():
     assert Groq("llama-test", api_key="k").payload(
         [], None, stream=True
     ).stream_options == {"include_usage": True}
+
+
+async def test_gemini_counts_thinking_tokens_as_completion():
+    client = make_client(
+        {
+            "candidates": [{"content": {"parts": [{"text": "hello"}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 89,
+                "candidatesTokenCount": 19,
+                "totalTokenCount": 164,
+                "thoughtsTokenCount": 56,
+            },
+        }
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    # 89 + 19 does not reach 164; the missing 56 are the model's reasoning.
+    assert result.usage.completion_tokens == 75
+    assert (
+        result.usage.prompt_tokens + result.usage.completion_tokens
+        == result.usage.total_tokens
+    )
+
+
+async def test_gemini_reports_a_finished_answer_as_stop():
+    client = make_client(
+        {
+            "candidates": [
+                {"content": {"parts": [{"text": "hi"}]}, "finishReason": "STOP"}
+            ]
+        }
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == "stop"
+
+
+async def test_gemini_response_without_a_finish_reason_defaults_to_stop():
+    client = make_client({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]})
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == "stop"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("MAX_TOKENS", "length"),
+        ("RECITATION", "filtered"),
+        ("SAFETY", "filtered"),
+        ("PROHIBITED_CONTENT", "filtered"),
+        ("SOMETHING_NEW", "other"),
+    ],
+)
+async def test_gemini_normalizes_a_cut_short_answer(raw, expected):
+    client = make_client(
+        {
+            "candidates": [
+                {"content": {"parts": [{"text": "half a sen"}]}, "finishReason": raw}
+            ]
+        }
+    )
+    provider = Gemini(model="gemini-test", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == expected
+    assert result.content == "half a sen"  # the partial text is kept
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("stop", "stop"),
+        ("tool_calls", "stop"),
+        ("length", "length"),
+        ("content_filter", "filtered"),
+        ("something_new", "other"),
+        (None, "stop"),
+    ],
+)
+async def test_openai_normalizes_its_finish_reason(raw, expected):
+    client = make_client(
+        {"choices": [{"message": {"content": "half a sen"}, "finish_reason": raw}]}
+    )
+    provider = OpenAI(model="gpt-test", api_key="k", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == expected
+    assert result.content == "half a sen"
+
+
+async def test_a_gateway_inherits_the_finish_reason_mapping():
+    client = make_client(
+        {"choices": [{"message": {"content": "cut"}, "finish_reason": "length"}]}
+    )
+    provider = Groq(model="llama-test", api_key="k", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == "length"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("end_turn", "stop"),
+        ("tool_use", "stop"),
+        ("stop_sequence", "stop"),
+        ("max_tokens", "length"),
+        ("refusal", "filtered"),
+        ("pause_turn", "other"),
+        (None, "stop"),
+    ],
+)
+async def test_anthropic_normalizes_its_stop_reason(raw, expected):
+    client = make_client(
+        {"content": [{"type": "text", "text": "half a sen"}], "stop_reason": raw}
+    )
+    provider = Anthropic(model="claude-test", api_key="k", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == expected
+    assert result.content == "half a sen"
+
+
+def test_openai_sends_no_auth_header_without_a_key(monkeypatch):
+    """A local server takes no credential, and "Bearer " with an empty value is
+    an illegal header value httpx refuses to send at request time."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    provider = OpenAI(model="local", api_key="")
+
+    assert "authorization" not in provider._http._async_client.headers
+
+
+def test_openai_still_sends_a_key_when_given_one():
+    provider = OpenAI(model="gpt-test", api_key="secret")
+
+    assert provider._http._async_client.headers["authorization"] == "Bearer secret"

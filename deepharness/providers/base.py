@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field, fields
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 
 def token_usage(usage: Any) -> TokenUsage | None:
@@ -84,6 +84,15 @@ class TokenUsage:
         )
 
 
+FinishReason = Literal["stop", "length", "filtered", "other"]
+"""Why the model stopped generating, normalized across vendors.
+
+Anything but "stop" means the text is cut short: a vendor returns a partial
+answer in the same shape as a whole one, so without this a caller cannot tell
+half a sentence from a finished reply.
+"""
+
+
 @dataclass(slots=True)
 class CompletionResponse:
     """Normalized result of a provider completion, independent of vendor format."""
@@ -91,6 +100,7 @@ class CompletionResponse:
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage | None = None
+    finish_reason: FinishReason = "stop"
 
 
 @dataclass(slots=True)

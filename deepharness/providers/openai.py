@@ -10,6 +10,7 @@ import httpx
 from deepharness.errors import ProviderError
 from deepharness.providers.base import (
     CompletionResponse,
+    FinishReason,
     ReasoningLevel,
     ToolCall,
     token_usage,
@@ -17,9 +18,26 @@ from deepharness.providers.base import (
 )
 from deepharness.providers.client import HTTPClient
 from deepharness.providers.rest import RestCompletions, RestLLM
-from deepharness.providers.wire import Usage, clip, load_arguments, require, usage_from
+from deepharness.providers.wire import (
+    Usage,
+    clip,
+    finish_reason_from,
+    load_arguments,
+    require,
+    usage_from,
+)
 
 _BASE_URL = "https://api.openai.com/v1"
+_FINISH_REASONS: dict[str, FinishReason] = {
+    "stop": "stop",
+    "tool_calls": "stop",
+    "function_call": "stop",
+    "length": "length",
+    "content_filter": "filtered",
+}
+"""OpenAI's finish_reason values, normalized. "tool_calls" is a complete turn -
+the model finished, it just asked for a tool - so it maps to "stop" rather than
+being reported as an answer cut short."""
 
 
 @dataclass(slots=True)
@@ -81,7 +99,10 @@ class OpenAI(RestLLM):
         if api_key is None and self.env_key:
             api_key = os.environ.get(self.env_key)
 
-        headers = {"Authorization": f"Bearer {api_key or ''}"}
+        # No credential means no header at all: "Bearer " with an empty value
+        # is an illegal header value that httpx refuses to send, which is the
+        # normal case for a local server (Ollama, vLLM, LM Studio, llama.cpp).
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         resolved_base_url = base_url or self.default_base_url
         self._http = HTTPClient(
             resolved_base_url, headers=headers, client=client, sync_client=sync_client
@@ -190,6 +211,7 @@ def _from_openai_response(completion: OpenAIChatCompletion) -> CompletionRespons
         content=completion.message.content or "",
         tool_calls=tool_calls,
         usage=token_usage(completion.usage),
+        finish_reason=completion.finish_reason,
     )
 
 
@@ -228,6 +250,7 @@ class OpenAIMessage:
 class OpenAIChatCompletion:
     message: OpenAIMessage
     usage: Usage | None = None
+    finish_reason: FinishReason = "stop"
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> OpenAIChatCompletion:
@@ -236,6 +259,10 @@ class OpenAIChatCompletion:
             raise ProviderError(f"OpenAI response has no choices: {clip(data)}")
         return cls(
             message=OpenAIMessage.from_json(require(choices[0], "message", "OpenAI")),
+            finish_reason=finish_reason_from(
+                choices[0].get("finish_reason"), _FINISH_REASONS
+            )
+            or "stop",
             usage=usage_from(
                 data.get("usage"),
                 prompt="prompt_tokens",
@@ -253,12 +280,13 @@ class OpenAIStream:
     keyed by index because that is the only field present on every fragment.
     """
 
-    __slots__ = ("_calls", "_text", "_usage")
+    __slots__ = ("_calls", "_finish_reason", "_text", "_usage")
 
     def __init__(self) -> None:
         self._text: list[str] = []
         self._calls: dict[int, dict[str, Any]] = {}
         self._usage: Usage | None = None
+        self._finish_reason: FinishReason = "stop"
 
     def feed(self, data: dict[str, Any]) -> str | None:
         if usage := data.get("usage"):
@@ -270,6 +298,11 @@ class OpenAIStream:
         choices = data.get("choices") or []
         if not choices:
             return None
+        chunk_finish = finish_reason_from(
+            choices[0].get("finish_reason"), _FINISH_REASONS
+        )
+        if chunk_finish is not None:
+            self._finish_reason = chunk_finish
         delta = choices[0].get("delta") or {}
         for fragment in delta.get("tool_calls") or []:
             call = self._calls.setdefault(
@@ -297,4 +330,5 @@ class OpenAIStream:
                 if call["name"]
             ],
             usage=token_usage(self._usage),
+            finish_reason=self._finish_reason,
         )

@@ -102,10 +102,14 @@ class Budget:
             )
 
 
-StopReason = Literal["answer", "step_budget", "paused", "token_budget"]
+StopReason = Literal["answer", "step_budget", "paused", "token_budget", "truncated"]
 """Why the think/act loop stopped. Only "answer" means the model actually
 replied - the rest are early exits, so a caller that ignores this can't tell
-a real answer from a truncated run."""
+a real answer from a truncated run.
+
+"truncated" is the provider cutting the model off mid-answer (a length cap, a
+content filter). The partial text is still in output, because discarding it
+would lose the only evidence of what went wrong."""
 
 
 @dataclass(slots=True)

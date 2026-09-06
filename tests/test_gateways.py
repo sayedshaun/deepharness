@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock
 
-from deepharness.providers.gateways import Groq, Ollama
+from deepharness.providers.gateways import Groq, LlamaCpp, Ollama
 from deepharness.providers.openai import _build_payload
 
 
@@ -27,13 +27,15 @@ def test_explicit_api_key_overrides_env(monkeypatch):
     )
 
 
-def test_local_gateway_has_no_env_lookup_and_empty_auth(monkeypatch):
+def test_local_gateway_has_no_env_lookup_and_no_auth_header(monkeypatch):
+    """A local server takes no credential, and "Bearer " with an empty value is
+    an illegal header value that httpx refuses to send at request time."""
     monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
 
     provider = Ollama("llama3")
 
     assert str(provider._http._async_client.base_url) == "http://localhost:11434/v1/"
-    assert provider._http._async_client.headers["authorization"] == "Bearer "
+    assert "authorization" not in provider._http._async_client.headers
 
 
 def test_base_url_param_overrides_default(monkeypatch):
@@ -64,3 +66,19 @@ def test_temperature_omitted_by_default():
     payload = _build_payload("model", [{"role": "user", "content": "hi"}], None, None)
 
     assert "temperature" not in payload.to_json()
+
+
+def test_llamacpp_defaults_to_the_llama_server_port(monkeypatch):
+    monkeypatch.delenv("LLAMACPP_API_KEY", raising=False)
+
+    provider = LlamaCpp("qwen3-4b")
+
+    assert str(provider._http._async_client.base_url) == "http://localhost:8080/v1/"
+    assert "authorization" not in provider._http._async_client.headers
+
+
+def test_llamacpp_accepts_a_remote_base_url():
+    """llama-server behind a tunnel or reverse proxy is the same wire format."""
+    provider = LlamaCpp("qwen3-4b", base_url="https://llm.example/v1")
+
+    assert str(provider._http._async_client.base_url) == "https://llm.example/v1/"

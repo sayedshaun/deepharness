@@ -258,7 +258,13 @@ class Agent:
                         Message.human(f"Answer by calling {FINAL_TOOL}.").to_dict()
                     )
                     continue
-                return self._result(state, messages, response.content, "answer")
+                cut_short = response.finish_reason != "stop"
+                return self._result(
+                    state,
+                    messages,
+                    response.content,
+                    "truncated" if cut_short else "answer",
+                )
 
             if not self._tools:
                 raise ConfigurationError(

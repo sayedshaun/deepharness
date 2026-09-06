@@ -8,6 +8,7 @@ import httpx
 
 from deepharness.providers.base import (
     CompletionResponse,
+    FinishReason,
     ReasoningLevel,
     ToolCall,
     token_usage,
@@ -15,12 +16,28 @@ from deepharness.providers.base import (
 )
 from deepharness.providers.client import HTTPClient
 from deepharness.providers.rest import RestCompletions, RestLLM
-from deepharness.providers.wire import Usage, load_arguments, require, usage_from
+from deepharness.providers.wire import (
+    Usage,
+    finish_reason_from,
+    load_arguments,
+    require,
+    usage_from,
+)
 
 _BASE_URL = "https://api.anthropic.com/v1"
 _ANTHROPIC_VERSION = "2023-06-01"
 _DEFAULT_MAX_TOKENS = 4096
 _ENV_KEY = "ANTHROPIC_API_KEY"
+_FINISH_REASONS: dict[str, FinishReason] = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "tool_use": "stop",
+    "max_tokens": "length",
+    "refusal": "filtered",
+}
+"""Anthropic's stop_reason values, normalized. "max_tokens" matters more here
+than at other vendors: max_tokens is required on every request, so a long answer
+runs into the default cap rather than only an unusually long one."""
 
 
 @dataclass(slots=True)
@@ -184,7 +201,10 @@ def _from_anthropic_response(message: AnthropicMessage) -> CompletionResponse:
         if block.type == "tool_use" and block.name
     ]
     return CompletionResponse(
-        content=text, tool_calls=tool_calls, usage=token_usage(message.usage)
+        content=text,
+        tool_calls=tool_calls,
+        usage=token_usage(message.usage),
+        finish_reason=message.finish_reason or "stop",
     )
 
 
@@ -211,6 +231,7 @@ class AnthropicContentBlock:
 class AnthropicMessage:
     content: list[AnthropicContentBlock] = field(default_factory=list)
     usage: Usage | None = None
+    finish_reason: FinishReason | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> AnthropicMessage:
@@ -220,6 +241,7 @@ class AnthropicMessage:
             usage=usage_from(
                 data.get("usage"), prompt="input_tokens", completion="output_tokens"
             ),
+            finish_reason=finish_reason_from(data.get("stop_reason"), _FINISH_REASONS),
         )
 
 
@@ -231,12 +253,13 @@ class AnthropicStream:
     block is open, and tool arguments arrive as partial_json fragments.
     """
 
-    __slots__ = ("_blocks", "_text", "_usage")
+    __slots__ = ("_blocks", "_finish_reason", "_text", "_usage")
 
     def __init__(self) -> None:
         self._text: list[str] = []
         self._blocks: dict[int, dict[str, Any]] = {}
         self._usage: Usage | None = None
+        self._finish_reason: FinishReason = "stop"
 
     def feed(self, data: dict[str, Any]) -> str | None:
         event = data.get("type")
@@ -267,6 +290,9 @@ class AnthropicStream:
             self._record_usage((data.get("message") or {}).get("usage"))
         elif event == "message_delta":
             self._record_usage(data.get("usage"))
+            raw_finish = (data.get("delta") or {}).get("stop_reason")
+            if (finish := finish_reason_from(raw_finish, _FINISH_REASONS)) is not None:
+                self._finish_reason = finish
         return None
 
     def _record_usage(self, usage: dict[str, Any] | None) -> None:
@@ -300,4 +326,5 @@ class AnthropicStream:
                 if block["name"]
             ],
             usage=token_usage(self._usage),
+            finish_reason=self._finish_reason,
         )

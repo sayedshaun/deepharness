@@ -97,3 +97,16 @@ class LMStudio(OpenAI):
     default_base_url = "http://localhost:1234/v1"
     env_key = ""
     __slots__ = ()
+
+
+class LlamaCpp(OpenAI):
+    """llama.cpp's own server (llama-server), which speaks this wire format.
+
+    Tool calling needs the server started with --jinja: without it llama.cpp
+    emits the chat template's raw text instead of parsing calls into tool_calls.
+    """
+
+    provider = "llamacpp"
+    default_base_url = "http://localhost:8080/v1"
+    env_key = ""
+    __slots__ = ()

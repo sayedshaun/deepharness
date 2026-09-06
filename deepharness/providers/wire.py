@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..errors import ProviderError
+from .base import FinishReason
 
 
 def require(data: dict[str, Any], key: str, where: str) -> Any:
@@ -77,3 +78,20 @@ def load_arguments(raw: str) -> dict[str, Any]:
         return json.loads(raw)
     except json.JSONDecodeError:
         return {}
+
+
+def finish_reason_from(
+    raw: str | None, mapping: dict[str, FinishReason]
+) -> FinishReason | None:
+    """One vendor's finish reason under its own name, or None if it sent none.
+
+    None rather than "stop" for a missing value: mid-stream every chunk lacks
+    one, and that means "not finished yet", not "finished normally". Callers
+    settle it to "stop" at the point a whole response is built.
+
+    An unmapped value becomes "other" - vendors add reasons over time, and a new
+    one is far more likely to mean a cut-off answer than a clean stop.
+    """
+    if not raw:
+        return None
+    return mapping.get(raw, "other")

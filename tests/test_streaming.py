@@ -392,3 +392,96 @@ async def test_structured_output_survives_streaming():
     events = [event async for event in agent.astream_events("where?")]
 
     assert events[-1].state.output == Weather(city="Oslo")
+
+
+def test_gemini_stream_carries_a_cut_short_finish_reason():
+    reader = GeminiStream()
+
+    feed_all(
+        reader,
+        [
+            {"candidates": [{"content": {"parts": [{"text": "half a sen"}]}}]},
+            {"candidates": [{"finishReason": "RECITATION"}]},
+        ],
+    )
+
+    response = reader.response()
+
+    assert response.content == "half a sen"
+    assert response.finish_reason == "filtered"
+
+
+def test_gemini_stream_defaults_to_stop_when_no_chunk_says_otherwise():
+    reader = GeminiStream()
+
+    feed_all(reader, [{"candidates": [{"content": {"parts": [{"text": "done"}]}}]}])
+
+    assert reader.response().finish_reason == "stop"
+
+
+def test_openai_stream_carries_a_cut_short_finish_reason():
+    reader = OpenAIStream()
+
+    feed_all(
+        reader,
+        [
+            {"choices": [{"delta": {"content": "half a sen"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "length"}]},
+        ],
+    )
+
+    response = reader.response()
+
+    assert response.content == "half a sen"
+    assert response.finish_reason == "length"
+
+
+def test_openai_stream_defaults_to_stop():
+    reader = OpenAIStream()
+
+    feed_all(reader, [{"choices": [{"delta": {"content": "done"}}]}])
+
+    assert reader.response().finish_reason == "stop"
+
+
+def test_anthropic_stream_carries_a_cut_short_stop_reason():
+    reader = AnthropicStream()
+
+    feed_all(
+        reader,
+        [
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "half a sen"},
+            },
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "max_tokens"},
+                "usage": {"output_tokens": 9},
+            },
+        ],
+    )
+
+    response = reader.response()
+
+    assert response.content == "half a sen"
+    assert response.finish_reason == "length"
+
+
+def test_anthropic_stream_defaults_to_stop():
+    reader = AnthropicStream()
+
+    feed_all(
+        reader,
+        [
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "done"},
+            },
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
+        ],
+    )
+
+    assert reader.response().finish_reason == "stop"
