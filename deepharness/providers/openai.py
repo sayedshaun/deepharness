@@ -99,7 +99,10 @@ class OpenAI(RestLLM):
         if api_key is None and self.env_key:
             api_key = os.environ.get(self.env_key)
 
-        headers = {"Authorization": f"Bearer {api_key or ''}"}
+        # No credential means no header at all: "Bearer " with an empty value
+        # is an illegal header value that httpx refuses to send, which is the
+        # normal case for a local server (Ollama, vLLM, LM Studio, llama.cpp).
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         resolved_base_url = base_url or self.default_base_url
         self._http = HTTPClient(
             resolved_base_url, headers=headers, client=client, sync_client=sync_client

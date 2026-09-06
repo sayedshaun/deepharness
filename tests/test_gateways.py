@@ -27,13 +27,15 @@ def test_explicit_api_key_overrides_env(monkeypatch):
     )
 
 
-def test_local_gateway_has_no_env_lookup_and_empty_auth(monkeypatch):
+def test_local_gateway_has_no_env_lookup_and_no_auth_header(monkeypatch):
+    """A local server takes no credential, and "Bearer " with an empty value is
+    an illegal header value that httpx refuses to send at request time."""
     monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
 
     provider = Ollama("llama3")
 
     assert str(provider._http._async_client.base_url) == "http://localhost:11434/v1/"
-    assert provider._http._async_client.headers["authorization"] == "Bearer "
+    assert "authorization" not in provider._http._async_client.headers
 
 
 def test_base_url_param_overrides_default(monkeypatch):

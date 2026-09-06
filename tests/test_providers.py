@@ -926,3 +926,19 @@ async def test_anthropic_normalizes_its_stop_reason(raw, expected):
 
     assert result.finish_reason == expected
     assert result.content == "half a sen"
+
+
+def test_openai_sends_no_auth_header_without_a_key(monkeypatch):
+    """A local server takes no credential, and "Bearer " with an empty value is
+    an illegal header value httpx refuses to send at request time."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    provider = OpenAI(model="local", api_key="")
+
+    assert "authorization" not in provider._http._async_client.headers
+
+
+def test_openai_still_sends_a_key_when_given_one():
+    provider = OpenAI(model="gpt-test", api_key="secret")
+
+    assert provider._http._async_client.headers["authorization"] == "Bearer secret"
