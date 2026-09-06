@@ -417,3 +417,28 @@ def test_gemini_stream_defaults_to_stop_when_no_chunk_says_otherwise():
     feed_all(reader, [{"candidates": [{"content": {"parts": [{"text": "done"}]}}]}])
 
     assert reader.response().finish_reason == "stop"
+
+
+def test_openai_stream_carries_a_cut_short_finish_reason():
+    reader = OpenAIStream()
+
+    feed_all(
+        reader,
+        [
+            {"choices": [{"delta": {"content": "half a sen"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "length"}]},
+        ],
+    )
+
+    response = reader.response()
+
+    assert response.content == "half a sen"
+    assert response.finish_reason == "length"
+
+
+def test_openai_stream_defaults_to_stop():
+    reader = OpenAIStream()
+
+    feed_all(reader, [{"choices": [{"delta": {"content": "done"}}]}])
+
+    assert reader.response().finish_reason == "stop"

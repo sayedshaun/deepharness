@@ -868,3 +868,37 @@ async def test_gemini_normalizes_a_cut_short_answer(raw, expected):
 
     assert result.finish_reason == expected
     assert result.content == "half a sen"  # the partial text is kept
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("stop", "stop"),
+        ("tool_calls", "stop"),
+        ("length", "length"),
+        ("content_filter", "filtered"),
+        ("something_new", "other"),
+        (None, "stop"),
+    ],
+)
+async def test_openai_normalizes_its_finish_reason(raw, expected):
+    client = make_client(
+        {"choices": [{"message": {"content": "half a sen"}, "finish_reason": raw}]}
+    )
+    provider = OpenAI(model="gpt-test", api_key="k", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == expected
+    assert result.content == "half a sen"
+
+
+async def test_a_gateway_inherits_the_finish_reason_mapping():
+    client = make_client(
+        {"choices": [{"message": {"content": "cut"}, "finish_reason": "length"}]}
+    )
+    provider = Groq(model="llama-test", api_key="k", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == "length"
