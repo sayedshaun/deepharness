@@ -4,7 +4,7 @@
 **Compose LLM agents into typed, concurrent workflows.**
 
 Build agent workflows as a graph of plain Python functions: parallel branches,
-typed state, and 14 LLM providers behind one interface.
+typed state, and 15 LLM providers behind one interface.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
 
@@ -26,7 +26,7 @@ typed state, and 14 LLM providers behind one interface.
   are offloaded to threads so a blocking call never stalls the event loop.
 - **One provider interface, a dozen vendors.** `OpenAI`, `Anthropic`, `Gemini`, and OpenAI-compatible
   gateways (`Groq`, `Together`, `Fireworks`, `DeepSeek`, `Mistral`, `Cerebras`, `OpenRouter`, `XAI`,
-  `Ollama`, `LMStudio`, `VLLM`) all share the same `LLM` interface.
+  `Ollama`, `LMStudio`, `VLLM`, `LlamaCpp`) all share the same `LLM` interface.
 
 ## Install
 
@@ -181,7 +181,8 @@ variable:
 | `Gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
 
 OpenAI-compatible gateways each read their own key — `GROQ_API_KEY`, `TOGETHER_API_KEY`,
-`DEEPSEEK_API_KEY`, and so on — and local runtimes (`Ollama`, `LMStudio`, `VLLM`) need no key
+`DEEPSEEK_API_KEY`, and so on — and local runtimes (`Ollama`, `LMStudio`, `VLLM`, `LlamaCpp`)
+need no key
 at all. Swapping vendors means swapping the constructor; nothing else changes:
 
 ```python

@@ -268,7 +268,7 @@ environment automatically:
 
 `Groq`, `Together`, `DeepSeek`, `Mistral`, `XAI`, `OpenRouter`, `Fireworks`, `Cerebras`.
 
-Local servers — no API key required: `Ollama`, `VLLM`, `LMStudio`.
+Local servers — no API key required: `Ollama`, `VLLM`, `LMStudio`, `LlamaCpp`.
 
 For any other OpenAI-compatible endpoint, construct `OpenAI` directly with an explicit
 `base_url` and `api_key`.

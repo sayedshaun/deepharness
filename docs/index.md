@@ -12,7 +12,7 @@ title: DeepHarness
 
 <p class="sa-subtitle">
 Build agent workflows as a graph of plain Python functions: parallel branches,
-typed state, and 14 LLM providers behind one interface.
+typed state, and 15 LLM providers behind one interface.
 </p>
 
 [Get started :octicons-arrow-right-24:](getting-started.md){ .md-button .md-button--primary }
