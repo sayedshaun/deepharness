@@ -17,7 +17,7 @@ from .base import (
 )
 from .client import HTTPClient
 from .rest import RestCompletions, RestLLM
-from .wire import Usage, clip, usage_from
+from .wire import Usage, clip, finish_reason_from, usage_from
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _ROLE_MAP = {"assistant": "model", "system": "user", "user": "user"}
@@ -252,15 +252,14 @@ class GeminiResponse:
         if candidates is None:
             raise ProviderError(f"Gemini response has no candidates: {clip(data)}")
         candidate = candidates[0] if candidates else {}
-        raw_finish = candidate.get("finishReason")
         return cls(
             parts=[
                 GeminiPart.from_json(part)
                 for part in (candidate.get("content") or {}).get("parts", [])
             ],
             usage=_usage(data.get("usageMetadata")),
-            finish_reason=(
-                _FINISH_REASONS.get(raw_finish, "other") if raw_finish else None
+            finish_reason=finish_reason_from(
+                candidate.get("finishReason"), _FINISH_REASONS
             ),
         )
 
