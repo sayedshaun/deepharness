@@ -20,7 +20,7 @@ from typing import Any, Literal
 import httpx
 
 from ..errors import ConfigurationError
-from ..providers.client import HTTPClient
+from ..http import HTTPClient
 from .toolbox import ToolSpec
 
 _BASE_URL = "https://api.tavily.com"
@@ -83,8 +83,7 @@ class TavilySearch:
     """Tavily's search API, usable directly or as an Agent tool.
 
     The credential is read from TAVILY_API_KEY when not passed, matching how
-    providers resolve theirs. Requests go through the same HTTPClient the
-    providers use, so a rate-limited search is retried with backoff instead of
+    providers resolve theirs. Requests go through the shared HTTPClient, so a rate-limited search is retried with backoff instead of
     failing the tool call and costing the agent a turn.
 
         search = TavilySearch()

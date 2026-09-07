@@ -22,7 +22,8 @@ Keep modules focused and responsibilities separate.
 ```text
 agent/      → agent think/act loop, Toolbox, @tool
 graph/      → graph/node/edge definitions, executor (waves + merging)
-providers/  → LLM interface, HTTPClient, wire types, per-vendor clients
+http.py     → retrying httpx wrapper, shared by providers/ and tools/
+providers/  → LLM interface, wire types, per-vendor clients
 tools/      → built-in tool implementations
 ```
 

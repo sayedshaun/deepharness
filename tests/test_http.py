@@ -4,13 +4,13 @@ import httpx
 import pytest
 
 from deepharness.errors import ProviderError
-from deepharness.providers.client import DEFAULT_TIMEOUT, HTTPClient
+from deepharness.http import DEFAULT_TIMEOUT, HTTPClient
 
 
 @pytest.fixture(autouse=True)
 def _no_real_sleep(monkeypatch):
-    monkeypatch.setattr("deepharness.providers.client.asyncio.sleep", AsyncMock())
-    monkeypatch.setattr("deepharness.providers.client.time.sleep", MagicMock())
+    monkeypatch.setattr("deepharness.http.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("deepharness.http.time.sleep", MagicMock())
 
 
 def make_response(status_code, headers=None):
@@ -70,7 +70,7 @@ async def test_post_honors_retry_after_header(monkeypatch):
     client = AsyncMock()
     client.post = AsyncMock(side_effect=[rate_limited, ok_response])
     sleep_mock = AsyncMock()
-    monkeypatch.setattr("deepharness.providers.client.asyncio.sleep", sleep_mock)
+    monkeypatch.setattr("deepharness.http.asyncio.sleep", sleep_mock)
 
     http = HTTPClient("https://example.com", client=client)
     await http.post("/thing")
@@ -147,7 +147,7 @@ async def test_retry_after_is_capped(monkeypatch):
     client = AsyncMock()
     client.post = AsyncMock(side_effect=[rate_limited, ok_response])
     sleep_mock = AsyncMock()
-    monkeypatch.setattr("deepharness.providers.client.asyncio.sleep", sleep_mock)
+    monkeypatch.setattr("deepharness.http.asyncio.sleep", sleep_mock)
 
     http = HTTPClient("https://example.com", client=client)
     await http.post("/thing")
