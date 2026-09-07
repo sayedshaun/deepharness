@@ -82,3 +82,38 @@ agent = Agent(llm, name="assistant", tools=[get_weather])
 
 - a plain list of functions — a `Toolbox` is built for you automatically
 - an existing `Toolbox` (or subclass) — used as-is
+
+## Built-in: web search
+
+`TavilySearch` wraps [Tavily's](https://tavily.com) search API as a tool, so an agent can
+answer from the live web instead of its training data.
+
+```python
+from deepharness import Agent, TavilySearch
+
+search = TavilySearch()  # reads TAVILY_API_KEY, or pass api_key=
+
+agent = Agent(
+    llm,
+    tools=[search.as_tool()],
+    system="Answer from search results only, and cite the URLs you used.",
+)
+state = await agent.arun("Who won the Chuadanga-1 seat in 2026?")
+```
+
+The settings live on the object, not in the schema — the model chooses only `query`, which is
+one less thing for it to get wrong:
+
+```python
+search = TavilySearch(max_results=10, search_depth="advanced")
+```
+
+- `as_tool()` is async, for an agent driven with `arun()`; `as_sync_tool()` blocks, for one
+  driven with `run()`. Both take `name=` and `description=` overrides.
+- `await search.search(query)` (or `search.search_sync`) returns `list[SearchResult]` —
+  `title`, `url`, `content`, `score` — for when you want the URLs as data rather than prose.
+  Only the tool flattens them into text.
+- Requests go through the same retrying `HTTPClient` the providers use, so a rate-limited
+  search backs off and retries instead of failing the call and costing the agent a turn.
+  A failure that survives the retries raises `ProviderError`.
+- Close it when you are done: `await search.aclose()`, or `search.close()` for the sync pool.
