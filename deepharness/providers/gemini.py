@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from ..errors import ProviderError
+from ..http import HTTPClient
 from .base import (
     CompletionResponse,
     FinishReason,
@@ -15,7 +16,6 @@ from .base import (
     token_usage,
     without_none,
 )
-from .client import HTTPClient
 from .rest import RestCompletions, RestLLM
 from .wire import Usage, clip, finish_reason_from, usage_from
 

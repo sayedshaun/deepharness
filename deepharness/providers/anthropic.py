@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from deepharness.http import HTTPClient
 from deepharness.providers.base import (
     CompletionResponse,
     FinishReason,
@@ -14,7 +15,6 @@ from deepharness.providers.base import (
     token_usage,
     without_none,
 )
-from deepharness.providers.client import HTTPClient
 from deepharness.providers.rest import RestCompletions, RestLLM
 from deepharness.providers.wire import (
     Usage,

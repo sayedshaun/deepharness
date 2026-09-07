@@ -18,8 +18,8 @@ from typing import Any, Protocol
 import httpx
 
 from ..errors import ProviderError
+from ..http import HTTPClient
 from .base import LLM, Completed, CompletionResponse, StreamEvent, TextDelta
-from .client import HTTPClient
 from .wire import clip
 
 _SSE_DONE = "[DONE]"

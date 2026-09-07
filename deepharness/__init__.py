@@ -53,6 +53,7 @@ from deepharness.providers import (
     Together,
     TokenUsage,
 )
+from deepharness.tools import SearchResult, TavilySearch
 
 __all__ = [
     "FINAL_TOOL",
@@ -88,8 +89,10 @@ __all__ = [
     "OutputValidationError",
     "PendingHumanInput",
     "ProviderError",
+    "SearchResult",
     "StepLimitExceeded",
     "StopReason",
+    "TavilySearch",
     "TextDelta",
     "Together",
     "TokenBudgetExceeded",

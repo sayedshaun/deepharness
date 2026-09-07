@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from ..errors import ProviderError
+from .errors import ProviderError
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _MAX_RETRIES = 3
@@ -53,8 +53,10 @@ def _transport_failure(url: str, exc: httpx.TransportError) -> ProviderError:
 class HTTPClient:
     """Pairs an async and sync httpx client for one base URL.
 
-    Centralizes client construction and request/stream mechanics so provider
-    modules never import or call httpx directly. Requests are retried with
+    Centralizes client construction and request/stream mechanics so the rest of
+    the library never imports or calls httpx directly. It lives here rather than
+    under providers/ because it is not provider-specific: tools/ reaches for the
+    same retries and timeouts when it calls an API of its own. Requests are retried with
     exponential backoff on transient failures - 429 rate limits, 5xx server
     errors, and connection-level errors - honoring a Retry-After header when the
     server sends one. Whatever still fails after the last attempt surfaces as a
