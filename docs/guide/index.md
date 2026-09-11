@@ -37,4 +37,12 @@ you need.
 
     [:octicons-arrow-right-24: Read](providers.md)
 
+-   :material-book-search-outline:{ .lg .middle } **Deep research**
+
+    ---
+
+    Plan sub-questions, research them in parallel, synthesize one report.
+
+    [:octicons-arrow-right-24: Read](research.md)
+
 </div>

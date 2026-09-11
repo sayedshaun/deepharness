@@ -74,6 +74,7 @@ nav:
       - Agents: guide/agents.md
       - Tools: guide/tools.md
       - Providers: guide/providers.md
+      - Deep research: guide/research.md
   - Examples: examples.md
   - API reference: reference/api.md
 
