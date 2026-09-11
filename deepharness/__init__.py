@@ -33,6 +33,7 @@ from deepharness.graph import (
     concat,
     merge_dicts,
 )
+from deepharness.prebuilt import DeepResearch, Finding, ResearchResult
 from deepharness.providers import (
     VLLM,
     XAI,
@@ -69,9 +70,11 @@ __all__ = [
     "ConfigurationError",
     "Ctx",
     "DeepHarnessError",
+    "DeepResearch",
     "DeepSeek",
     "ExecutionError",
     "Executor",
+    "Finding",
     "Finished",
     "Fireworks",
     "Gemini",
@@ -89,6 +92,7 @@ __all__ = [
     "OutputValidationError",
     "PendingHumanInput",
     "ProviderError",
+    "ResearchResult",
     "SearchResult",
     "StepLimitExceeded",
     "StopReason",
