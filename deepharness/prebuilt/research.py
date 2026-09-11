@@ -23,10 +23,11 @@ themselves than configuring this class into something it is not.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 
-from ..agent import Agent, Budget, Finished, Toolbox
+from ..agent import Agent, Budget, Toolbox
+from ..agent import Finished as _AgentFinished
 from ..errors import ConfigurationError
 from ..providers.base import LLM, TextDelta, TokenUsage
 
@@ -67,16 +68,40 @@ class Synthesizing:
     findings: int
 
 
-ResearchEvent = Planning | Planned | Researching | Researched | Synthesizing
-"""What a run reports as it goes.
+@dataclass(slots=True)
+class ResearchFinished:
+    """The run's final result, emitted once the report is complete.
+
+    An async generator cannot return a value, so the result comes through as
+    the final event - astream_events() yields this last, and arun() drains
+    the stream and keeps it.
+
+    Named distinctly from agent.Finished (which wraps an AgentState, not a
+    ResearchResult) rather than reusing that name: this stream and an Agent's
+    are commonly read side by side, and `from deepharness import Finished`
+    would silently match nothing here - `case Finished(...):` never fires,
+    with no error, if a caller happened to import the wrong one.
+    """
+
+    result: ResearchResult
+
+
+ResearchEvent = (
+    Planning
+    | Planned
+    | Researching
+    | Researched
+    | Synthesizing
+    | TextDelta
+    | ResearchFinished
+)
+"""What a run reports as it happens.
 
 Typed rather than formatted prose, so a caller can count, route or record
 events instead of matching substrings against a sentence meant for a human.
+astream_events() is the only driver: iterate it directly to watch a run live,
+or call arun() to drain it and get just the ResearchFinished result.
 """
-
-Reporter = Callable[[ResearchEvent], None]
-"""Where progress goes. The workflow never prints: a caller that wants a run
-visible passes one of these, and a caller that does not stays silent."""
 
 DEFAULT_MAX_SUB_QUESTIONS = 5
 
@@ -119,6 +144,17 @@ class _Plan:
     """The planner's structured output - the schema it must fill to answer."""
 
     sub_questions: list[str]
+
+
+@dataclass(slots=True)
+class _Researched:
+    """One researcher's result, with the planned position Researched needs and
+    the answer Finding needs - kept together so as_completed's arrival order
+    doesn't have to be threaded back through two separate return values."""
+
+    index: int
+    question: str
+    answer: str
 
 
 @dataclass(slots=True)
@@ -178,7 +214,6 @@ class DeepResearch:
         tools=[search.as_tool()],
         max_sub_questions=4,
         n_parallel=2,
-        on_event=print,
     )
 
     result = asyncio.run(research.arun("How do UK master's student visas work?"))
@@ -186,6 +221,23 @@ class DeepResearch:
 
     for finding in result.findings:
         print(finding.question, "->", finding.answer)
+    ```
+
+    Watch a run live by iterating astream_events() instead of arun() - it
+    yields the same progress events arun() drains internally, plus TextDelta
+    as the synthesizer writes the report and a final ResearchFinished with the result:
+
+    ```python
+    async for event in research.astream_events("your research question"):
+        match event:
+            case Planned(sub_questions):
+                print(f"researching {len(sub_questions)} sub-question(s)")
+            case Researched(index, question):
+                print(f"  [{index}] {question}")
+            case TextDelta(text):
+                print(text, end="", flush=True)
+            case ResearchFinished(result):
+                print(f"\n\n{len(result.findings)} findings")
     ```
 
     Swap the prompts to change what the agents are asked for, and pass a
@@ -216,9 +268,9 @@ class DeepResearch:
     concurrent requests turns a fast run into a wall of 429s, and a tool
     backed by one server may not survive six callers at once.
 
-    Progress leaves through on_event (one line per step) and on_text (the
-    report's prose as the synthesizer writes it) rather than print, so the
-    workflow is usable where stdout is not free to write to.
+    Progress leaves through astream_events() - typed events out, rather than
+    print, so the workflow is usable where stdout is not free to write to. A
+    caller that only wants the result calls arun(), which drains the stream.
 
     All three prompts reach their agent verbatim: the sub-question cap is
     appended to the planner's rather than interpolated into it, since
@@ -231,8 +283,6 @@ class DeepResearch:
         "_max_sub_questions",
         "_model",
         "_n_parallel",
-        "_on_event",
-        "_on_text",
         "_planner_system",
         "_researcher_system",
         "_sequential",
@@ -252,8 +302,6 @@ class DeepResearch:
         researcher_system: str = RESEARCHER_SYSTEM,
         synthesizer_system: str = SYNTHESIZER_SYSTEM,
         budget: Budget | None = None,
-        on_event: Reporter | None = None,
-        on_text: Reporter | None = None,
     ):
         if max_sub_questions < 1:
             raise ConfigurationError(
@@ -276,8 +324,6 @@ class DeepResearch:
         self._sequential = sequential
         self._budget = budget
         self._researcher_system = researcher_system
-        self._on_event = on_event or _silent
-        self._on_text = on_text or _silent
 
         self._planner_system = (
             f"{planner_system}\n\nReturn at most {max_sub_questions} sub-questions."
@@ -310,29 +356,60 @@ class DeepResearch:
     async def arun(self, query: str) -> ResearchResult:
         """Research `query` end to end and return the report with its working.
 
-        Async only: the fan-out across sub-questions is the point of the
-        workflow, so there is no synchronous path that would have to give it
-        up. Drive it with `asyncio.run` from synchronous code.
+        Drains astream_events() and keeps the ResearchFinished result, so a caller
+        who does not want to watch a run live never has to think about
+        events. Async only: the fan-out across sub-questions is the point of
+        the workflow, so there is no synchronous path that would have to
+        give it up. Drive it with `asyncio.run` from synchronous code.
+        """
+        async for event in self.astream_events(query):
+            if isinstance(event, ResearchFinished):
+                return event.result
+        raise AssertionError(
+            "a run always ends with ResearchFinished"
+        )  # pragma: no cover
+
+    async def astream_events(self, query: str) -> AsyncIterator[ResearchEvent]:
+        """Drive one run, yielding progress and prose as they happen.
+
+        The only driver: arun() consumes this and keeps the last event, so
+        the workflow's mechanics - planning, fan-out, synthesis - exist once
+        rather than once per public method.
 
         Every agent is built here rather than in __init__ so that two runs of
         the same instance cannot share one Agent's usage accounting or budget.
         """
-        self._on_event(Planning(query))
-        sub_questions, planning_usage = await self._plan(query)
+        yield Planning(query)
+        sub_questions, usage = await self._plan(query)
+        yield Planned(sub_questions)
 
-        self._on_event(Researching(len(sub_questions)))
-        findings, research_usage = await self._research(sub_questions)
+        yield Researching(len(sub_questions))
+        findings: list[Finding] = []
+        async for event, spent in self._research(sub_questions):
+            findings.append(Finding(question=event.question, answer=event.answer))
+            usage = usage + spent
+            yield Researched(event.index, event.question)
 
-        self._on_event(Synthesizing(len(findings)))
-        report, report_usage = await self._synthesize(query, findings)
-
-        return ResearchResult(
-            query=query,
-            sub_questions=sub_questions,
-            findings=findings,
-            report=report,
-            usage=planning_usage + research_usage + report_usage,
+        yield Synthesizing(len(findings))
+        synthesizer = Agent(
+            self._model, system=self._synthesizer_system, name="synthesizer"
         )
+        async for event in synthesizer.astream_events(
+            _synthesis_prompt(query, findings)
+        ):
+            if isinstance(event, TextDelta):
+                yield event
+            elif isinstance(event, _AgentFinished):
+                usage = usage + synthesizer.total_usage
+                yield ResearchFinished(
+                    ResearchResult(
+                        query=query,
+                        sub_questions=sub_questions,
+                        findings=findings,
+                        report=event.state.output,
+                        usage=usage,
+                    )
+                )
 
     async def _plan(self, query: str) -> tuple[list[str], TokenUsage]:
         """Split the query, falling back to the query itself.
@@ -346,13 +423,12 @@ class DeepResearch:
         result = await planner.arun(query)
         planned = result.output.sub_questions if result.answered else []
         sub_questions = planned[: self._max_sub_questions] or [query]
-        self._on_event(Planned(sub_questions))
         return sub_questions, planner.total_usage
 
     async def _research(
         self, sub_questions: list[str]
-    ) -> tuple[list[Finding], TokenUsage]:
-        """Answer every sub-question, in parallel or in order.
+    ) -> AsyncIterator[tuple[_Researched, TokenUsage]]:
+        """Answer every sub-question, yielding each as it completes.
 
         Parallel is the default and uses as_completed, so a finished
         sub-answer lands when it is ready rather than when the slowest one
@@ -362,31 +438,30 @@ class DeepResearch:
         before any other has answered.
         """
         if self._sequential:
-            return await self._research_in_order(sub_questions)
+            async for item in self._research_in_order(sub_questions):
+                yield item
+            return
 
         limit = asyncio.Semaphore(self._n_parallel) if self._n_parallel else None
         tasks = [
             asyncio.ensure_future(self._research_one(i, question, limit))
             for i, question in enumerate(sub_questions, 1)
         ]
-        findings = []
-        usage = TokenUsage(0, 0, 0)
         for task in asyncio.as_completed(tasks):
-            finding, spent = await task
-            findings.append(finding)
-            usage = usage + spent
-        return findings, usage
+            yield await task
 
     async def _research_in_order(
         self, sub_questions: list[str]
-    ) -> tuple[list[Finding], TokenUsage]:
+    ) -> AsyncIterator[tuple[_Researched, TokenUsage]]:
         findings: list[Finding] = []
-        usage = TokenUsage(0, 0, 0)
         for index, question in enumerate(sub_questions, 1):
-            finding, spent = await self._research_one(index, question, None, findings)
-            findings.append(finding)
-            usage = usage + spent
-        return findings, usage
+            researched, usage = await self._research_one(
+                index, question, None, findings
+            )
+            findings.append(
+                Finding(question=researched.question, answer=researched.answer)
+            )
+            yield researched, usage
 
     async def _research_one(
         self,
@@ -394,7 +469,7 @@ class DeepResearch:
         question: str,
         limit: asyncio.Semaphore | None,
         earlier: list[Finding] | None = None,
-    ) -> tuple[Finding, TokenUsage]:
+    ) -> tuple[_Researched, TokenUsage]:
         researcher = Agent(
             self._model,
             tools=self._tools,
@@ -408,26 +483,8 @@ class DeepResearch:
         else:
             async with limit:
                 result = await researcher.arun(prompt)
-        self._on_event(Researched(index, question))
-        return Finding(question=question, answer=result.output), researcher.total_usage
-
-    async def _synthesize(
-        self, query: str, findings: list[Finding]
-    ) -> tuple[str, TokenUsage]:
-        synthesizer = Agent(
-            self._model, system=self._synthesizer_system, name="synthesizer"
-        )
-        prompt = _synthesis_prompt(query, findings)
-        async for event in synthesizer.astream_events(prompt):
-            if isinstance(event, TextDelta):
-                self._on_text(event.text)
-            elif isinstance(event, Finished):
-                return event.state.output, synthesizer.total_usage
-        raise AssertionError("a run always ends with Finished")  # pragma: no cover
-
-
-def _silent(_: ResearchEvent) -> None:
-    """The default reporter: a run says nothing unless a caller asks it to."""
+        researched = _Researched(index=index, question=question, answer=result.output)
+        return researched, researcher.total_usage
 
 
 def _with_earlier(question: str, earlier: list[Finding] | None) -> str:

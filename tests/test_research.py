@@ -14,12 +14,14 @@ from deepharness.prebuilt.research import (
     Planning,
     Researched,
     ResearchEvent,
+    ResearchFinished,
     Researching,
     Synthesizing,
 )
 from deepharness.providers.base import (
     LLM,
     CompletionResponse,
+    TextDelta,
     TokenUsage,
     ToolCall,
 )
@@ -195,28 +197,31 @@ async def test_progress_is_reported_as_typed_events():
     report happens to quote the words being matched.
     """
     model = RoleProvider(["a", "b"], report="the report")
-    events: list[ResearchEvent] = []
-    text: list[str] = []
-    research = DeepResearch(model, on_event=events.append, on_text=text.append)
+    research = DeepResearch(model)
 
-    await research.arun("query")
+    events: list[ResearchEvent] = [e async for e in research.astream_events("query")]
 
-    assert [type(event) for event in events] == [
+    steps = [e for e in events if not isinstance(e, TextDelta)]
+    assert [type(event) for event in steps] == [
         Planning,
         Planned,
         Researching,
         Researched,
         Researched,
         Synthesizing,
+        ResearchFinished,
     ]
-    assert events[0].query == "query"
-    assert events[1].sub_questions == ["a", "b"]
-    assert events[2].count == 2
-    assert {event.question for event in events if isinstance(event, Researched)} == {
+    assert steps[0].query == "query"
+    assert steps[1].sub_questions == ["a", "b"]
+    assert steps[2].count == 2
+    assert {event.question for event in steps if isinstance(event, Researched)} == {
         "a",
         "b",
     }
-    assert events[-1].findings == 2
+    assert steps[-2].findings == 2
+    assert steps[-1].result.report == "the report"
+
+    text = [e.text for e in events if isinstance(e, TextDelta)]
     assert "".join(text) == "the report"
 
 
@@ -241,7 +246,9 @@ async def test_usage_is_per_run_not_cumulative():
     assert first.usage == second.usage == TokenUsage(3, 3, 6)
 
 
-async def test_a_run_says_nothing_without_callbacks(capsys):
+async def test_a_run_prints_nothing_on_its_own(capsys):
+    """arun() drains the event stream itself; nothing reaches stdout unless
+    the caller iterates astream_events() and prints it themselves."""
     model = RoleProvider(["a"])
 
     await DeepResearch(model).arun("query")
