@@ -331,3 +331,79 @@ def test_a_finding_is_a_typed_pair():
     assert (finding.question, finding.answer) == ("q", "a")
     with pytest.raises(AttributeError):
         finding.extra = json.dumps({})  # slots: no accidental attributes
+
+
+async def test_sequential_researchers_see_the_earlier_answers():
+    """The point of the mode: a later sub-question can use an earlier answer.
+
+    Parallel researchers structurally cannot do this - each starts before any
+    other has finished - so a question whose parts build on each other needs
+    the answers threaded through.
+    """
+    seen: list[str] = []
+
+    class PromptCapturingProvider(RoleProvider):
+        async def agenerate(self, messages, *, tools=None):
+            system = next(
+                (m["content"] for m in messages if m.get("role") == "system"), ""
+            )
+            if system == RESEARCHER_SYSTEM:
+                seen.append(
+                    next(m["content"] for m in messages if m.get("role") == "user")
+                )
+            return await super().agenerate(messages, tools=tools)
+
+    model = PromptCapturingProvider(["name the things", "detail each thing"])
+
+    result = await DeepResearch(model, sequential=True).arun("query")
+
+    assert len(seen) == 2
+    assert seen[0] == "name the things"
+    assert "Already established by earlier research" in seen[1]
+    assert "answer to name the things" in seen[1]
+    assert result.sub_questions == ["name the things", "detail each thing"]
+
+
+async def test_sequential_keeps_the_planned_order():
+    model = RoleProvider(["a", "b", "c"])
+
+    result = await DeepResearch(model, sequential=True).arun("query")
+
+    assert [finding.question for finding in result.findings] == ["a", "b", "c"]
+
+
+async def test_sequential_runs_one_researcher_at_a_time():
+    model = RoleProvider(["a", "b", "c"])
+
+    await DeepResearch(model, sequential=True).arun("query")
+
+    assert model.peak_concurrent == 1
+
+
+async def test_parallel_researchers_do_not_see_each_other():
+    """The default must stay isolated: no earlier answers in the prompt."""
+    seen: list[str] = []
+
+    class PromptCapturingProvider(RoleProvider):
+        async def agenerate(self, messages, *, tools=None):
+            system = next(
+                (m["content"] for m in messages if m.get("role") == "system"), ""
+            )
+            if system == RESEARCHER_SYSTEM:
+                seen.append(
+                    next(m["content"] for m in messages if m.get("role") == "user")
+                )
+            return await super().agenerate(messages, tools=tools)
+
+    model = PromptCapturingProvider(["a", "b"])
+
+    await DeepResearch(model).arun("query")
+
+    assert sorted(seen) == ["a", "b"]
+
+
+def test_sequential_and_n_parallel_are_rejected_together():
+    model = RoleProvider(["a"])
+
+    with pytest.raises(ConfigurationError, match="n_parallel has nothing to cap"):
+        DeepResearch(model, sequential=True, n_parallel=2)

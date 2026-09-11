@@ -86,8 +86,13 @@ PLANNER_SYSTEM = (
     "question actually needs: a single factual question needs exactly one, "
     "and only a question with genuinely separate parts needs several. Every "
     "extra sub-question costs another round of research, so do not pad the "
-    "list to fill the allowance. If the question asks to find, list, name, or "
-    "recommend specific things, at least one sub-question must explicitly ask "
+    "list to fill the allowance. Each sub-question is researched on its own, "
+    "in parallel, and cannot see any other's answer - so if answering one "
+    "part requires first knowing the answer to another (finding things, then "
+    "looking up details about the things you found), keep both parts in a "
+    "single sub-question rather than splitting them. If the question asks to "
+    "find, list, name, or recommend specific things, at least one "
+    "sub-question must explicitly ask "
     "to identify and name those specific things - not just describe general "
     "criteria about them. Do not answer the sub-questions yourself."
 )
@@ -128,8 +133,8 @@ class Finding:
 class ResearchResult:
     """A finished run: the report, plus the working behind it.
 
-    `findings` is in completion order, not the planner's order, because that
-    is the order the answers actually arrived in.
+    `findings` is in the order the answers arrived: completion order when the
+    researchers ran in parallel, planned order when they ran sequentially.
 
     `usage` is what this run cost across every agent it ran - the planner, all
     the researchers, and the synthesizer - since a fanned-out workflow's spend
@@ -147,6 +152,7 @@ class DeepResearch:
     """Plan sub-questions, research them concurrently, synthesize one report.
 
     ```
+
         ╭══════╮      ╭──────────╮      ╭════════════╮
         │ plan │ ───▶ │ research │ ───▶ │ synthesize │ ───▶ ResearchResult
         ╰══════╯      ╰──────────╯      ╰════════════╯
@@ -229,6 +235,7 @@ class DeepResearch:
         "_on_text",
         "_planner_system",
         "_researcher_system",
+        "_sequential",
         "_synthesizer_system",
         "_tools",
     )
@@ -240,6 +247,7 @@ class DeepResearch:
         tools: Iterable[Callable[..., object]] | Toolbox = (),
         max_sub_questions: int = DEFAULT_MAX_SUB_QUESTIONS,
         n_parallel: int | None = None,
+        sequential: bool = False,
         planner_system: str = PLANNER_SYSTEM,
         researcher_system: str = RESEARCHER_SYSTEM,
         synthesizer_system: str = SYNTHESIZER_SYSTEM,
@@ -255,11 +263,17 @@ class DeepResearch:
             raise ConfigurationError(
                 f"n_parallel must be at least 1 when set, got {n_parallel}"
             )
+        if sequential and n_parallel is not None:
+            raise ConfigurationError(
+                "sequential=True runs one researcher at a time, so n_parallel "
+                "has nothing to cap - pass one or the other"
+            )
 
         self._model = model
         self._tools = tools if isinstance(tools, Toolbox) else Toolbox(tools)
         self._max_sub_questions = max_sub_questions
         self._n_parallel = n_parallel
+        self._sequential = sequential
         self._budget = budget
         self._researcher_system = researcher_system
         self._on_event = on_event or _silent
@@ -278,6 +292,11 @@ class DeepResearch:
     @property
     def max_sub_questions(self) -> int:
         return self._max_sub_questions
+
+    @property
+    def sequential(self) -> bool:
+        """Whether researchers run in order, each seeing the earlier answers."""
+        return self._sequential
 
     @property
     def n_parallel(self) -> int | None:
@@ -333,11 +352,18 @@ class DeepResearch:
     async def _research(
         self, sub_questions: list[str]
     ) -> tuple[list[Finding], TokenUsage]:
-        """Answer every sub-question concurrently, in completion order.
+        """Answer every sub-question, in parallel or in order.
 
-        as_completed rather than gather: a finished sub-answer is worth
-        reporting when it lands, not when the slowest one catches up.
+        Parallel is the default and uses as_completed, so a finished
+        sub-answer lands when it is ready rather than when the slowest one
+        catches up. Sequential exists for questions whose parts build on each
+        other - find the things, then look up details about the things found -
+        which parallel researchers structurally cannot do, since each starts
+        before any other has answered.
         """
+        if self._sequential:
+            return await self._research_in_order(sub_questions)
+
         limit = asyncio.Semaphore(self._n_parallel) if self._n_parallel else None
         tasks = [
             asyncio.ensure_future(self._research_one(i, question, limit))
@@ -351,8 +377,23 @@ class DeepResearch:
             usage = usage + spent
         return findings, usage
 
+    async def _research_in_order(
+        self, sub_questions: list[str]
+    ) -> tuple[list[Finding], TokenUsage]:
+        findings: list[Finding] = []
+        usage = TokenUsage(0, 0, 0)
+        for index, question in enumerate(sub_questions, 1):
+            finding, spent = await self._research_one(index, question, None, findings)
+            findings.append(finding)
+            usage = usage + spent
+        return findings, usage
+
     async def _research_one(
-        self, index: int, question: str, limit: asyncio.Semaphore | None
+        self,
+        index: int,
+        question: str,
+        limit: asyncio.Semaphore | None,
+        earlier: list[Finding] | None = None,
     ) -> tuple[Finding, TokenUsage]:
         researcher = Agent(
             self._model,
@@ -361,11 +402,12 @@ class DeepResearch:
             budget=self._budget or Budget(),
             name=f"researcher-{index}",
         )
+        prompt = _with_earlier(question, earlier)
         if limit is None:
-            result = await researcher.arun(question)
+            result = await researcher.arun(prompt)
         else:
             async with limit:
-                result = await researcher.arun(question)
+                result = await researcher.arun(prompt)
         self._on_event(Researched(index, question))
         return Finding(question=question, answer=result.output), researcher.total_usage
 
@@ -386,6 +428,25 @@ class DeepResearch:
 
 def _silent(_: ResearchEvent) -> None:
     """The default reporter: a run says nothing unless a caller asks it to."""
+
+
+def _with_earlier(question: str, earlier: list[Finding] | None) -> str:
+    """A sequential researcher's question, prefixed with what is known so far.
+
+    Only the answers are carried, not the transcripts behind them: a
+    researcher needs the facts an earlier one found, not the searches it ran
+    to find them, and the context window is the binding limit here.
+    """
+    if not earlier:
+        return question
+    known = "\n\n".join(
+        f"Sub-question: {finding.question}\nAnswer: {finding.answer}"
+        for finding in earlier
+    )
+    return (
+        f"Already established by earlier research:\n\n{known}\n\n"
+        f"Now answer this, using what is above where it helps: {question}"
+    )
 
 
 def _synthesis_prompt(query: str, findings: list[Finding]) -> str:
