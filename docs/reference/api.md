@@ -272,3 +272,85 @@ Local servers — no API key required: `Ollama`, `VLLM`, `LMStudio`, `LlamaCpp`.
 
 For any other OpenAI-compatible endpoint, construct `OpenAI` directly with an explicit
 `base_url` and `api_key`.
+
+## Prebuilt workflows
+
+### `DeepResearch`
+
+```python
+DeepResearch(
+    model: LLM,
+    *,
+    tools: Iterable[Callable] | Toolbox = (),
+    max_sub_questions: int = 5,
+    n_parallel: int | None = None,
+    sequential: bool = False,
+    planner_system: str = PLANNER_SYSTEM,
+    researcher_system: str = RESEARCHER_SYSTEM,
+    synthesizer_system: str = SYNTHESIZER_SYSTEM,
+    budget: Budget | None = None,
+)
+```
+
+Plans sub-questions, researches each with its own `Agent` (`tools` reach every researcher, not
+the planner or synthesizer), then synthesizes one report. See
+[Deep research](../guide/research.md) for the full picture, including `n_parallel` vs
+`sequential`.
+
+| Member | Signature | Description |
+| --- | --- | --- |
+| `arun` | `async def arun(query: str) -> ResearchResult` | Drains `astream_events` and returns its `ResearchFinished` result. |
+| `astream_events` | `async def astream_events(query: str) -> AsyncIterator[ResearchEvent]` | The actual driver. Yields `Planning`, `Planned`, `Researching`, `Researched`, `Synthesizing`, `TextDelta` (the report as it is written), then a final `ResearchFinished(result)`. |
+| `tools` | `Toolbox` | Always a `Toolbox`. Read-only. |
+| `max_sub_questions` | `int` | The planner's cap. Read-only. |
+| `sequential` | `bool` | Whether researchers run one at a time, seeing earlier answers. Read-only. |
+| `n_parallel` | `int \| None` | The concurrency cap; `None` leaves it to the planner. Read-only. |
+
+Raises `ConfigurationError` at construction for `max_sub_questions < 1`, `n_parallel < 1`, or
+passing both `sequential=True` and `n_parallel=`.
+
+### `ResearchResult`
+
+```python
+ResearchResult(
+    query: str,
+    sub_questions: list[str],
+    findings: list[Finding],
+    report: str,
+    usage: TokenUsage,
+)
+```
+
+`findings` is in the order the answers arrived: completion order when parallel, planned order
+when `sequential=True`. `usage` covers every agent the run made — planner, every researcher, and
+the synthesizer.
+
+### `Finding`
+
+```python
+Finding(question: str, answer: str)
+```
+
+One sub-question and the answer a researcher reached for it.
+
+### Events
+
+Importable from `deepharness.prebuilt.research` (not re-exported from `deepharness` itself):
+
+```python
+Planning(query: str)
+Planned(sub_questions: list[str])
+Researching(count: int)
+Researched(index: int, question: str)
+Synthesizing(findings: int)
+ResearchFinished(result: ResearchResult)
+```
+
+`ResearchFinished` is named apart from `Agent`'s `Finished` on purpose, even though it fills the
+same role: the two wrap different things (`result` vs `state`), and the two streams are commonly
+read side by side — `from deepharness import Finished` would silently match nothing against a
+`DeepResearch` stream, since it names the wrong class.
+
+`ResearchEvent` is the union of these plus `TextDelta`. Typed rather than formatted prose, so a
+caller can count, route, or record events instead of matching substrings against a sentence
+meant for a human.
