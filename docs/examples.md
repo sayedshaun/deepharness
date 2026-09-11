@@ -194,3 +194,23 @@ place to insert an approval gate, a budget check, or a re-planning step mid-cycl
 graph.connect(think, act, condition=lambda s: bool(s.pending_calls))
 graph.connect(act, think, loop=True)
 ```
+
+## Researching a question end to end
+
+`DeepResearch` plans sub-questions, researches each with its own `Agent`, and synthesizes one
+report:
+
+```python
+import asyncio
+
+from deepharness import DeepResearch, OpenAI, TavilySearch
+
+search = TavilySearch()
+research = DeepResearch(OpenAI("gpt-4o-mini"), tools=[search.as_tool()])
+
+result = asyncio.run(research.arun("How do UK master's student visas work?"))
+print(result.report)
+```
+
+Watch it work instead of waiting on a blank screen by iterating `astream_events()` — see
+[Deep research](guide/research.md#watching-a-run-live).
