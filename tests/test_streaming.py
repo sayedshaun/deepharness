@@ -30,7 +30,7 @@ def test_openai_stream_collects_text():
         ],
     )
 
-    assert deltas == ["Hel", "lo", None]
+    assert deltas == [TextDelta("Hel"), TextDelta("lo"), None]
     assert reader.response() == CompletionResponse(content="Hello")
 
 
@@ -171,7 +171,7 @@ def test_anthropic_stream_collects_text_and_usage():
     )
     response = reader.response()
 
-    assert [d for d in deltas if d] == ["Hi"]
+    assert [d for d in deltas if d] == [TextDelta("Hi")]
     assert response.content == "Hi"
     assert response.usage == TokenUsage(4, 6, 10)
 
@@ -267,7 +267,7 @@ def test_gemini_stream_collects_text_and_whole_function_calls():
     )
     response = reader.response()
 
-    assert [d for d in deltas if d] == ["Hel", "lo"]
+    assert [d for d in deltas if d] == [TextDelta("Hel"), TextDelta("lo")]
     assert response.content == "Hello"
     assert response.tool_calls[0].arguments == {"a": 1}
     assert response.usage == TokenUsage(3, 4, 7)

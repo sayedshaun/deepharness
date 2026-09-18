@@ -8,6 +8,7 @@ from typing import Any
 from deepharness.providers.base import (
     LLM,
     TextDelta,
+    ThinkingDelta,
     TokenUsage,
 )
 
@@ -32,13 +33,15 @@ from .state import (
     StopReason,
 )
 
-AgentEvent = TextDelta | StepStarted | ToolStarted | ToolFinished | Finished
+AgentEvent = (
+    TextDelta | ThinkingDelta | StepStarted | ToolStarted | ToolFinished | Finished
+)
 """What streaming a run emits: the run's progress, then the final state.
 
-Prose arrives as TextDelta and the rest is what the loop is doing between
-those - a step beginning, a tool starting and finishing - ending with the one
-Finished that carries the AgentState. A caller interested in text alone wants
-astream() and never sees these."""
+Prose arrives as TextDelta, reasoning as ThinkingDelta, and the rest is what the
+loop is doing between those - a step beginning, a tool starting and finishing -
+ending with the one Finished that carries the AgentState. A caller interested in
+text alone wants astream() and never sees these."""
 
 
 @dataclass(slots=True)
@@ -283,7 +286,9 @@ class Agent:
                 return self._result(state, messages, answer, "answer")
 
             if not response.tool_calls:
-                messages.append(Message.ai(response.content).to_dict())
+                messages.append(
+                    Message.ai(response.blocks or response.content).to_dict()
+                )
                 if self._final_schema is not None:
                     # output= was asked for, so plain prose is not an answer yet.
                     messages.append(
@@ -386,7 +391,7 @@ class Agent:
                     async for event in self._model.astream_events(
                         self._context.prune(request.messages), tools=schemas
                     ):
-                        if isinstance(event, TextDelta):
+                        if isinstance(event, TextDelta | ThinkingDelta):
                             yield event
                         else:
                             outcome = event.response
@@ -428,7 +433,7 @@ class Agent:
                     for event in self._model.stream_events(
                         self._context.prune(request.messages), tools=schemas
                     ):
-                        if isinstance(event, TextDelta):
+                        if isinstance(event, TextDelta | ThinkingDelta):
                             yield event
                         else:
                             outcome = event.response

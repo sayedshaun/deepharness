@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from ..errors import ConfigurationError
 from ..providers.base import TokenUsage
+from ..providers.content import Block, Content, text_of, to_wire
 
 
 @dataclass(slots=True)
@@ -25,27 +26,45 @@ class Message:
     role off one or update() it with arbitrary keys. to_dict() produces the wire
     form at the boundary, and Agent normalizes whatever it is handed, so a plain
     dict from a caller still works.
+
+    content is a string in the common case and a list of blocks when it carries
+    an image, a file, or the model's own thinking. to_dict() keeps the string
+    form for string content, so a transcript written before blocks existed and
+    one written now are the same transcript.
     """
 
     role: str
-    content: str
+    content: Content
     name: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+
+    @property
+    def text(self) -> str:
+        """Just the prose, whatever blocks the content is made of."""
+        return text_of(self.content)
 
     @classmethod
     def system(cls, content: str) -> Message:
         return cls(role="system", content=content)
 
     @classmethod
-    def human(cls, content: str) -> Message:
-        return cls(role="user", content=content)
+    def human(cls, content: Content | Block) -> Message:
+        """A user turn, which is the one that may carry an image or a file."""
+        return cls(role="user", content=_content(content))
 
     @classmethod
     def ai(
-        cls, content: str, *, tool_calls: list[dict[str, Any]] | None = None
+        cls,
+        content: Content | Block,
+        *,
+        tool_calls: list[dict[str, Any]] | None = None,
     ) -> Message:
-        return cls(role="assistant", content=content, tool_calls=tool_calls or None)
+        return cls(
+            role="assistant",
+            content=_content(content),
+            tool_calls=tool_calls or None,
+        )
 
     @classmethod
     def tool(cls, content: str, *, name: str, call_id: str | None = None) -> Message:
@@ -53,7 +72,7 @@ class Message:
 
     def to_dict(self) -> dict[str, Any]:
         """The wire form, without the fields this role does not use."""
-        message: dict[str, Any] = {"role": self.role, "content": self.content}
+        message: dict[str, Any] = {"role": self.role, "content": to_wire(self.content)}
         if self.name is not None:
             message["name"] = self.name
         if self.tool_calls:
@@ -66,6 +85,11 @@ class Message:
 def as_dict(message: Message | dict[str, Any]) -> dict[str, Any]:
     """One transcript entry as a plain dict, whoever built it."""
     return message.to_dict() if isinstance(message, Message) else dict(message)
+
+
+def _content(content: Content | Block) -> Content:
+    """A lone block accepted as content, so a caller can pass one image."""
+    return content if isinstance(content, str | list) else [content]
 
 
 @dataclass(frozen=True, slots=True)

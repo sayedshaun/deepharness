@@ -13,9 +13,18 @@ from deepharness.providers.base import (
     CompletionResponse,
     FinishReason,
     ReasoningLevel,
+    TextDelta,
     ToolCall,
     token_usage,
     without_none,
+)
+from deepharness.providers.content import (
+    Document,
+    Image,
+    Text,
+    Thinking,
+    parse,
+    text_of,
 )
 from deepharness.providers.rest import RestCompletions, RestLLM
 from deepharness.providers.wire import (
@@ -163,7 +172,9 @@ def _to_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             converted.append(
                 {
                     "role": "assistant",
-                    "content": message.get("content") or None,
+                    # An assistant turn takes text only here, and its thinking
+                    # is not replayable through Chat Completions anyway.
+                    "content": text_of(message.get("content")) or None,
                     "tool_calls": [
                         {
                             "id": call["id"],
@@ -182,13 +193,50 @@ def _to_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 {
                     "role": "tool",
                     "tool_call_id": message.get("tool_call_id", ""),
-                    "content": message["content"],
+                    "content": text_of(message.get("content")),
                 }
             )
         else:
-            converted.append(dict(message))
+            entry = dict(message)
+            entry["content"] = _to_openai_content(message.get("content"))
+            converted.append(entry)
 
     return converted
+
+
+def _to_openai_content(content: Any) -> str | list[dict[str, Any]]:
+    """One message's content as OpenAI parts, or a plain string if that is all.
+
+    The string form is kept for plain text so an ordinary conversation's payload
+    is unchanged; anything else becomes the multipart form, which is the only
+    one that can carry an image or a file.
+    """
+    blocks = parse(content)
+    if all(isinstance(block, Text) for block in blocks):
+        return text_of(blocks)
+
+    parts: list[dict[str, Any]] = []
+    for block in blocks:
+        match block:
+            case Text():
+                parts.append({"type": "text", "text": block.text})
+            case Image():
+                parts.append(
+                    {"type": "image_url", "image_url": {"url": block.data_url}}
+                )
+            case Document():
+                parts.append(
+                    {
+                        "type": "file",
+                        "file": {
+                            "filename": block.name or "document",
+                            "file_data": block.data_url,
+                        },
+                    }
+                )
+            case Thinking():
+                continue
+    return parts
 
 
 def _to_openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
@@ -288,7 +336,7 @@ class OpenAIStream:
         self._usage: Usage | None = None
         self._finish_reason: FinishReason = "stop"
 
-    def feed(self, data: dict[str, Any]) -> str | None:
+    def feed(self, data: dict[str, Any]) -> TextDelta | None:
         if usage := data.get("usage"):
             self._usage = Usage(
                 prompt_tokens=usage.get("prompt_tokens", 0),
@@ -313,9 +361,10 @@ class OpenAIStream:
             call["name"] = function.get("name") or call["name"]
             call["arguments"] += function.get("arguments") or ""
         text = delta.get("content")
-        if text:
-            self._text.append(text)
-        return text
+        if not text:
+            return None
+        self._text.append(text)
+        return TextDelta(text)
 
     def response(self) -> CompletionResponse:
         return CompletionResponse(

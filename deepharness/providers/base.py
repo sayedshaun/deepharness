@@ -6,6 +6,8 @@ from dataclasses import dataclass, field, fields
 from enum import StrEnum
 from typing import Any, Literal
 
+from .content import Block, Text, Thinking, text_of
+
 
 def token_usage(usage: Any) -> TokenUsage | None:
     """Normalize a vendor's parsed Usage into TokenUsage, if it sent one."""
@@ -95,17 +97,49 @@ half a sentence from a finished reply.
 
 @dataclass(slots=True)
 class CompletionResponse:
-    """Normalized result of a provider completion, independent of vendor format."""
+    """Normalized result of a provider completion, independent of vendor format.
 
-    content: str
+    `content` stays the turn's prose, because that is what almost every caller
+    wants, and `blocks` carries everything the model actually returned -
+    including the thinking a later turn may have to replay. The two are kept in
+    step here rather than by each provider: give either one and the other is
+    derived, so they cannot disagree.
+    """
+
+    content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage | None = None
     finish_reason: FinishReason = "stop"
+    blocks: list[Block] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.blocks and self.content:
+            self.blocks = [Text(self.content)]
+        elif self.blocks and not self.content:
+            self.content = text_of(self.blocks)
+
+    @property
+    def thinking(self) -> str:
+        """The reasoning the model reported, if it reported any."""
+        return "".join(
+            block.text for block in self.blocks if isinstance(block, Thinking)
+        )
 
 
 @dataclass(slots=True)
 class TextDelta:
     """A chunk of the model's prose, as it arrives."""
+
+    text: str
+
+
+@dataclass(slots=True)
+class ThinkingDelta:
+    """A chunk of the model's reasoning, as it arrives.
+
+    Separate from TextDelta so a caller can show it differently, or not at all:
+    run together with the answer it reads as one confused voice.
+    """
 
     text: str
 
@@ -117,7 +151,7 @@ class Completed:
     response: CompletionResponse
 
 
-StreamEvent = TextDelta | Completed
+StreamEvent = TextDelta | ThinkingDelta | Completed
 """What a streaming call emits.
 
 Text alone is not enough to drive an agent: a turn may ask for tools instead of
@@ -174,8 +208,8 @@ class LLM(ABC):
         error or an empty iterator. Providers that really stream override this.
         """
         response = await self.agenerate(messages, tools=tools)
-        if response.content:
-            yield TextDelta(response.content)
+        for event in _as_deltas(response):
+            yield event
         yield Completed(response)
 
     def stream_events(
@@ -186,8 +220,7 @@ class LLM(ABC):
     ) -> Iterator[StreamEvent]:
         """Synchronous counterpart to astream_events()."""
         response = self.generate(messages, tools=tools)
-        if response.content:
-            yield TextDelta(response.content)
+        yield from _as_deltas(response)
         yield Completed(response)
 
     async def astream(
@@ -211,3 +244,18 @@ class LLM(ABC):
         for event in self.stream_events(messages, tools=tools):
             if isinstance(event, TextDelta):
                 yield event.text
+
+
+def _as_deltas(response: CompletionResponse) -> list[TextDelta | ThinkingDelta]:
+    """One whole turn as the deltas a streaming turn would have emitted.
+
+    For a backend that cannot stream: its callers still get the same event
+    sequence, in block order, rather than a special case of their own.
+    """
+    events: list[TextDelta | ThinkingDelta] = []
+    for block in response.blocks:
+        if isinstance(block, Thinking) and block.text:
+            events.append(ThinkingDelta(block.text))
+        elif isinstance(block, Text) and block.text:
+            events.append(TextDelta(block.text))
+    return events

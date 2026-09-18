@@ -33,7 +33,7 @@ def record_request(messages: list[dict[str, Any]], response: Any) -> None:
     """Record the assistant turn that asked for tools."""
     messages.append(
         Message.ai(
-            response.content,
+            response.blocks or response.content,
             tool_calls=[
                 {"id": call.id, "name": call.name, "arguments": call.arguments}
                 for call in response.tool_calls

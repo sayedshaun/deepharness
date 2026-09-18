@@ -19,7 +19,7 @@ import httpx
 
 from ..errors import ProviderError
 from ..http import HTTPClient
-from .base import LLM, Completed, CompletionResponse, StreamEvent, TextDelta
+from .base import LLM, Completed, CompletionResponse, StreamEvent
 from .wire import clip
 
 _SSE_DONE = "[DONE]"
@@ -59,8 +59,13 @@ class StreamAccumulator(Protocol):
     partial call until the stream ends.
     """
 
-    def feed(self, data: dict[str, Any]) -> str | None:
-        """Take one payload; return any text it carried."""
+    def feed(self, data: dict[str, Any]) -> StreamEvent | None:
+        """Take one payload; return the delta it carried, if any.
+
+        An event rather than a string because a payload may carry reasoning
+        instead of prose, and a caller showing the two the same way is showing
+        the model talking over itself.
+        """
 
     def response(self) -> CompletionResponse:
         """The whole turn, once the stream has ended."""
@@ -132,7 +137,7 @@ class RestCompletions:
 
 
 def _feed(reader: StreamAccumulator, line: str) -> Iterator[StreamEvent]:
-    """One SSE line into zero or one TextDelta, so both loops stay identical.
+    """One SSE line into zero or one delta, so both loops stay identical.
 
     A generator rather than an optional return so that "not a data line",
     "stream is done" and "carried no text" are all the same empty result.
@@ -146,9 +151,9 @@ def _feed(reader: StreamAccumulator, line: str) -> Iterator[StreamEvent]:
         payload = json.loads(data)
     except json.JSONDecodeError:
         raise ProviderError(f"unparseable stream payload: {clip(data)}") from None
-    text = reader.feed(payload)
-    if text:
-        yield TextDelta(text)
+    event = reader.feed(payload)
+    if event is not None:
+        yield event
 
 
 class RestLLM(LLM):

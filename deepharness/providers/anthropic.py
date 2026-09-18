@@ -11,9 +11,20 @@ from deepharness.providers.base import (
     CompletionResponse,
     FinishReason,
     ReasoningLevel,
+    TextDelta,
+    ThinkingDelta,
     ToolCall,
     token_usage,
     without_none,
+)
+from deepharness.providers.content import (
+    Document,
+    Image,
+    Text,
+    Thinking,
+    merge,
+    parse,
+    text_of,
 )
 from deepharness.providers.rest import RestCompletions, RestLLM
 from deepharness.providers.wire import (
@@ -149,7 +160,7 @@ def _to_anthropic_messages(
     for message in messages:
         role = message["role"]
         if role == "system":
-            system_parts.append(message["content"])
+            system_parts.append(text_of(message.get("content")))
         elif role == "tool":
             converted.append(
                 {
@@ -158,15 +169,13 @@ def _to_anthropic_messages(
                         {
                             "type": "tool_result",
                             "tool_use_id": message.get("tool_call_id", ""),
-                            "content": message["content"],
+                            "content": text_of(message.get("content")),
                         }
                     ],
                 }
             )
         elif role == "assistant" and message.get("tool_calls"):
-            blocks: list[dict[str, Any]] = []
-            if message.get("content"):
-                blocks.append({"type": "text", "text": message["content"]})
+            blocks = _to_anthropic_blocks(message.get("content"))
             blocks.extend(
                 {
                     "type": "tool_use",
@@ -178,9 +187,76 @@ def _to_anthropic_messages(
             )
             converted.append({"role": "assistant", "content": blocks})
         else:
-            converted.append({"role": role, "content": message["content"]})
+            converted.append(
+                {"role": role, "content": _to_anthropic_content(message.get("content"))}
+            )
 
     return ("\n".join(system_parts) if system_parts else None), converted
+
+
+def _to_anthropic_content(content: Any) -> str | list[dict[str, Any]]:
+    """Blocks, or a plain string when text is all the content is.
+
+    Anthropic takes either, and the string form keeps an ordinary conversation's
+    payload identical to what it was before blocks existed.
+    """
+    blocks = parse(content)
+    if all(isinstance(block, Text) for block in blocks):
+        return text_of(blocks)
+    return _to_anthropic_blocks(content)
+
+
+def _to_anthropic_blocks(content: Any) -> list[dict[str, Any]]:
+    """One message's content as Anthropic content blocks.
+
+    Thinking is replayed with its signature, unmodified: Anthropic requires the
+    thinking block back on the request that follows a tool call, and a run that
+    drops it loses the model's chain exactly where a long task depends on it. A
+    thinking block with no signature is left out rather than sent unsigned,
+    which the API rejects.
+    """
+    blocks: list[dict[str, Any]] = []
+    for block in parse(content):
+        match block:
+            case Text():
+                blocks.append({"type": "text", "text": block.text})
+            case Thinking() if block.signature:
+                blocks.append(
+                    {
+                        "type": "thinking",
+                        "thinking": block.text,
+                        "signature": block.signature,
+                    }
+                )
+            case Thinking():
+                continue
+            case Image() if block.url:
+                blocks.append(
+                    {"type": "image", "source": {"type": "url", "url": block.url}}
+                )
+            case Image():
+                blocks.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": block.media_type,
+                            "data": block.data,
+                        },
+                    }
+                )
+            case Document():
+                blocks.append(
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": block.media_type,
+                            "data": block.data,
+                        },
+                    }
+                )
+    return blocks
 
 
 def _to_anthropic_tool(tool: dict[str, Any]) -> dict[str, Any]:
@@ -192,20 +268,32 @@ def _to_anthropic_tool(tool: dict[str, Any]) -> dict[str, Any]:
 
 
 def _from_anthropic_response(message: AnthropicMessage) -> CompletionResponse:
-    text = "".join(
-        block.text for block in message.content if block.type == "text" and block.text
-    )
     tool_calls = [
         ToolCall(id=block.id, name=block.name, arguments=block.input)
         for block in message.content
         if block.type == "tool_use" and block.name
     ]
     return CompletionResponse(
-        content=text,
+        blocks=[
+            block for raw in message.content if (block := _to_block(raw)) is not None
+        ],
         tool_calls=tool_calls,
         usage=token_usage(message.usage),
         finish_reason=message.finish_reason or "stop",
     )
+
+
+def _to_block(raw: AnthropicContentBlock) -> Text | Thinking | None:
+    """One response block as normalized content, or None if it is a tool call.
+
+    A tool call is already carried as a ToolCall, and repeating it as content
+    would have the loop record the same request twice.
+    """
+    if raw.type == "text" and raw.text:
+        return Text(raw.text)
+    if raw.type == "thinking" and raw.thinking:
+        return Thinking(raw.thinking, signature=raw.signature)
+    return None
 
 
 @dataclass(slots=True)
@@ -215,6 +303,8 @@ class AnthropicContentBlock:
     id: str | None = None
     name: str | None = None
     input: dict[str, Any] = field(default_factory=dict)
+    thinking: str | None = None
+    signature: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> AnthropicContentBlock:
@@ -224,6 +314,8 @@ class AnthropicContentBlock:
             id=data.get("id"),
             name=data.get("name"),
             input=data.get("input") or {},
+            thinking=data.get("thinking"),
+            signature=data.get("signature"),
         )
 
 
@@ -246,45 +338,43 @@ class AnthropicMessage:
 
 
 class AnthropicStream:
-    """Folds Anthropic's block events into text plus tool calls.
+    """Folds Anthropic's block events into content plus tool calls.
 
     Anthropic streams content as numbered blocks: content_block_start announces a
-    block's type (text or tool_use), the deltas that follow belong to whichever
-    block is open, and tool arguments arrive as partial_json fragments.
+    block's type (text, thinking or tool_use), the deltas that follow belong to
+    whichever block is open, and tool arguments arrive as partial_json
+    fragments. Content is kept per index rather than in one buffer because a
+    thinking block's signature arrives after its text, and it has to land on
+    that block - unsigned thinking cannot be replayed.
     """
 
-    __slots__ = ("_blocks", "_finish_reason", "_text", "_usage")
+    __slots__ = ("_content", "_finish_reason", "_tools", "_usage")
 
     def __init__(self) -> None:
-        self._text: list[str] = []
-        self._blocks: dict[int, dict[str, Any]] = {}
+        self._content: dict[int, dict[str, Any]] = {}
+        self._tools: dict[int, dict[str, Any]] = {}
         self._usage: Usage | None = None
         self._finish_reason: FinishReason = "stop"
 
-    def feed(self, data: dict[str, Any]) -> str | None:
+    def feed(self, data: dict[str, Any]) -> TextDelta | ThinkingDelta | None:
         event = data.get("type")
         index = data.get("index", 0)
 
         if event == "content_block_start":
             block = data.get("content_block") or {}
-            if block.get("type") == "tool_use":
-                self._blocks[index] = {
+            kind = block.get("type")
+            if kind == "tool_use":
+                self._tools[index] = {
                     "id": block.get("id"),
                     "name": block.get("name", ""),
                     "arguments": "",
                 }
+            elif kind in ("text", "thinking"):
+                self._content[index] = {"type": kind, "text": "", "signature": None}
             return None
 
         if event == "content_block_delta":
-            delta = data.get("delta") or {}
-            if delta.get("type") == "text_delta":
-                text = delta.get("text")
-                if text:
-                    self._text.append(text)
-                return text
-            if delta.get("type") == "input_json_delta" and index in self._blocks:
-                self._blocks[index]["arguments"] += delta.get("partial_json") or ""
-            return None
+            return self._delta(index, data.get("delta") or {})
 
         if event == "message_start":
             self._record_usage((data.get("message") or {}).get("usage"))
@@ -294,6 +384,36 @@ class AnthropicStream:
             if (finish := finish_reason_from(raw_finish, _FINISH_REASONS)) is not None:
                 self._finish_reason = finish
         return None
+
+    def _delta(
+        self, index: int, delta: dict[str, Any]
+    ) -> TextDelta | ThinkingDelta | None:
+        """One delta into its open block, and the event it carried.
+
+        The block is created on demand: a vendor that ever sends a delta before
+        its content_block_start would otherwise drop that text on the floor.
+        """
+        match delta.get("type"):
+            case "text_delta" if delta.get("text"):
+                self._append(index, "text", delta["text"])
+                return TextDelta(delta["text"])
+            case "thinking_delta" if delta.get("thinking"):
+                self._append(index, "thinking", delta["thinking"])
+                return ThinkingDelta(delta["thinking"])
+            case "signature_delta" if delta.get("signature"):
+                block = self._content.setdefault(
+                    index, {"type": "thinking", "text": "", "signature": None}
+                )
+                block["signature"] = (block["signature"] or "") + delta["signature"]
+            case "input_json_delta" if index in self._tools:
+                self._tools[index]["arguments"] += delta.get("partial_json") or ""
+        return None
+
+    def _append(self, index: int, kind: str, text: str) -> None:
+        block = self._content.setdefault(
+            index, {"type": kind, "text": "", "signature": None}
+        )
+        block["text"] += text
 
     def _record_usage(self, usage: dict[str, Any] | None) -> None:
         """Fold in one event's counts, keeping the ones it left out.
@@ -315,14 +435,20 @@ class AnthropicStream:
 
     def response(self) -> CompletionResponse:
         return CompletionResponse(
-            content="".join(self._text),
+            blocks=merge(
+                Thinking(block["text"], signature=block["signature"])
+                if block["type"] == "thinking"
+                else Text(block["text"])
+                for _, block in sorted(self._content.items())
+                if block["text"]
+            ),
             tool_calls=[
                 ToolCall(
                     id=block["id"],
                     name=block["name"],
                     arguments=load_arguments(block["arguments"]),
                 )
-                for block in self._blocks.values()
+                for block in self._tools.values()
                 if block["name"]
             ],
             usage=token_usage(self._usage),
