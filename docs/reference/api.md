@@ -139,6 +139,7 @@ What `astream_events()`/`stream_events()` emit.
 | `ToolStarted` | `name: str`, `arguments: dict`, `call_id: str \| None` | Before a tool runs, with the arguments the model sent. |
 | `ToolFinished` | `name: str`, `result: str`, `failed: bool`, `call_id: str \| None` | After a tool returns or raises. `result` is the (truncated) text the model will read. Not emitted for a tool that asked a human — it has no result yet. |
 | `TextDelta` | `text: str` | As the model's prose arrives. |
+| `ThinkingDelta` | `text: str` | As the model's reasoning arrives, kept apart from the answer. |
 | `Finished` | `state: AgentState` | Once, last, carrying the run's result. |
 
 ### `TokenBudgetExceeded`
@@ -263,6 +264,29 @@ A `run_command` tool that runs a shell command with the workspace as its working
 reporting stdout, then stderr, then a non-zero exit code. Gated by default, and not a sandbox:
 the workspace bounds where a command starts, not what it can reach.
 
+### `MCPServer` / `MCPTool`
+
+```python
+MCPServer.stdio(command: str | Iterable[str], *, env=None, requires_approval=True)
+MCPServer.http(url: str, *, headers=None, client=None, requires_approval=True)
+MCPServer(transport: Transport, *, requires_approval: bool = True)
+```
+
+A Model Context Protocol server's tools as callables. The handshake runs on first use;
+`async with` closes the transport.
+
+| Member | Signature | Description |
+| --- | --- | --- |
+| `tools` | `async def tools() -> list[Callable]` | The server's tools, ready for `Agent(tools=...)`. Async, so use `arun()`. |
+| `list_tools` | `async def list_tools() -> list[MCPTool]` | The same tools as data: `name`, `description`, `input_schema`, `read_only`. |
+| `call` | `async def call(name, arguments) -> str` | Run one tool; raises `MCPError` if the server reports failure. |
+| `connect` / `aclose` | `async def ...() -> None` | Handshake and shutdown; both are idempotent. |
+
+A tool the server did not mark read-only is gated with `requires_approval=True`. `Transport` is
+the seam: `StdioTransport` (a subprocess speaking newline-delimited JSON) and `HTTPTransport`
+(streamable HTTP, JSON or SSE replies, carrying any `Mcp-Session-Id`). A protocol-level failure
+raises `MCPError`.
+
 ### `Permissions` / `Rule`
 
 ```python
@@ -357,6 +381,28 @@ everywhere, transport regardless. The streaming pair is optional: the base class
 Vendors that speak REST share their request sequence through `RestCompletions` rather than by
 inheriting it (see `providers/rest.py`).
 
+### Content blocks
+
+```python
+Text(text: str)
+Image(data: str | None = None, media_type: str = "image/png", url: str | None = None)
+Document(data: str, media_type: str = "application/pdf", name: str | None = None)
+Thinking(text: str, signature: str | None = None)
+
+Block = Text | Image | Document | Thinking
+Content = str | list[Block]
+```
+
+What a message's `content` may be. `Image.from_path(path)` / `Document.from_path(path)` encode
+a local file and infer its media type; `Image.from_url(url)` passes a URL through. An `Image`
+with both `data` and `url`, or neither, raises `ConfigurationError`, as does a suffix no media
+type is known for. Providers render blocks into their own wire shape; Gemini rejects an image
+URL it cannot send. Text-only content is still sent — and saved — as a plain string.
+
+`Thinking.signature` is Anthropic's attestation, replayed unmodified with the turn because
+Anthropic requires it back after a tool call; an unsigned thinking block is left out rather
+than sent.
+
 ### Response types
 
 ```python
@@ -369,12 +415,17 @@ CompletionResponse(content: str, tool_calls: list[ToolCall] = [], usage: TokenUs
 
 | Class | Signature |
 | --- | --- |
-| `Anthropic` | `Anthropic(model: str, api_key: str \| None = None, max_tokens: int = 4096)` |
-| `OpenAI` | `OpenAI(model: str, api_key: str \| None = None, *, base_url: str \| None = None, temperature: float \| None = None, stream_usage: bool = True)` |
-| `Gemini` | `Gemini(model: str, api_key: str \| None = None)` |
+| `Anthropic` | `Anthropic(model: str, api_key: str \| None = None, max_tokens: int = 4096, *, reasoning_effort=None, cache_prompt: bool = False, max_concurrency: int \| None = None)` |
+| `OpenAI` | `OpenAI(model: str, api_key: str \| None = None, *, base_url: str \| None = None, temperature: float \| None = None, reasoning_effort=None, stream_usage: bool = True, max_concurrency: int \| None = None)` |
+| `Gemini` | `Gemini(model: str, api_key: str \| None = None, *, reasoning_effort=None, max_concurrency: int \| None = None)` |
 
 `api_key` falls back to the vendor's standard environment variable when omitted:
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY` (or `GOOGLE_API_KEY`).
+
+`max_concurrency` caps that provider's in-flight requests, held across retries and for a
+stream's whole body — a fan-out of agents otherwise opens one connection per branch.
+`cache_prompt=True` (Anthropic) puts a cache breakpoint on the system prompt and the last tool
+definition, the part of a harness request that repeats every turn.
 
 Each provider holds an HTTP connection pool. Call `await model.aclose()` — or
 `model.close()` from synchronous code — when you are done with one.

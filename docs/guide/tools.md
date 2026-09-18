@@ -161,6 +161,40 @@ The three decisions play out like this:
   find another way instead of retrying. Nothing pauses; a turn where everything was refused
   simply goes back to the model.
 
+## Tools from an MCP server
+
+`MCPServer` connects to a [Model Context Protocol](https://modelcontextprotocol.io) server and
+hands you its tools as ordinary callables — no protocol SDK, just `httpx` and the standard
+library.
+
+```python
+from deepharness import Agent, MCPServer
+
+async with MCPServer.stdio(["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]) as mcp:
+    agent = Agent(llm, tools=await mcp.tools())
+    state = await agent.arun("What is in the repo?")
+```
+
+`MCPServer.stdio(command)` runs a server as a subprocess; `MCPServer.http(url, headers=...)`
+reaches a remote one over streamable HTTP, handling both the JSON and SSE reply shapes and
+carrying the session id a server may issue. The handshake happens on first use, so `connect()`
+is optional; as a context manager the transport is closed for you.
+
+The tools are async, so drive the agent with `arun()`. Each one keeps the schema the server
+published rather than a re-derived one, and a call that the server reports as failed raises
+`MCPError` — which reaches the model as that call's result, so the run continues.
+
+A tool the server did **not** mark read-only is gated by default: it is code in another process
+that this side cannot inspect, so asking is the right default. Widen it with
+[`Permissions`](#permissions-deciding-per-call) so what you allowed stays written down, or pass
+`requires_approval=False` to turn the gate off wholesale.
+
+```python
+mcp = MCPServer.http("https://tools.internal/mcp", headers={"Authorization": f"Bearer {key}"})
+tools = await mcp.tools()          # list[Callable], ready for Agent(tools=...)
+listed = await mcp.list_tools()    # list[MCPTool] - name, description, schema, read_only
+```
+
 ## Built-in: web search
 
 `TavilySearch` wraps [Tavily's](https://tavily.com) search API as a tool, so an agent can
