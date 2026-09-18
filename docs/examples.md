@@ -185,6 +185,185 @@ def lookup_plan(customer: str, ctx: Ctx) -> str:
 state = await agent.arun("What plan is Acme on?", deps=Deps(db=db, tenant="acme"))
 ```
 
+## An agent working in a directory
+
+`file_tools()` and `shell_tool()` are the difference between an agent that talks about a
+codebase and one that reads it. Both close over a `Workspace`, so every path the model sends is
+resolved inside that root:
+
+```python
+import asyncio
+
+from deepharness import Agent, OpenAI, file_tools, shell_tool
+
+agent = Agent(
+    OpenAI("gpt-4o-mini"),
+    tools=[*file_tools("."), shell_tool(".")],
+    system="Work in the repository you are given. Read before you edit.",
+)
+
+state = asyncio.run(
+    agent.arun("Which module defines the executor, and what does it do?")
+)
+print(state.output)
+```
+
+A path that escapes the root raises `OutsideWorkspace`, which reaches the model as that call's
+result — so it can correct itself while the read never happens. `write_file` and `edit_file`
+are gated out of the box; `file_tools(".", writable=False)` hands over the read-only three
+instead, which is a stronger guarantee than a rule because there is nothing left to rule on.
+
+## Allowing `git log` but not `git push`
+
+`requires_approval` is per tool, which stops being enough when the tool is `run_command`.
+`Permissions` decides per call, from the arguments the model actually sent:
+
+```python
+from deepharness import Agent, Permissions, Rule, shell_tool
+
+agent = Agent(
+    llm,
+    tools=[shell_tool(".")],
+    permissions=Permissions(
+        allow=[Rule("run_command", {"command": "git log*"})],
+        ask=["run_command"],
+        deny=[Rule("run_command", {"command": "*rm -rf*"})],
+    ),
+)
+```
+
+`deny` beats `allow` beats `ask`, so widening a policy can never quietly override a refusal
+already written down. A denied call never runs and the model is told so, which lets it find
+another way instead of retrying. A call no rule matches falls back to the tool's own
+`requires_approval`.
+
+## Keeping a long run inside the window
+
+A run that reads files pays for every result again on every later turn. `ContextPolicy` bounds
+both ends of that:
+
+```python
+from deepharness import Agent, ContextPolicy, file_tools
+
+agent = Agent(
+    llm,
+    tools=file_tools("."),
+    context=ContextPolicy(max_tokens=100_000, tool_result_chars=8_000),
+)
+```
+
+`tool_result_chars` truncates each result as it is recorded, eliding the middle. `max_tokens`
+prunes the view the model is sent — oldest turns first — while `state.messages` keeps every
+message, so nothing is lost to you that only had to be kept from the provider. See
+[context management](guide/agents.md#context-management).
+
+## Watching a run work
+
+Text alone makes an agent look stalled, because most of a long run is tool calls the model
+never narrates:
+
+```python
+from deepharness import Finished, StepStarted, TextDelta, ToolFinished, ToolStarted
+
+async for event in agent.astream_events("Add a docstring to the executor"):
+    match event:
+        case StepStarted(step):
+            print(f"\n— step {step}")
+        case ToolStarted(name, arguments, _):
+            print(f"{name}({arguments}) …")
+        case ToolFinished(name, result, failed, _):
+            print(f"{name} {'failed' if failed else 'ok'}: {result[:60]}")
+        case TextDelta(text):
+            print(text, end="", flush=True)
+        case Finished(state):
+            print(f"\nstopped because: {state.stop_reason}")
+```
+
+`ToolFinished.result` is the text the model will read, truncation included, so what you show
+cannot drift from what it saw.
+
+## Stepping into the loop
+
+`Hooks` is four optional methods; override only what you need. Here: scrub secrets out of every
+tool result, and stop the run once it has spent enough:
+
+```python
+from deepharness import Agent, Hooks
+
+
+class Bounded(Hooks):
+    def after_tool(self, call, result):
+        return str(result).replace(SECRET, "[redacted]")
+
+    def after_step(self, step, state):
+        return state.usage.total_tokens < 200_000
+
+
+agent = Agent(llm, tools=file_tools("."), hooks=Bounded())
+```
+
+`after_step` returning `False` ends the run with `stop_reason == "stopped"`, so an early exit
+cannot be mistaken for a reply. Hooks never decide whether a gated call runs — `Permissions`
+owns that. See [hooks](guide/agents.md#hooks).
+
+## Asking about an image
+
+Message content is a string until it needs to be more:
+
+```python
+from deepharness import Image, Message, Text
+
+state = await agent.arun(
+    [
+        Message.human(
+            [Text("What changed in this screenshot?"), Image.from_path("ui.png")]
+        )
+    ]
+)
+```
+
+`Image.from_path()` encodes the file and infers its media type; `Document.from_path("x.pdf")`
+sends a file to read. Each provider renders these into its own wire shape. Content that is only
+text is still sent as a plain string, so nothing changes for an ordinary conversation.
+
+## Resuming a run that stopped for a human
+
+The pause is a returned state, not an exception, so it survives a process boundary:
+
+```python
+from deepharness import load_session, save_session
+
+state = await agent.arun("Deploy the release branch")
+if state.stop_reason == "paused":
+    save_session("run.json", state)  # the whole state, pending approval included
+
+# ... in another process, once someone has looked at it
+state = load_session("run.json")
+state = await agent.arun(state.approve())  # the gated call runs now
+```
+
+`save_session` takes a bare message list too, and `load_session` reads an older messages-only
+file, so existing sessions keep loading. See
+[session persistence](guide/agents.md#session-persistence).
+
+## Tools from an MCP server
+
+An [MCP](https://modelcontextprotocol.io) server's tools join the same toolbox as your own:
+
+```python
+from deepharness import Agent, MCPServer
+
+async with MCPServer.stdio(
+    ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
+) as mcp:
+    agent = Agent(llm, tools=await mcp.tools())
+    state = await agent.arun("What is in the repo?")
+```
+
+They are async, so drive the agent with `arun()`. A tool the server did not mark read-only is
+gated by default — it is code in another process that this side cannot inspect. See
+[MCP](guide/tools.md#tools-from-an-mcp-server).
+
 ## The agent loop, as a graph
 
 `Agent` runs think/act as an internal Python loop. Rebuilding it out of graph nodes gives you a

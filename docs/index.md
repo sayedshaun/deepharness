@@ -38,6 +38,10 @@ typed state, and 15 LLM providers behind one interface.
   are offloaded to threads so a blocking call never stalls the event loop.
 - **Agents are optional.** The graph engine has no idea what an LLM is. Use it for plain
   function orchestration, or drop an [`Agent`](guide/agents.md) inside a node.
+- **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
+  per-call [permission policy](guide/tools.md#permissions-deciding-per-call), a
+  [bounded context window](guide/agents.md#context-management), progress events and
+  [hooks](guide/agents.md#hooks) — the parts a run needs once it is long enough to matter.
 
 ## Install
 
@@ -71,9 +75,17 @@ Requires Python 3.11+.
 
     ---
 
-    Think/act loops, tools, token budgets, and session persistence.
+    Think/act loops, context management, hooks, budgets, and resumable sessions.
 
     [:octicons-arrow-right-24: Agents guide](guide/agents.md)
+
+-   :material-hammer-wrench:{ .lg .middle } **Tools & permissions**
+
+    ---
+
+    Workspace-confined file and shell tools, MCP servers, and per-call rules.
+
+    [:octicons-arrow-right-24: Tools guide](guide/tools.md)
 
 -   :material-api:{ .lg .middle } **API reference**
 

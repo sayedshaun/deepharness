@@ -8,7 +8,7 @@ typed state, and 15 LLM providers behind one interface.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![CI](https://github.com/sayedshaun/deepharness/actions/workflows/test.yml/badge.svg)](https://github.com/sayedshaun/deepharness/actions/workflows/test.yml) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
 
-[Install](#install) · [Quickstart](#quickstart) · [Graphs](#graphs) · [Providers](#providers) · [Docs](https://sayedshaun.github.io/deepharness/) · [Contributing](CONTRIBUTING.md)
+[Install](#install) · [Quickstart](#quickstart) · [Harness](#working-in-a-directory) · [Graphs](#graphs) · [Providers](#providers) · [Docs](https://sayedshaun.github.io/deepharness/) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -30,37 +30,6 @@ typed state, and 15 LLM providers behind one interface.
 - **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
   per-call permission policy, a bounded context window, and progress events — the parts a run
   needs once it is long enough to matter.
-
-## Working in a directory
-
-An agent that can read a codebase and change it, with the sharp edges gated:
-
-```python
-from deepharness import Agent, ContextPolicy, Permissions, Rule, file_tools, shell_tool
-
-agent = Agent(
-    OpenAI(model="gpt-4o-mini"),
-    tools=[*file_tools("."), shell_tool(".")],
-    context=ContextPolicy(max_tokens=120_000),
-    permissions=Permissions(
-        allow=[
-            "read_file",
-            "list_files",
-            "search_files",
-            Rule("run_command", {"command": "git *"}),
-        ],
-        ask=["write_file", "edit_file", "run_command"],
-        deny=[Rule("run_command", {"command": "*rm -rf*"})],
-    ),
-)
-
-state = await agent.arun("What does the executor do? Add a docstring if it lacks one.")
-```
-
-Every path is resolved inside the workspace root, `deny` beats `allow` beats `ask`, and a run
-that needs a human stops with `stop_reason == "paused"` — resumable later, from disk, with
-`save_session`/`load_session`. Tools from an [MCP](https://modelcontextprotocol.io) server join
-the same toolbox via `MCPServer.stdio(...)` or `MCPServer.http(...)`.
 
 ## Install
 
@@ -121,6 +90,50 @@ editor = Agent(
     tools=[researcher.as_tool(description="Look up facts on a topic.")],
 )
 ```
+
+## Working in a directory
+
+An agent that can read a codebase and change it, with the sharp edges gated:
+
+```python
+from deepharness import Agent, ContextPolicy, Permissions, Rule, file_tools, shell_tool
+
+agent = Agent(
+    OpenAI(model="gpt-4o-mini"),
+    tools=[*file_tools("."), shell_tool(".")],
+    context=ContextPolicy(max_tokens=120_000),
+    permissions=Permissions(
+        allow=[
+            "read_file",
+            "list_files",
+            "search_files",
+            Rule("run_command", {"command": "git *"}),
+        ],
+        ask=["write_file", "edit_file", "run_command"],
+        deny=[Rule("run_command", {"command": "*rm -rf*"})],
+    ),
+)
+
+state = await agent.arun("What does the executor do? Add a docstring if it lacks one.")
+```
+
+Every path is resolved inside the workspace root, `deny` beats `allow` beats `ask`, and a run
+that needs a human stops with `stop_reason == "paused"` — resumable later, in another process,
+because `save_session`/`load_session` round-trip the whole state, pending approval included.
+
+The rest of what a long run needs:
+
+- **Watch it work.** `astream_events()` emits `StepStarted`, `ToolStarted`, `ToolFinished` and
+  `ThinkingDelta` alongside the text, so a tool call is visible rather than dead air.
+- **Stay inside the window.** `ContextPolicy` truncates each tool result and prunes the view
+  the model is sent, while `state.messages` keeps everything.
+- **Step into the loop.** `Hooks` rewrites what is sent, what a call runs with, what its result
+  says, or stops the run — without forking the loop.
+- **More than text.** `Message.human([Text("what changed?"), Image.from_path("ui.png")])`
+  sends images and PDFs; a thinking model's reasoning arrives as `ThinkingDelta` and is
+  replayed where the vendor requires it.
+- **Tools from elsewhere.** An [MCP](https://modelcontextprotocol.io) server's tools join the
+  same toolbox via `MCPServer.stdio(...)` or `MCPServer.http(...)`.
 
 ## Graphs
 

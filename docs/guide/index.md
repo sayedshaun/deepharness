@@ -17,7 +17,8 @@ you need.
 
     ---
 
-    The think/act loop, `run` vs `arun`, token budgets, and session persistence.
+    The think/act loop, streaming and progress events, context management, hooks,
+    budgets, and resumable sessions.
 
     [:octicons-arrow-right-24: Read](agents.md)
 
@@ -25,7 +26,8 @@ you need.
 
     ---
 
-    Turning a function into a callable tool, and passing tools to an agent.
+    Writing a tool, the workspace-confined file and shell tools, per-call permissions,
+    and tools from an MCP server.
 
     [:octicons-arrow-right-24: Read](tools.md)
 
@@ -33,7 +35,8 @@ you need.
 
     ---
 
-    Anthropic, OpenAI, Gemini, and OpenAI-compatible gateways behind one interface.
+    Anthropic, OpenAI, Gemini and OpenAI-compatible gateways behind one interface, plus
+    images, reasoning, caching and concurrency.
 
     [:octicons-arrow-right-24: Read](providers.md)
 
