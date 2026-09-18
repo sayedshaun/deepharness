@@ -16,6 +16,7 @@ Agent(
     system: str | None = None,
     name: str = "agent",
     budget: Budget | None = None,
+    context: ContextPolicy | None = None,
     output: type | None = None,
 )
 ```
@@ -28,10 +29,11 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 | `arun` | `async def arun(state: Any = None, *, deps: Any = None) -> AgentState` | Async run. Tool calls in the same turn dispatch concurrently. |
 | `run` | `def run(state: Any = None, *, deps: Any = None) -> AgentState` | Sync run. Raises if a registered tool is `async def`. |
 | `astream` | `async def astream(state=None, *, deps=None) -> AsyncIterator[str]` | Text deltas as they arrive; tools still dispatch. |
-| `astream_events` | `async def astream_events(...) -> AsyncIterator[TextDelta \| Finished]` | Deltas plus a final `Finished(state)`. |
+| `astream_events` | `async def astream_events(...) -> AsyncIterator[AgentEvent]` | Text deltas, progress events and a final `Finished(state)`. |
 | `stream` / `stream_events` | sync counterparts | Same, outside an event loop. |
 | `total_usage` | `TokenUsage` | Cumulative token usage across every call made by this agent instance. Read-only. |
 | `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. Read-only. |
+| `context` | `ContextPolicy` | What the transcript may cost; defaults to `ContextPolicy()`. Read-only. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
 | `output` | `type \| None` | A dataclass; when set, `state.output` is a validated instance of it. |
 
@@ -88,6 +90,52 @@ dict adds `output` (the model's final text) and `usage` (a `TokenUsage`).
 
 Without a `model`, `run`/`arun` are a no-op passthrough — useful as a placeholder while
 wiring a graph.
+
+### `ContextPolicy`
+
+```python
+ContextPolicy(
+    max_tokens: int | None = None,
+    tool_result_chars: int | None = 8000,
+    keep_last: int = 4,
+)
+```
+
+Frozen dataclass bounding what a run sends. `tool_result_chars` truncates each tool result as
+it is recorded, eliding the middle. `max_tokens` prunes the transcript the model is sent —
+oldest turns first, with a note in their place — while `state.messages` keeps every message;
+it is `None` (no pruning) by default. Pruning never drops the leading system prompt, never
+orphans a tool result, and always keeps the last `keep_last` messages, so a transcript whose
+tail alone exceeds the budget is sent over it. Non-positive values raise `ConfigurationError`.
+
+| Member | Signature | Description |
+| --- | --- | --- |
+| `prune` | `def prune(messages: list[dict]) -> list[dict]` | The transcript as it should be sent; returns the list unchanged when it fits. Override to prune differently. |
+
+### `estimate_tokens`
+
+```python
+estimate_tokens(messages: list[dict]) -> int
+```
+
+Approximate token cost of a transcript, at roughly four characters per token. A heuristic, not
+a tokenizer — a real count would mean a per-vendor dependency.
+
+### `AgentEvent`
+
+```python
+AgentEvent = TextDelta | StepStarted | ToolStarted | ToolFinished | Finished
+```
+
+What `astream_events()`/`stream_events()` emit.
+
+| Event | Fields | Emitted |
+| --- | --- | --- |
+| `StepStarted` | `step: int` | Before each model call; 1-based, capped by `Budget.steps`. |
+| `ToolStarted` | `name: str`, `arguments: dict`, `call_id: str \| None` | Before a tool runs, with the arguments the model sent. |
+| `ToolFinished` | `name: str`, `result: str`, `failed: bool`, `call_id: str \| None` | After a tool returns or raises. `result` is the (truncated) text the model will read. Not emitted for a tool that asked a human — it has no result yet. |
+| `TextDelta` | `text: str` | As the model's prose arrives. |
+| `Finished` | `state: AgentState` | Once, last, carrying the run's result. |
 
 ### `TokenBudgetExceeded`
 
