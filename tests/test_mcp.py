@@ -303,3 +303,35 @@ async def test_a_stdio_server_that_dies_is_reported(tmp_path):
 def test_a_stdio_server_needs_a_command():
     with pytest.raises(MCPError):
         MCPServer.stdio([])
+
+
+_CHATTY_SERVER = textwrap.dedent(
+    """
+    import json, sys
+
+    def send(message):
+        sys.stdout.write(json.dumps(message) + "\\n")
+        sys.stdout.flush()
+
+    for line in sys.stdin:
+        message = json.loads(line)
+        if "id" not in message:
+            continue
+        send({"jsonrpc": "2.0", "method": "notifications/message",
+              "params": {"level": "info", "data": "working"}})
+        sys.stdout.write("not protocol at all\\n")
+        sys.stdout.flush()
+        result = ({"protocolVersion": "2025-06-18"} if message["method"] == "initialize"
+                  else {"content": [{"type": "text", "text": "done"}]})
+        send({"jsonrpc": "2.0", "id": message["id"], "result": result})
+    """
+)
+
+
+async def test_a_server_that_logs_before_answering_is_still_understood(tmp_path):
+    """Notifications and stray output sit between a request and its reply."""
+    script = tmp_path / "chatty.py"
+    script.write_text(_CHATTY_SERVER)
+
+    async with MCPServer.stdio([sys.executable, str(script)]) as server:
+        assert await server.call("anything", {}) == "done"

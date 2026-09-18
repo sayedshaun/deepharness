@@ -235,11 +235,28 @@ class StdioTransport(Transport):
                     "params": params,
                 },
             )
-            assert process.stdout is not None
-            line = await process.stdout.readline()
-            if not line:
-                raise MCPError(f"MCP server closed the connection during {method}")
-            return _result(json.loads(line), method)
+            return _result(await self._reply(process, self._next_id, method), method)
+
+    @staticmethod
+    async def _reply(
+        process: asyncio.subprocess.Process, request_id: int, method: str
+    ) -> dict[str, Any]:
+        """Read until this request's own reply arrives.
+
+        A server is free to write notifications - progress, logging - between
+        the request and its answer, so the next line out is not necessarily the
+        one being waited for. Anything carrying another id, or none, belongs to
+        something this client did not ask about and is skipped.
+        """
+        assert process.stdout is not None
+        while line := await process.stdout.readline():
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # servers do print the odd non-protocol line
+            if isinstance(message, dict) and message.get("id") == request_id:
+                return message
+        raise MCPError(f"MCP server closed the connection during {method}")
 
     async def notify(self, method: str, params: dict[str, Any]) -> None:
         async with self._lock:
