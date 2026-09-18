@@ -13,11 +13,14 @@ from deepharness.providers.base import (
 
 from ..errors import (
     ConfigurationError,
+    HumanInputRequired,
     OutputValidationError,
     TokenBudgetExceeded,
 )
 from ..tools.toolbox import Ctx, Toolbox, ToolSpec
 from . import turn
+from .context import ContextPolicy
+from .events import StepStarted, ToolFinished, ToolStarted
 from .output import FINAL_TOOL, coerce, final_tool_schema, find_final
 from .state import (
     AgentState,
@@ -28,8 +31,13 @@ from .state import (
     StopReason,
 )
 
-AgentEvent = TextDelta | Finished
-"""What streaming a run emits: prose as it arrives, then the final state."""
+AgentEvent = TextDelta | StepStarted | ToolStarted | ToolFinished | Finished
+"""What streaming a run emits: the run's progress, then the final state.
+
+Prose arrives as TextDelta and the rest is what the loop is doing between
+those - a step beginning, a tool starting and finishing - ending with the one
+Finished that carries the AgentState. A caller interested in text alone wants
+astream() and never sees these."""
 
 
 @dataclass(slots=True)
@@ -66,6 +74,9 @@ class Agent:
     * total_usage accumulates across every model call this instance makes, not
       per run, and Budget(tokens=...) turns crossing it into TokenBudgetExceeded
       with the partial state attached.
+    * ContextPolicy bounds what the transcript costs: each tool result is
+      truncated as it is recorded, and the model is sent a pruned view while
+      state.messages keeps every message.
     * Every public entry point - arun, run, astream, stream - is the same loop;
       only the I/O differs. See astream_events for the one async driver.
 
@@ -77,6 +88,7 @@ class Agent:
 
     __slots__ = (
         "_budget",
+        "_context",
         "_final_schema",
         "_model",
         "_name",
@@ -94,6 +106,7 @@ class Agent:
         system: str | None = None,
         name: str = "agent",
         budget: Budget | None = None,
+        context: ContextPolicy | None = None,
         output: type | None = None,
     ):
         self._model = model
@@ -101,6 +114,7 @@ class Agent:
         self._system = system
         self._name = name
         self._budget = budget or Budget()
+        self._context = context or ContextPolicy()
         self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
         self._total_usage = TokenUsage(0, 0, 0)
@@ -127,6 +141,10 @@ class Agent:
     @property
     def budget(self) -> Budget:
         return self._budget
+
+    @property
+    def context(self) -> ContextPolicy:
+        return self._context
 
     @property
     def output(self) -> type | None:
@@ -228,7 +246,9 @@ class Agent:
         approved = turn.settle(state, messages, self._name)
         if approved:
             results = yield _Dispatch(approved)
-            turn.record_results(messages, approved, results)
+            turn.record_results(
+                messages, approved, results, limit=self._context.tool_result_chars
+            )
 
         for _ in range(self._budget.steps):
             response = yield _Ask(messages)
@@ -281,7 +301,9 @@ class Agent:
                 return self._result(state, messages, "", "paused", paused=gated)
 
             results = yield _Dispatch(wanted)
-            pending = turn.record_results(messages, wanted, results)
+            pending = turn.record_results(
+                messages, wanted, results, limit=self._context.tool_result_chars
+            )
             if pending:
                 return self._result(state, messages, "", "paused", paused=pending)
 
@@ -335,24 +357,32 @@ class Agent:
         turns = self._turns(state, turn.prepare(state, self._system))
         schemas = self._schemas()
         outcome: Any = None
+        step = 0
         try:
             while True:
                 request = turns.send(outcome)
                 if isinstance(request, _Ask):
+                    step += 1
+                    yield StepStarted(step)
                     async for event in self._model.astream_events(
-                        request.messages, tools=schemas
+                        self._context.prune(request.messages), tools=schemas
                     ):
                         if isinstance(event, TextDelta):
                             yield event
                         else:
                             outcome = event.response
                 else:
+                    for call in request.calls:
+                        yield ToolStarted(call.name, call.arguments, call.id)
                     outcome = await asyncio.gather(
                         *(
                             self._call_tool(call.name, call.arguments, ctx)
                             for call in request.calls
                         )
                     )
+                    for call, result in zip(request.calls, outcome, strict=True):
+                        if (finished := self._finished(call, result)) is not None:
+                            yield finished
         except StopIteration as done:
             yield Finished(done.value)
 
@@ -369,22 +399,29 @@ class Agent:
         turns = self._turns(state, turn.prepare(state, self._system))
         schemas = self._schemas()
         outcome: Any = None
+        step = 0
         try:
             while True:
                 request = turns.send(outcome)
                 if isinstance(request, _Ask):
+                    step += 1
+                    yield StepStarted(step)
                     for event in self._model.stream_events(
-                        request.messages, tools=schemas
+                        self._context.prune(request.messages), tools=schemas
                     ):
                         if isinstance(event, TextDelta):
                             yield event
                         else:
                             outcome = event.response
                 else:
-                    outcome = [
-                        self._call_tool_sync(call.name, call.arguments, ctx)
-                        for call in request.calls
-                    ]
+                    results: list[Any] = []
+                    for call in request.calls:
+                        yield ToolStarted(call.name, call.arguments, call.id)
+                        result = self._call_tool_sync(call.name, call.arguments, ctx)
+                        results.append(result)
+                        if (finished := self._finished(call, result)) is not None:
+                            yield finished
+                    outcome = results
         except StopIteration as done:
             yield Finished(done.value)
 
@@ -401,6 +438,18 @@ class Agent:
         for event in self.stream_events(state, deps=deps):
             if isinstance(event, TextDelta):
                 yield event.text
+
+    def _finished(self, call: Any, result: Any) -> ToolFinished | None:
+        """How one dispatched call ended, or None if it is not over.
+
+        A tool that asked a human has produced no result yet - the run is about
+        to pause on it - so it gets no event rather than one reporting its own
+        question as an error.
+        """
+        if isinstance(result, HumanInputRequired):
+            return None
+        content, failed = turn.render(result, limit=self._context.tool_result_chars)
+        return ToolFinished(call.name, content, failed, call.id)
 
     async def _call_tool(self, name: str, arguments: dict[str, Any], ctx: Ctx) -> Any:
         try:
