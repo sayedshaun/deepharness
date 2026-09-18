@@ -143,38 +143,26 @@ def _decide(tools: Toolbox, call: Any, permissions: Permissions | None) -> Decis
     return "allow"
 
 
-def record_denials(messages: list[dict[str, Any]], calls: list[Any]) -> None:
-    """Tell the model a call was refused by policy, as that call's result.
+DENIED = "Denied by policy: this call is not permitted."
+"""A permission rule refused the call outright."""
+
+REFUSED = "Refused before running."
+"""A hook refused the call; see Hooks.before_tool."""
+
+NOT_RUN = "Not run: the turn stopped for approval of another call."
+"""The turn paused on a gated call, so this one was left unrun."""
+
+
+def record_unrun(messages: list[dict[str, Any]], calls: list[Any], note: str) -> None:
+    """Account for calls that were requested but never ran, and say why.
 
     Recorded rather than dropped for two reasons: the model needs to learn it
     cannot take that route, and a vendor rejects a transcript in which a
-    requested call has no result at all.
+    requested call has no result at all - which is what a resumed run would
+    otherwise send.
     """
     for call in calls:
-        messages.append(
-            Message.tool(
-                "Denied by policy: this call is not permitted.",
-                name=call.name,
-                call_id=call.id,
-            ).to_dict()
-        )
-
-
-def record_skipped(messages: list[dict[str, Any]], calls: list[Any]) -> None:
-    """Account for calls the turn never ran because it paused on another one.
-
-    Nothing in a turn runs until the human rules on its gated calls, so these
-    are left unrun - but they were still requested, and a requested call with
-    no result is a transcript a vendor will reject on resume.
-    """
-    for call in calls:
-        messages.append(
-            Message.tool(
-                "Not run: the turn stopped for approval of another call.",
-                name=call.name,
-                call_id=call.id,
-            ).to_dict()
-        )
+        messages.append(Message.tool(note, name=call.name, call_id=call.id).to_dict())
 
 
 def settle(
