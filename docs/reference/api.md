@@ -52,6 +52,8 @@ AgentState(
 What a run consumed and produced. `answered` is `True` only when `stop_reason == "answer"`.
 `AgentState.of(value)` builds one from a prompt string, a list of messages, a dict of known
 fields, or an existing state; an unknown dict key raises `ConfigurationError`.
+`to_dict()`/`from_dict(data)` round-trip the whole state as JSON-able data — what
+`save_session`/`load_session` use.
 
 `approve(call_id=None)` / `reject(call_id=None)` rule on calls waiting in `paused`, returning the
 state so a resume reads as `await agent.arun(state.approve())`. Both raise `ConfigurationError`
@@ -163,11 +165,15 @@ style dict, so it's interchangeable with hand-built message dicts anywhere one i
 ### `save_session` / `load_session`
 
 ```python
-save_session(path: str, messages: list[dict]) -> None
-load_session(path: str) -> list[dict]  # [] if the file doesn't exist
+save_session(path: str, session: AgentState | list[dict]) -> None
+load_session(path: str) -> AgentState  # empty AgentState if the file doesn't exist
 ```
 
-Round-trips `state.messages` through JSON so a conversation can resume across process runs.
+Round-trips a whole `AgentState` through JSON so a run can resume across process runs —
+including `usage`, `stop_reason` and any call paused on an approval, so a run waiting on a
+human can be resumed with `load_session(path).approve()`. A bare message list is accepted on
+the way in, and a file holding a bare JSON array is read as a transcript. Structured `output`
+is stored as plain data and returns as a dict.
 
 ## Tools
 
