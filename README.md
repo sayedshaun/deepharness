@@ -127,49 +127,41 @@ The rest of what a long run needs:
   `ThinkingDelta` alongside the text, so a tool call is visible rather than dead air.
 - **Stay inside the window.** `ContextPolicy` truncates each tool result and prunes the view
   the model is sent, while `state.messages` keeps everything.
-- **Step into the loop.** [`Middleware`](#middleware) rewrites what is sent, what a call runs
-  with, what its result says, or stops the run — without forking the loop.
+- **Wrap the model, not the loop.** [`Caching`, `RateLimited`, `Retrying` and
+  `Fallback`](#wrapping-a-provider) are themselves `LLM`s, so they work on the sync path, the
+  async path and streaming alike.
 - **More than text.** `Message.human([Text("what changed?"), Image.from_path("ui.png")])`
   sends images and PDFs; a thinking model's reasoning arrives as `ThinkingDelta` and is
   replayed where the vendor requires it.
 - **Tools from elsewhere.** An [MCP](https://modelcontextprotocol.io) server's tools join the
   same toolbox via `MCPServer.stdio(...)` or `MCPServer.http(...)`.
 
-### Middleware
+### Wrapping a provider
 
-Override one method and leave the rest alone — they are no-ops:
+Caching, rate limiting, retrying and falling back are all "do something around a model call,
+then delegate" — so each one is just another `LLM`. They compose at the call site, where the
+order is visible:
 
 ```python
-from deepharness import Agent, Middleware, file_tools
+from deepharness import Anthropic, Caching, Fallback, OpenAI, RateLimited
 
+llm = Caching(
+    RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)
+)
 
-class StopAtBudget(Middleware):
-    def after_step(self, step, state):
-        return state.usage.total_tokens < 200_000
-
-
-agent = Agent(llm, tools=file_tools("."), middleware=StopAtBudget())
+agent = Agent(llm, tools=file_tools("."))
 ```
 
-That is the whole feature: one object, four optional entry points, so new behaviour goes here
-instead of into another `Agent` parameter.
+| Wrapper | What it does |
+| --- | --- |
+| `Fallback(primary, *others)` | Moves to the next provider when one raises `ProviderError`. A stream that fails *before* its first event falls back; one that fails partway does not, since those deltas already reached you. |
+| `Caching(llm, maxsize=256, ttl=None)` | Serves a repeated request from an LRU. Put it in front of a deterministic setup only. |
+| `RateLimited(llm, rps=…, burst=…)` | Token bucket. Each caller reserves a slot and waits its own turn, so simultaneous requests leave in order at the configured rate. |
+| `Retrying(llm, attempts=2)` | Asks again when a turn comes back with no text *and* no tool call — the transport already retries 429s and 5xx. |
 
-| Method | Called | Return |
-| --- | --- | --- |
-| `before_model(messages)` | Before every model call, on the whole transcript | The messages to send, or `None` for unchanged |
-| `before_tool(call)` | Per requested call, **before** the permission policy | The call, possibly rewritten, or `None` to refuse it |
-| `after_tool(call, result)` | As each result comes back | The result, changed or not |
-| `after_step(step, state)` | End of each step that ran tools | `False` to stop the run |
-
-`before_model`'s return value is sent but **not** recorded, which makes it the place for a
-per-turn reminder — it never accumulates. `before_tool` runs *before* `Permissions`, so a
-rewritten argument is what the policy rules on rather than a way around a `deny`. `after_tool`
-sees a failure as a value (`result` is the exception), and what it returns is what both the
-transcript and the `ToolFinished` event carry. `after_step` returning `False` ends the run with
-`stop_reason == "stopped"`, so an early exit cannot be mistaken for a reply.
-
-Middleware never decides whether a gated call runs — `Permissions` and `requires_approval` own
-that, so there stays one answer to "why did this call run?".
+Because these are `LLM` implementations rather than a middleware stack, one wrapper covers
+`run()`, `arun()` and streaming at once — and `Fallback(on=(ProviderError,))` deliberately does
+not catch bare `Exception`, so a bug in your own code never reads as a flaky vendor.
 
 ## Graphs
 

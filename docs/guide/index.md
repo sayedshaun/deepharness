@@ -17,8 +17,8 @@ you need.
 
     ---
 
-    The think/act loop, streaming and progress events, context management, middleware,
-    budgets, and resumable sessions.
+    The think/act loop, streaming and progress events, context management, budgets, and
+    resumable sessions.
 
     [:octicons-arrow-right-24: Read](agents.md)
 
@@ -36,7 +36,7 @@ you need.
     ---
 
     Anthropic, OpenAI, Gemini and OpenAI-compatible gateways behind one interface, plus
-    images, reasoning, caching and concurrency.
+    images, reasoning, and wrappers for caching, rate limiting and fallback.
 
     [:octicons-arrow-right-24: Read](providers.md)
 

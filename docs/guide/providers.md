@@ -82,7 +82,7 @@ that dropped it would lose the model's chain exactly where a long task depends o
 is replayed only where it is required and accepted; OpenAI and Gemini get text alone.
 `astream()` never yields reasoning, so a caller that only prints text is unaffected.
 
-## Caching and concurrency
+## Prompt caching and concurrency
 
 Two knobs for what a harness does differently from a chat: it sends the same long prefix every
 turn, and it fans out.
@@ -104,6 +104,92 @@ in-flight requests are what a rate limiter counts.
     prompt is a separate top-level field, and there's no `role: "tool"` — tool calls/results
     become content blocks instead. `Message` carries the vendor's call id under the hood, so
     this round-trips correctly across turns for all three providers.
+
+## Wrapping a provider
+
+Caching, rate limiting, retrying and falling back are the same shape: do something around a
+model call, then delegate. `LLM` is already a narrow interface, so each of these is another
+implementation of it — which means one wrapper covers `generate()`, `agenerate()` and both
+streaming paths, and they compose at the call site where the order is visible.
+
+```python
+from deepharness import Anthropic, Caching, Fallback, OpenAI, RateLimited, Retrying
+
+llm = Caching(
+    RateLimited(
+        Retrying(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5"))),
+        rps=2,
+    )
+)
+```
+
+Read it outside-in: the cache is asked first, then the limiter, then the retry, and the
+fallback is what actually talks to a vendor. `llm.inner` reaches the provider underneath, and
+`aclose()`/`close()` pass all the way down.
+
+### `Fallback`
+
+```python
+from deepharness import Fallback, ProviderError
+
+llm = Fallback(primary, backup, on=(ProviderError,))  # on= is the default
+```
+
+Tries each provider in order. `on` is `ProviderError` rather than `Exception` on purpose:
+catching everything would turn a `TypeError` in your own code into "the primary model is
+flaky" and quietly send your traffic elsewhere. When every provider fails you get one
+`ProviderError` naming how many were tried, with the last failure as its `__cause__`.
+
+Streaming has one rule worth knowing: a stream that fails **before its first event** falls
+back, and one that fails partway through raises instead. Those deltas are already with the
+caller, and starting over would repeat them.
+
+### `Caching`
+
+```python
+Caching(llm, maxsize=256, ttl=None)
+```
+
+An in-process LRU keyed on the messages *and* the tool schemas. Worth putting in front of a
+deterministic setup — temperature 0, or a classify/extract step. In front of a sampling model
+it hands every caller the first answer it happened to get, which is not what sampling is for,
+so it is never on by default.
+
+A streamed hit is replayed in block order and ends with the same `Completed`, so a caller's
+loop looks identical either way. Responses are copied on the way out, so editing what you got
+cannot corrupt the entry behind it. `hits`, `misses` and `clear()` are there for when you want
+to know whether it is earning its place.
+
+Two things it deliberately does not do: identical calls made *concurrently* all miss and all
+reach the vendor (no single-flight), and nothing is shared between processes.
+
+### `RateLimited`
+
+```python
+RateLimited(llm, rps=2, burst=4)
+```
+
+A token bucket refilling at `rps`, up to `burst`. A caller reserves its slot when it asks and
+then waits out its own turn, so ten simultaneous requests leave in order at the configured rate
+rather than retrying against each other.
+
+State is guarded by a `threading.Lock`, not an `asyncio` one — a contended asyncio primitive
+binds to the loop that awaited it and raises in any other, and a provider built once at import
+time routinely outlives a script's first `asyncio.run()`.
+
+### `Retrying`
+
+```python
+Retrying(llm, attempts=2, backoff=0.5)
+```
+
+For the other kind of failure: the request succeeded and the model said nothing at all — no
+text, no tool call. That turn is unusable, and an agent loop would otherwise spend a step on
+it. Transport failures (429, 5xx, a dropped connection) are already retried with backoff by
+the HTTP client underneath, so this does not repeat that.
+
+A streamed turn is retried only while nothing has been emitted, which an empty turn satisfies
+by definition — so streaming stays as responsive as it was.
 
 ## OpenAI-compatible gateways
 

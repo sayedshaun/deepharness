@@ -18,7 +18,6 @@ Agent(
     budget: Budget | None = None,
     context: ContextPolicy | None = None,
     permissions: Permissions | None = None,
-    middleware: Middleware | None = None,
     output: type | None = None,
 )
 ```
@@ -37,7 +36,6 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 | `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. Read-only. |
 | `context` | `ContextPolicy` | What the transcript may cost; defaults to `ContextPolicy()`. Read-only. |
 | `permissions` | `Permissions \| None` | Per-call policy; `None` leaves each call to the tool's own `requires_approval`. Read-only. |
-| `middleware` | `Middleware` | Where the run steps out to its caller; no-ops unless one was passed. Read-only. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
 | `output` | `type \| None` | A dataclass; when set, `state.output` is a validated instance of it. |
 
@@ -54,8 +52,8 @@ AgentState(
 ```
 
 What a run consumed and produced. `stop_reason` is one of `"answer"`, `"step_budget"`,
-`"paused"`, `"token_budget"`, `"truncated"` or `"stopped"` (a `Middleware.after_step` early exit).
-`answered` is `True` only when `stop_reason == "answer"`.
+`"paused"`, `"token_budget"` or `"truncated"`. `answered` is `True` only when
+`stop_reason == "answer"`.
 `AgentState.of(value)` builds one from a prompt string, a list of messages, a dict of known
 fields, or an existing state; an unknown dict key raises `ConfigurationError`.
 `to_dict()`/`from_dict(data)` round-trip the whole state as JSON-able data — what
@@ -119,29 +117,6 @@ tail alone exceeds the budget is sent over it. Non-positive values raise `Config
 | Member | Signature | Description |
 | --- | --- | --- |
 | `prune` | `def prune(messages: list[dict]) -> list[dict]` | The transcript as it should be sent; returns the list unchanged when it fits. Override to prune differently. |
-
-### `Middleware`
-
-```python
-class Middleware:
-    def before_model(self, messages: list[dict]) -> list[dict] | None: ...
-    def before_tool(self, call: ToolCall) -> ToolCall | None: ...
-    def after_tool(self, call: ToolCall, result: Any) -> Any: ...
-    def after_step(self, step: int, state: AgentState) -> bool: ...
-```
-
-Optional entry points into the loop; subclass and override only what you need. A plain class
-rather than an ABC, so wanting one method does not mean writing four, and synchronous, because
-`run()` is a real synchronous path.
-
-| Method | Called | Effect |
-| --- | --- | --- |
-| `before_model` | Before every model call, before `ContextPolicy` shapes the request | Its return value is sent and **not** recorded in `state.messages` |
-| `before_tool` | Per requested call, **before** the permission policy rules on it | Rewrites the call, or refuses it with `None` (recorded like a denial) |
-| `after_tool` | As each result arrives; `result` is the `Exception` when a tool raised | Replaces what the transcript and the `ToolFinished` event carry. Skipped for a `HumanInputRequired` pause |
-| `after_step` | End of each step that ran tools; never on the answering step | `False` ends the run with `stop_reason == "stopped"` |
-
-Middleware does not decide whether a gated call runs — `Permissions` and `requires_approval` own that.
 
 ### `estimate_tokens`
 
@@ -462,6 +437,30 @@ definition, the part of a harness request that repeats every turn.
 
 Each provider holds an HTTP connection pool. Call `await model.aclose()` — or
 `model.close()` from synchronous code — when you are done with one.
+
+### Wrapping a provider
+
+```python
+Fallback(primary: LLM, *others: LLM, on: tuple[type[BaseException], ...] = (ProviderError,))
+Caching(llm: LLM, *, maxsize: int = 256, ttl: float | None = None)
+RateLimited(llm: LLM, *, rps: float, burst: int | None = None)
+Retrying(llm: LLM, *, attempts: int = 2, backoff: float = 0.5)
+```
+
+Each is itself an `LLM`, so one wrapper covers `generate`, `agenerate` and both streaming
+paths, and they compose: `Caching(RateLimited(Fallback(a, b), rps=2))`. `inner` reaches the
+provider underneath (`models` on `Fallback`), and `aclose()`/`close()` pass down.
+
+| Wrapper | Behaviour |
+| --- | --- |
+| `Fallback` | Tries each provider in order, catching only `on` — `ProviderError` by default, so a bug in your own code is not mistaken for a flaky vendor. All failing raises one `ProviderError` with the last as `__cause__`. A stream failing before its first event falls back; one failing partway raises. |
+| `Caching` | In-process LRU keyed on messages **and** tool schemas, with optional `ttl`. Hits are copied on the way out; a streamed hit is replayed in block order then `Completed`. Exposes `hits`, `misses`, `clear()`. No single-flight: concurrent identical calls all miss. Only sound in front of a deterministic setup. |
+| `RateLimited` | Token bucket at `rps`, capacity `burst` (default `max(1, int(rps))`). A caller reserves its slot then waits its own turn. Guarded by a `threading.Lock`, so one instance works across event loops. |
+| `Retrying` | Re-asks when a turn has no text **and** no tool calls. Transport-level retries already happen in `HTTPClient`. A stream is retried only while nothing has been emitted. |
+
+Non-positive limits raise `ConfigurationError`, as does a `Fallback` with nothing to fall back
+to. `Wrapping` is the shared base if you write your own: subclass it and override only the
+methods you change.
 
 ### OpenAI-compatible gateways
 

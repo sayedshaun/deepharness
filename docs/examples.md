@@ -282,38 +282,26 @@ async for event in agent.astream_events("Add a docstring to the executor"):
 `ToolFinished.result` is the text the model will read, truncation included, so what you show
 cannot drift from what it saw.
 
-## Stepping into the loop
+## Wrapping the model instead of the loop
 
-`Middleware` is four optional methods; override only what you need. Here: keep an API key out of
-whatever the tools read back:
-
-```python
-import os
-
-from deepharness import Agent, Middleware, file_tools
-
-
-class Scrubbing(Middleware):
-    def after_tool(self, call, result):
-        return str(result).replace(os.environ["API_KEY"], "[redacted]")
-
-
-agent = Agent(llm, tools=file_tools("."), middleware=Scrubbing())
-```
-
-What `after_tool` returns is what the transcript *and* the `ToolFinished` event carry, so the
-model and your UI cannot be shown different things. To stop a run early, override
-`after_step` instead:
+Caching, rate limiting, retrying and falling back are all `LLM`s, so they stack in front of a
+provider and work on every path at once:
 
 ```python
-class Bounded(Middleware):
-    def after_step(self, step, state):
-        return state.usage.total_tokens < 200_000
+from deepharness import Agent, Anthropic, Caching, Fallback, OpenAI, RateLimited
+
+llm = Caching(
+    RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)
+)
+
+agent = Agent(llm, tools=[get_weather])
 ```
 
-`after_step` returning `False` ends the run with `stop_reason == "stopped"`, so an early exit
-cannot be mistaken for a reply. Middleware never decides whether a gated call runs —
-`Permissions` owns that. See [middleware](guide/agents.md#middleware).
+Read it outside-in: the cache answers first, then the limiter, then the fallback talks to a
+vendor. `Fallback` catches `ProviderError` only — a `TypeError` in your own code should not
+read as a flaky model — and a stream that fails partway through raises rather than restarting,
+because those deltas already reached you. See
+[wrapping a provider](guide/providers.md#wrapping-a-provider).
 
 ## Asking about an image
 
