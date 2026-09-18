@@ -208,7 +208,7 @@ class LLM(ABC):
         error or an empty iterator. Providers that really stream override this.
         """
         response = await self.agenerate(messages, tools=tools)
-        for event in _as_deltas(response):
+        for event in as_deltas(response):
             yield event
         yield Completed(response)
 
@@ -220,7 +220,7 @@ class LLM(ABC):
     ) -> Iterator[StreamEvent]:
         """Synchronous counterpart to astream_events()."""
         response = self.generate(messages, tools=tools)
-        yield from _as_deltas(response)
+        yield from as_deltas(response)
         yield Completed(response)
 
     async def astream(
@@ -246,7 +246,7 @@ class LLM(ABC):
                 yield event.text
 
 
-def _as_deltas(response: CompletionResponse) -> list[TextDelta | ThinkingDelta]:
+def as_deltas(response: CompletionResponse) -> list[TextDelta | ThinkingDelta]:
     """One whole turn as the deltas a streaming turn would have emitted.
 
     For a backend that cannot stream: its callers still get the same event

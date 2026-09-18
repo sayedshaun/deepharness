@@ -146,9 +146,6 @@ def _decide(tools: Toolbox, call: Any, permissions: Permissions | None) -> Decis
 DENIED = "Denied by policy: this call is not permitted."
 """A permission rule refused the call outright."""
 
-REFUSED = "Refused before running."
-"""Middleware refused the call; see Middleware.before_tool."""
-
 NOT_RUN = "Not run: the turn stopped for approval of another call."
 """The turn paused on a gated call, so this one was left unrun."""
 

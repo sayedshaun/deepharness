@@ -34,6 +34,13 @@ from deepharness.providers.gateways import (
 )
 from deepharness.providers.gemini import Gemini
 from deepharness.providers.openai import OpenAI
+from deepharness.providers.wrappers import (
+    Caching,
+    Fallback,
+    RateLimited,
+    Retrying,
+    Wrapping,
+)
 
 __all__ = [
     "LLM",
@@ -41,12 +48,14 @@ __all__ = [
     "XAI",
     "Anthropic",
     "Block",
+    "Caching",
     "Cerebras",
     "Completed",
     "CompletionResponse",
     "Content",
     "DeepSeek",
     "Document",
+    "Fallback",
     "Fireworks",
     "Gemini",
     "Groq",
@@ -57,7 +66,9 @@ __all__ = [
     "Ollama",
     "OpenAI",
     "OpenRouter",
+    "RateLimited",
     "ReasoningLevel",
+    "Retrying",
     "StreamEvent",
     "Text",
     "TextDelta",
@@ -66,4 +77,5 @@ __all__ = [
     "Together",
     "TokenUsage",
     "ToolCall",
+    "Wrapping",
 ]
