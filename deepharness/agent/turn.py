@@ -12,6 +12,7 @@ from typing import Any
 
 from ..errors import ConfigurationError, HumanInputRequired
 from ..tools.toolbox import Toolbox
+from .context import truncate
 from .state import AgentState, Message, PendingHumanInput, as_dict
 
 
@@ -40,10 +41,23 @@ def record_request(messages: list[dict[str, Any]], response: Any) -> None:
     )
 
 
+def render(result: Any, *, limit: int | None = None) -> tuple[str, bool]:
+    """One tool outcome as the text the model sees, and whether it failed.
+
+    Shared with the ToolFinished event rather than rendered twice, so a caller
+    watching a run cannot be shown something the model was never sent.
+    """
+    failed = isinstance(result, Exception)
+    content = f"Error: {result!r}" if failed else str(result)
+    return truncate(content, limit), failed
+
+
 def record_results(
     messages: list[dict[str, Any]],
     calls: list[Any],
     results: list[Any],
+    *,
+    limit: int | None = None,
 ) -> list[PendingHumanInput]:
     """Record one turn's tool outcomes, returning any that need a human.
 
@@ -57,7 +71,7 @@ def record_results(
         if isinstance(result, HumanInputRequired):
             pending.append(PendingHumanInput(call.id, call.name, result.question))
             continue
-        content = f"Error: {result!r}" if isinstance(result, Exception) else str(result)
+        content, _ = render(result, limit=limit)
         messages.append(
             Message.tool(content, name=call.name, call_id=call.id).to_dict()
         )
