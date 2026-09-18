@@ -179,23 +179,25 @@ loop asks for a view of the transcript and does not care how it was chosen.
 each a no-op unless you override it:
 
 ```python
-from deepharness import Agent, Middleware
+from deepharness import Agent, Middleware, shell_tool
 
 
-class Auditing(Middleware):
+class NoForcePush(Middleware):
     def before_tool(self, call):
         if "--force" in str(call.arguments.get("command", "")):
             return None  # refuse it; the model is told
         return call
 
-    def after_tool(self, call, result):
-        return scrub_secrets(str(result))
 
+agent = Agent(llm, tools=[shell_tool(".")], middleware=NoForcePush())
+```
+
+Each method is independent, so overriding one costs nothing in the other three:
+
+```python
+class Bounded(Middleware):
     def after_step(self, step, state):
         return state.usage.total_tokens < 200_000
-
-
-agent = Agent(llm, tools=[...], middleware=Auditing())
 ```
 
 | Method | Called | Return |
@@ -304,6 +306,9 @@ For anything finer than per-tool — allowing `git log` but not `git push`, both
 answer becomes that call's result:
 
 ```python
+from deepharness import HumanInputRequired
+
+
 @tool
 def confirm(question: str) -> str:
     """Ask the operator something."""

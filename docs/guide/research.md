@@ -128,6 +128,8 @@ degree of parallelism at one, so pass one or the other.
 ## Prompts and limits
 
 ```python
+from deepharness import Budget
+
 DeepResearch(
     model,
     tools=[search.as_tool()],

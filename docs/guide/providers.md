@@ -65,6 +65,8 @@ payload — and a saved session — is byte-for-byte what it was before blocks e
 Gemini take the matching token budget). What comes back is kept apart from the answer:
 
 ```python
+from deepharness import TextDelta, ThinkingDelta
+
 async for event in agent.astream_events("Prove it"):
     match event:
         case ThinkingDelta(text):

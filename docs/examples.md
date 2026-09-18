@@ -284,22 +284,31 @@ cannot drift from what it saw.
 
 ## Stepping into the loop
 
-`Middleware` is four optional methods; override only what you need. Here: scrub secrets out of every
-tool result, and stop the run once it has spent enough:
+`Middleware` is four optional methods; override only what you need. Here: keep an API key out of
+whatever the tools read back:
 
 ```python
-from deepharness import Agent, Middleware
+import os
+
+from deepharness import Agent, Middleware, file_tools
 
 
-class Bounded(Middleware):
+class Scrubbing(Middleware):
     def after_tool(self, call, result):
-        return str(result).replace(SECRET, "[redacted]")
+        return str(result).replace(os.environ["API_KEY"], "[redacted]")
 
+
+agent = Agent(llm, tools=file_tools("."), middleware=Scrubbing())
+```
+
+What `after_tool` returns is what the transcript *and* the `ToolFinished` event carry, so the
+model and your UI cannot be shown different things. To stop a run early, override
+`after_step` instead:
+
+```python
+class Bounded(Middleware):
     def after_step(self, step, state):
         return state.usage.total_tokens < 200_000
-
-
-agent = Agent(llm, tools=file_tools("."), middleware=Bounded())
 ```
 
 `after_step` returning `False` ends the run with `stop_reason == "stopped"`, so an early exit

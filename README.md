@@ -137,8 +137,22 @@ The rest of what a long run needs:
 
 ### Middleware
 
-One object, four optional methods, each a no-op unless you override it — so this is where new
-behaviour goes instead of another `Agent` parameter:
+Override one method and leave the rest alone — they are no-ops:
+
+```python
+from deepharness import Agent, Middleware, file_tools
+
+
+class StopAtBudget(Middleware):
+    def after_step(self, step, state):
+        return state.usage.total_tokens < 200_000
+
+
+agent = Agent(llm, tools=file_tools("."), middleware=StopAtBudget())
+```
+
+That is the whole feature: one object, four optional entry points, so new behaviour goes here
+instead of into another `Agent` parameter.
 
 | Method | Called | Return |
 | --- | --- | --- |
@@ -147,31 +161,10 @@ behaviour goes instead of another `Agent` parameter:
 | `after_tool(call, result)` | As each result comes back | The result, changed or not |
 | `after_step(step, state)` | End of each step that ran tools | `False` to stop the run |
 
-```python
-from deepharness import Agent, Middleware
-
-
-class Bounded(Middleware):
-    def before_model(self, messages):
-        return [*messages, Message.human("Cite the files you changed.").to_dict()]
-
-    def before_tool(self, call):
-        return None if "--force" in str(call.arguments.get("command", "")) else call
-
-    def after_tool(self, call, result):
-        return scrub_secrets(str(result))
-
-    def after_step(self, step, state):
-        return state.usage.total_tokens < 200_000
-
-
-agent = Agent(llm, tools=[*file_tools(".")], middleware=Bounded())
-```
-
-`before_model`'s return value is sent but **not** recorded, which is what makes it the place
-for a per-turn reminder — it never accumulates. `before_tool` runs *before* `Permissions`, so a
+`before_model`'s return value is sent but **not** recorded, which makes it the place for a
+per-turn reminder — it never accumulates. `before_tool` runs *before* `Permissions`, so a
 rewritten argument is what the policy rules on rather than a way around a `deny`. `after_tool`
-sees a failure as a value (`result` is the exception), and whatever it returns is what both the
+sees a failure as a value (`result` is the exception), and what it returns is what both the
 transcript and the `ToolFinished` event carry. `after_step` returning `False` ends the run with
 `stop_reason == "stopped"`, so an early exit cannot be mistaken for a reply.
 
