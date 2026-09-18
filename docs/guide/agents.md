@@ -237,6 +237,11 @@ raises `ConfigurationError` rather than silently continuing.
 The gate lives on the tool, not in the prompt, so a model cannot route around it by declining to
 ask. And if a turn requests a gated call alongside ordinary ones, **nothing** in that turn runs
 until the ruling — a half-applied turn the human is about to refuse would be worse than waiting.
+Those unrun calls are still recorded as not run, because a requested call that no result answers
+is a transcript vendors reject when the run resumes.
+
+For anything finer than per-tool — allowing `git log` but not `git push`, both of which are
+`run_command` — see [Permissions](tools.md#permissions-deciding-per-call).
 
 **A question — the tool wants to ask you something.** Raise `HumanInputRequired` and the human's
 answer becomes that call's result:

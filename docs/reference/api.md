@@ -17,6 +17,7 @@ Agent(
     name: str = "agent",
     budget: Budget | None = None,
     context: ContextPolicy | None = None,
+    permissions: Permissions | None = None,
     output: type | None = None,
 )
 ```
@@ -34,6 +35,7 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 | `total_usage` | `TokenUsage` | Cumulative token usage across every call made by this agent instance. Read-only. |
 | `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. Read-only. |
 | `context` | `ContextPolicy` | What the transcript may cost; defaults to `ContextPolicy()`. Read-only. |
+| `permissions` | `Permissions \| None` | Per-call policy; `None` leaves each call to the tool's own `requires_approval`. Read-only. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
 | `output` | `type \| None` | A dataclass; when set, `state.output` is a validated instance of it. |
 
@@ -216,6 +218,68 @@ Toolbox(tools: Iterable[Callable] = ())
 | `schemas` | `def schemas() -> list[dict]` | Returns tool schemas, ready to pass to a provider. |
 | `call` | `async def call(name: str, **kwargs) -> Any` | Invokes a tool by name, awaiting it if async. |
 | `call_sync` | `def call_sync(name: str, **kwargs) -> Any` | Invokes a tool synchronously; raises if it's async. |
+
+### `Workspace`
+
+```python
+Workspace(root: str | Path = ".")
+```
+
+The one directory a tool may touch. `resolve(path)` returns an absolute path inside the root
+or raises `OutsideWorkspace`; resolution is symlink-aware, so a link inside the root pointing
+out of it is refused. `relative(path)` renders a resolved path as the model should see it. A
+root that is not an existing directory raises `ConfigurationError`.
+
+### `file_tools`
+
+```python
+file_tools(
+    workspace: Workspace | str | Path = ".",
+    *,
+    max_bytes: int = 200_000,
+    max_matches: int = 200,
+    writable: bool = True,
+) -> list[Callable]
+```
+
+Filesystem tools confined to one workspace: `read_file`, `list_files`, `search_files`, and —
+unless `writable=False` — `write_file` and `edit_file`, both gated with
+`requires_approval=True`. `read_file` numbers lines and stops at `max_bytes`, naming the offset
+to continue from. `edit_file` refuses an `old` string that occurs more than once.
+
+### `shell_tool`
+
+```python
+shell_tool(
+    workspace: Workspace | str | Path = ".",
+    *,
+    timeout: int = 60,
+    max_chars: int = 30_000,
+    requires_approval: bool = True,
+) -> Callable
+```
+
+A `run_command` tool that runs a shell command with the workspace as its working directory,
+reporting stdout, then stderr, then a non-zero exit code. Gated by default, and not a sandbox:
+the workspace bounds where a command starts, not what it can reach.
+
+### `Permissions` / `Rule`
+
+```python
+Permissions(
+    *,
+    allow: Iterable[str | Rule] = (),
+    ask: Iterable[str | Rule] = (),
+    deny: Iterable[str | Rule] = (),
+)
+Rule(tool: str, arguments: dict[str, str] | None = None)
+```
+
+Decides per call what may run. `decide(name, arguments) -> "allow" | "ask" | "deny" | None`,
+where `None` means no rule applied and the tool's own `requires_approval` stands. `deny` beats
+`allow` beats `ask`. A `Rule` matches the tool name as an `fnmatch` glob, narrowed by argument
+patterns; a bare string is the name pattern alone. An argument a rule mentions but the call
+omits does not match.
 
 ## Graphs & execution
 
