@@ -48,7 +48,7 @@ result = await agent.arun("Weather in Oslo?")  # async, concurrent tool calls
 | `messages` | The transcript, as wire-form dicts. |
 | `output` | The answer: text, or an `output=` instance when one is set. |
 | `usage` | `TokenUsage` for this run. |
-| `stop_reason` | Why the loop ended: `"answer"`, `"step_budget"`, `"paused"`, `"token_budget"`, `"truncated"`. |
+| `stop_reason` | Why the loop ended: `"answer"`, `"step_budget"`, `"paused"`, `"token_budget"`, `"truncated"`, `"stopped"`. |
 | `paused` | Any `PendingHumanInput` waiting on a human; empty otherwise. |
 | `answered` | `True` only when `stop_reason == "answer"` — check this before trusting `output`. |
 
@@ -172,6 +172,63 @@ characters per token) rather than a real tokenizer, which would mean a per-vendo
 Treat it as a soft bound that keeps a long run away from a hard provider error, not as a way
 to predict a bill. Subclass `ContextPolicy` and override `prune()` to choose differently — the
 loop asks for a view of the transcript and does not care how it was chosen.
+
+## Hooks
+
+`Hooks` is where you step into the loop without forking it. One object, four optional methods,
+each a no-op unless you override it:
+
+```python
+from deepharness import Agent, Hooks
+
+
+class Auditing(Hooks):
+    def before_tool(self, call):
+        if "--force" in str(call.arguments.get("command", "")):
+            return None  # refuse it; the model is told
+        return call
+
+    def after_tool(self, call, result):
+        return scrub_secrets(str(result))
+
+    def after_step(self, step, state):
+        return state.usage.total_tokens < 200_000
+
+
+agent = Agent(llm, tools=[...], hooks=Auditing())
+```
+
+| Method | Called | Return |
+| --- | --- | --- |
+| `before_model(messages)` | Before every model call, on the whole transcript | The messages to send, or `None` for unchanged |
+| `before_tool(call)` | For each requested call, **before** the permission policy | The call, possibly rewritten, or `None` to refuse it |
+| `after_tool(call, result)` | As each result comes back | The result, changed or not |
+| `after_step(step, state)` | At the end of each step that ran tools | `False` to stop the run |
+
+Four things worth knowing:
+
+- **`before_model` does not record.** What it returns is sent; `state.messages` is untouched.
+  That makes it the place for a per-turn reminder — it never accumulates. It also runs *before*
+  `ContextPolicy` shapes the request, so a reminder added here still leaves it inside the
+  token budget.
+- **`before_tool` runs before the policy, not after.** A rewritten argument is what
+  [`Permissions`](tools.md#permissions-deciding-per-call) rules on, so a hook cannot slip a call
+  past a `deny` rule by rewriting it afterwards. A refused call is recorded like a denial, so
+  the model learns it and the transcript stays valid.
+- **`after_tool` sees a failure as a value** — `result` is the `Exception` when a tool raised,
+  because the loop passes failures around rather than raising them. Whatever you return is
+  what both the transcript and the `ToolFinished` event carry, so the model and your UI cannot
+  be shown different things. A tool that raised `HumanInputRequired` is skipped: it has no
+  result to rewrite yet.
+- **`after_step` returning `False`** ends the run with `stop_reason == "stopped"`, so
+  `state.answered` stays `False` and an early exit cannot be mistaken for a reply. It is not
+  called on the step where the model answers.
+
+Hooks never decide whether a gated call runs — `Permissions` and `requires_approval` own that,
+so there stays one answer to "why did this call run?". And the methods are synchronous on
+purpose: `run()` is a real synchronous path, so an async hook would either need a second form
+or work under `arun()` alone. Work that must await belongs in a tool, which the loop already
+dispatches both ways.
 
 ## Structured output
 
