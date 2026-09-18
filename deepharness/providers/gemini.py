@@ -66,6 +66,7 @@ class Gemini(RestLLM):
         reasoning_effort: ReasoningLevel | None = None,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
+        max_concurrency: int | None = None,
     ):
         if api_key is None:
             api_key = next(
@@ -79,6 +80,7 @@ class Gemini(RestLLM):
             headers={"x-goog-api-key": api_key or ""},
             client=client,
             sync_client=sync_client,
+            max_concurrency=max_concurrency,
         )
         self._rest = RestCompletions(self._http, self)
         self._model = model

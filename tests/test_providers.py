@@ -942,3 +942,34 @@ def test_openai_still_sends_a_key_when_given_one():
     provider = OpenAI(model="gpt-test", api_key="secret")
 
     assert provider._http._async_client.headers["authorization"] == "Bearer secret"
+
+
+async def test_anthropic_puts_a_cache_breakpoint_on_the_prompt_and_tools():
+    client = make_client({"content": [{"type": "text", "text": "hi"}]})
+    provider = Anthropic(
+        model="claude-test", api_key="x", client=client, cache_prompt=True
+    )
+
+    await provider.agenerate(
+        [{"role": "system", "content": "be terse"}, {"role": "user", "content": "hi"}],
+        tools=[
+            {"name": "a", "description": "", "parameters": {}},
+            {"name": "b", "description": "", "parameters": {}},
+        ],
+    )
+
+    body = client.post.await_args.kwargs["json"]
+    assert body["system"] == [
+        {"type": "text", "text": "be terse", "cache_control": {"type": "ephemeral"}}
+    ]
+    assert "cache_control" not in body["tools"][0]
+    assert body["tools"][1]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_anthropic_leaves_the_prompt_uncached_by_default():
+    client = make_client({"content": [{"type": "text", "text": "hi"}]})
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+
+    await provider.agenerate([{"role": "system", "content": "be terse"}])
+
+    assert client.post.await_args.kwargs["json"]["system"] == "be terse"

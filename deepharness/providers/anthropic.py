@@ -59,7 +59,8 @@ class AnthropicPayload:
     model: str
     max_tokens: int
     messages: list[dict[str, Any]]
-    system: str | None = None
+    system: str | list[dict[str, Any]] | None = None
+    """A string, or blocks when a cache breakpoint has to sit on it."""
     tools: list[dict[str, Any]] | None = None
     thinking: dict[str, Any] | None = None
     stream: bool | None = None
@@ -74,6 +75,9 @@ class Anthropic(RestLLM):
     Anthropic's wire format differs from OpenAI/Gemini in one structural way
     this provider bridges but doesn't fully hide: the system prompt is a
     top-level `system` field (not a message), not a role in `messages`.
+
+    cache_prompt=True puts a cache breakpoint on the system prompt and the tool
+    definitions - the part of a harness request that is identical every turn.
     Tool calls round-trip properly: an assistant turn with tool_calls becomes
     a `tool_use` content block (carrying ToolCall.id), and a tool-role
     message becomes a `tool_result` block referencing that same id via
@@ -81,7 +85,14 @@ class Anthropic(RestLLM):
     alternation and will reject a request where that link is missing.
     """
 
-    __slots__ = ("_http", "_max_tokens", "_model", "_reasoning_effort", "_rest")
+    __slots__ = (
+        "_cache_prompt",
+        "_http",
+        "_max_tokens",
+        "_model",
+        "_reasoning_effort",
+        "_rest",
+    )
 
     def __init__(
         self,
@@ -90,19 +101,26 @@ class Anthropic(RestLLM):
         max_tokens: int = _DEFAULT_MAX_TOKENS,
         *,
         reasoning_effort: ReasoningLevel | None = None,
+        cache_prompt: bool = False,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
+        max_concurrency: int | None = None,
     ):
         if api_key is None:
             api_key = os.environ.get(_ENV_KEY)
         headers = {"x-api-key": api_key or "", "anthropic-version": _ANTHROPIC_VERSION}
         self._http = HTTPClient(
-            _BASE_URL, headers=headers, client=client, sync_client=sync_client
+            _BASE_URL,
+            headers=headers,
+            client=client,
+            sync_client=sync_client,
+            max_concurrency=max_concurrency,
         )
         self._rest = RestCompletions(self._http, self)
         self._model = model
         self._max_tokens = max_tokens
         self._reasoning_effort = reasoning_effort
+        self._cache_prompt = cache_prompt
 
     def payload(
         self,
@@ -112,7 +130,12 @@ class Anthropic(RestLLM):
         stream: bool = False,
     ) -> AnthropicPayload:
         payload = _build_payload(
-            self._model, self._max_tokens, messages, tools, self._reasoning_effort
+            self._model,
+            self._max_tokens,
+            messages,
+            tools,
+            self._reasoning_effort,
+            self._cache_prompt,
         )
         payload.stream = stream or None
         return payload
@@ -133,6 +156,7 @@ def _build_payload(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
     reasoning_effort: ReasoningLevel | None = None,
+    cache_prompt: bool = False,
 ) -> AnthropicPayload:
     system, converted = _to_anthropic_messages(messages)
     thinking: dict[str, Any] | None = None
@@ -141,14 +165,47 @@ def _build_payload(
         thinking = {"type": "enabled", "budget_tokens": budget}
         # Anthropic requires max_tokens to exceed the thinking budget.
         max_tokens = max(max_tokens, budget + 1024)
+    anthropic_tools = [_to_anthropic_tool(tool) for tool in tools] if tools else None
     return AnthropicPayload(
         model=model,
         max_tokens=max_tokens,
         messages=converted,
-        system=system,
-        tools=[_to_anthropic_tool(tool) for tool in tools] if tools else None,
+        system=_cached_system(system) if cache_prompt else system,
+        tools=_cached_tools(anthropic_tools) if cache_prompt else anthropic_tools,
         thinking=thinking,
     )
+
+
+def _cached_system(system: str | None) -> Any:
+    """The system prompt as one cacheable block.
+
+    A harness sends the same long prompt on every turn of every run, and a
+    cache breakpoint on it is the single largest saving available. It has to be
+    the block form: cache_control has nowhere to live on a bare string.
+    """
+    if not system:
+        return None
+    return [
+        {
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+def _cached_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Tool definitions with a breakpoint on the last one.
+
+    Anthropic caches the prefix up to a breakpoint, and tools sit ahead of the
+    messages, so marking the final tool covers every definition before it with
+    one breakpoint rather than one each.
+    """
+    if not tools:
+        return None
+    marked = [dict(tool) for tool in tools]
+    marked[-1]["cache_control"] = {"type": "ephemeral"}
+    return marked
 
 
 def _to_anthropic_messages(

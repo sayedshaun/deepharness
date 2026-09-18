@@ -104,6 +104,7 @@ class OpenAI(RestLLM):
         stream_usage: bool = True,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
+        max_concurrency: int | None = None,
     ):
         if api_key is None and self.env_key:
             api_key = os.environ.get(self.env_key)
@@ -114,7 +115,11 @@ class OpenAI(RestLLM):
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         resolved_base_url = base_url or self.default_base_url
         self._http = HTTPClient(
-            resolved_base_url, headers=headers, client=client, sync_client=sync_client
+            resolved_base_url,
+            headers=headers,
+            client=client,
+            sync_client=sync_client,
+            max_concurrency=max_concurrency,
         )
         self._rest = RestCompletions(self._http, self)
         self._model = model
