@@ -43,6 +43,15 @@ class OutputValidationError(DeepHarnessError):
     """
 
 
+class MCPError(DeepHarnessError):
+    """Raised when an MCP server refuses a call, fails, or answers unusably.
+
+    A tool call that fails on the server reaches the model as that call's
+    result, same as a local tool raising - the run continues, and the model gets
+    a turn to try something else.
+    """
+
+
 class ProviderError(DeepHarnessError):
     """Raised when an LLM provider request fails after retries."""
 

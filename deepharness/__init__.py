@@ -25,6 +25,7 @@ from deepharness.errors import (
     ConfigurationError,
     DeepHarnessError,
     HumanInputRequired,
+    MCPError,
     OutputValidationError,
     OutsideWorkspace,
     ProviderError,
@@ -67,6 +68,8 @@ from deepharness.providers import (
     TokenUsage,
 )
 from deepharness.tools import (
+    MCPServer,
+    MCPTool,
     Permissions,
     Rule,
     SearchResult,
@@ -107,6 +110,9 @@ __all__ = [
     "Image",
     "LMStudio",
     "LlamaCpp",
+    "MCPError",
+    "MCPServer",
+    "MCPTool",
     "Message",
     "Mistral",
     "NodeSpec",
