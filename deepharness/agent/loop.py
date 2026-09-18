@@ -23,6 +23,7 @@ from ..tools.toolbox import Ctx, Toolbox, ToolSpec
 from . import turn
 from .context import ContextPolicy
 from .events import StepStarted, ToolFinished, ToolStarted
+from .hooks import Hooks
 from .output import FINAL_TOOL, coerce, final_tool_schema, find_final
 from .state import (
     AgentState,
@@ -81,6 +82,9 @@ class Agent:
     * Permissions decides per call what may run, what needs a human and what
       is refused outright; a call no rule matches falls back to the tool's own
       requires_approval flag.
+    * Hooks is where a caller steps into the loop - rewriting what is sent, what
+      a call runs with, what its result says, and whether to stop early. It does
+      not decide whether a gated call runs; Permissions owns that.
     * ContextPolicy bounds what the transcript costs: each tool result is
       truncated as it is recorded, and the model is sent a pruned view while
       state.messages keeps every message.
@@ -97,6 +101,7 @@ class Agent:
         "_budget",
         "_context",
         "_final_schema",
+        "_hooks",
         "_model",
         "_name",
         "_output",
@@ -116,6 +121,7 @@ class Agent:
         budget: Budget | None = None,
         context: ContextPolicy | None = None,
         permissions: Permissions | None = None,
+        hooks: Hooks | None = None,
         output: type | None = None,
     ):
         self._model = model
@@ -125,6 +131,7 @@ class Agent:
         self._budget = budget or Budget()
         self._context = context or ContextPolicy()
         self._permissions = permissions
+        self._hooks = hooks or Hooks()
         self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
         self._total_usage = TokenUsage(0, 0, 0)
@@ -155,6 +162,11 @@ class Agent:
     @property
     def context(self) -> ContextPolicy:
         return self._context
+
+    @property
+    def hooks(self) -> Hooks:
+        """Where this run steps out to its caller; no-ops unless one was given."""
+        return self._hooks
 
     @property
     def permissions(self) -> Permissions | None:
@@ -265,8 +277,8 @@ class Agent:
                 messages, approved, results, limit=self._context.tool_result_chars
             )
 
-        for _ in range(self._budget.steps):
-            response = yield _Ask(messages)
+        for step in range(1, self._budget.steps + 1):
+            response = yield _Ask(self._hooks.before_model(messages) or messages)
             self._account_for_usage(response, state, messages)
 
             final = find_final(response) if self._final_schema else None
@@ -309,29 +321,50 @@ class Agent:
                 )
 
             turn.record_request(messages, response)
-            wanted = [call for call in response.tool_calls if call.name != FINAL_TOOL]
+            asked = [call for call in response.tool_calls if call.name != FINAL_TOOL]
+            wanted, refused = self._intercept(asked)
+            turn.record_unrun(messages, refused, turn.REFUSED)
+
             ruling = turn.rule(self._tools, wanted, self._permissions)
-            turn.record_denials(messages, ruling.denied)
+            turn.record_unrun(messages, ruling.denied, turn.DENIED)
             if ruling.paused:
                 # Nothing in this turn runs until the human rules on the gated
                 # call: letting the rest run first would half-apply a turn the
                 # human may be about to refuse.
-                turn.record_skipped(messages, ruling.allowed)
+                turn.record_unrun(messages, ruling.allowed, turn.NOT_RUN)
                 return self._result(state, messages, "", "paused", paused=ruling.paused)
-            if not ruling.allowed:
-                continue  # everything was refused; back to the model with that
 
-            results = yield _Dispatch(ruling.allowed)
-            pending = turn.record_results(
-                messages,
-                ruling.allowed,
-                results,
-                limit=self._context.tool_result_chars,
-            )
-            if pending:
-                return self._result(state, messages, "", "paused", paused=pending)
+            if ruling.allowed:
+                results = yield _Dispatch(ruling.allowed)
+                pending = turn.record_results(
+                    messages,
+                    ruling.allowed,
+                    results,
+                    limit=self._context.tool_result_chars,
+                )
+                if pending:
+                    return self._result(state, messages, "", "paused", paused=pending)
+
+            if not self._hooks.after_step(
+                step, AgentState(messages=messages, usage=self._total_usage)
+            ):
+                return self._result(state, messages, "", "stopped")
 
         return self._result(state, messages, "", "step_budget")
+
+    def _intercept(self, calls: list[Any]) -> tuple[list[Any], list[Any]]:
+        """The calls a hook let through, rewritten, and the ones it refused.
+
+        Runs before the permission policy so a rewritten argument is what the
+        policy rules on - a hook must not be able to slip a call past a deny
+        rule by rewriting it afterwards.
+        """
+        wanted: list[Any] = []
+        refused: list[Any] = []
+        for call in calls:
+            allowed = self._hooks.before_tool(call)
+            (wanted if allowed is not None else refused).append(allowed or call)
+        return wanted, refused
 
     def _passthrough(self, state: AgentState) -> AgentState:
         """Without a model an Agent is inert - a placeholder node in a Graph.
@@ -398,11 +431,14 @@ class Agent:
                 else:
                     for call in request.calls:
                         yield ToolStarted(call.name, call.arguments, call.id)
-                    outcome = await asyncio.gather(
-                        *(
-                            self._call_tool(call.name, call.arguments, ctx)
-                            for call in request.calls
-                        )
+                    outcome = self._after_tools(
+                        request.calls,
+                        await asyncio.gather(
+                            *(
+                                self._call_tool(call.name, call.arguments, ctx)
+                                for call in request.calls
+                            )
+                        ),
                     )
                     for call, result in zip(request.calls, outcome, strict=True):
                         if (finished := self._finished(call, result)) is not None:
@@ -441,7 +477,9 @@ class Agent:
                     results: list[Any] = []
                     for call in request.calls:
                         yield ToolStarted(call.name, call.arguments, call.id)
-                        result = self._call_tool_sync(call.name, call.arguments, ctx)
+                        result = self._after_tool(
+                            call, self._call_tool_sync(call.name, call.arguments, ctx)
+                        )
                         results.append(result)
                         if (finished := self._finished(call, result)) is not None:
                             yield finished
@@ -462,6 +500,23 @@ class Agent:
         for event in self.stream_events(state, deps=deps):
             if isinstance(event, TextDelta):
                 yield event.text
+
+    def _after_tools(self, calls: list[Any], results: list[Any]) -> list[Any]:
+        return [
+            self._after_tool(call, result)
+            for call, result in zip(calls, results, strict=True)
+        ]
+
+    def _after_tool(self, call: Any, result: Any) -> Any:
+        """One result as the hook leaves it, or untouched if it is a question.
+
+        A tool raising HumanInputRequired has not produced a result at all - the
+        run is about to pause on it - so there is nothing there for a hook to
+        rewrite.
+        """
+        if isinstance(result, HumanInputRequired):
+            return result
+        return self._hooks.after_tool(call, result)
 
     def _finished(self, call: Any, result: Any) -> ToolFinished | None:
         """How one dispatched call ended, or None if it is not over.
