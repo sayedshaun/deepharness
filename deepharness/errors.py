@@ -22,6 +22,19 @@ class ToolNotFoundError(DeepHarnessError, KeyError):
     """Raised when a Toolbox is asked for a tool that isn't registered."""
 
 
+class OutsideWorkspace(DeepHarnessError, ValueError):
+    """Raised when a tool is asked for a path outside its workspace root.
+
+    Reaches the model as that call's result, since a model that asked for the
+    wrong path can correct itself - but the read never happens.
+    """
+
+    def __init__(self, path: str, root: Any):
+        self.path = path
+        self.root = root
+        super().__init__(f"path {path!r} is outside the workspace root {root}")
+
+
 class OutputValidationError(DeepHarnessError):
     """Raised when a model's structured answer does not fit the output= shape.
 
