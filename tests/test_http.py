@@ -215,3 +215,17 @@ async def test_requests_are_uncapped_by_default():
 def test_a_meaningless_cap_is_refused():
     with pytest.raises(ConfigurationError):
         HTTPClient("http://test", max_concurrency=0)
+
+
+def test_a_capped_client_survives_a_second_event_loop():
+    """A contended asyncio primitive binds to its loop; the cap must not."""
+    state, transport = _peak_counter()
+    client = _client(transport, max_concurrency=2)
+
+    async def four():
+        await asyncio.gather(*(client.post("/x") for _ in range(4)))
+
+    asyncio.run(four())
+    asyncio.run(four())  # a provider outliving one asyncio.run() is normal
+
+    assert state["peak"] == 2
