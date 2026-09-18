@@ -8,7 +8,7 @@ produce, and a session is that transcript on disk.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -193,6 +193,51 @@ class AgentState:
         """
         return self.stop_reason == "answer"
 
+    def to_dict(self) -> dict[str, Any]:
+        """The whole state as JSON-able data, for a session on disk.
+
+        Structured `output` is flattened to plain data: reconstructing the
+        dataclass would mean storing its import path and trusting it on the way
+        back in, and a session file is not worth that.
+        """
+        return {
+            "messages": [as_dict(message) for message in self.messages],
+            "output": asdict(self.output)
+            if is_dataclass(self.output) and not isinstance(self.output, type)
+            else self.output,
+            "usage": asdict(self.usage),
+            "stop_reason": self.stop_reason,
+            "paused": [asdict(pending) for pending in self.paused],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AgentState:
+        """Rebuild a state from to_dict() data, or from a hand-written dict.
+
+        Nested fields are accepted either as data or as the objects themselves,
+        so a caller assembling a state by hand does not have to know which form
+        a session file happens to use.
+        """
+        unknown = set(data) - {f.name for f in fields(cls)}
+        if unknown:
+            raise ConfigurationError(
+                f"unknown state keys: {', '.join(sorted(unknown))}. An agent "
+                f"owns its own state - keep a graph's fields on the graph's state"
+            )
+        usage = data.get("usage") or TokenUsage(0, 0, 0)
+        return cls(
+            messages=[as_dict(message) for message in data.get("messages") or ()],
+            output=data.get("output"),
+            usage=usage if isinstance(usage, TokenUsage) else TokenUsage(**usage),
+            stop_reason=data.get("stop_reason"),
+            paused=[
+                pending
+                if isinstance(pending, PendingHumanInput)
+                else PendingHumanInput(**pending)
+                for pending in data.get("paused") or ()
+            ],
+        )
+
     @classmethod
     def of(cls, value: Any) -> AgentState:
         """Build a state from whatever the caller found convenient.
@@ -210,13 +255,7 @@ class AgentState:
         if isinstance(value, (list, tuple)):
             return cls(messages=[as_dict(message) for message in value])
         if isinstance(value, dict):
-            unknown = set(value) - {f.name for f in fields(cls)}
-            if unknown:
-                raise ConfigurationError(
-                    f"unknown state keys: {', '.join(sorted(unknown))}. An agent "
-                    f"owns its own state - keep a graph's fields on the graph's state"
-                )
-            return cls(**value)
+            return cls.from_dict(value)
         raise ConfigurationError(
             f"cannot build agent state from {type(value).__name__}; pass a prompt, "
             f"a list of messages, or an AgentState"
@@ -235,18 +274,28 @@ class Finished:
     state: AgentState
 
 
-def save_session(path: str, messages: list[Message | dict[str, Any]]) -> None:
-    """Write a message history to a JSON file, so a session can be resumed later."""
-    Path(path).write_text(json.dumps([as_dict(m) for m in messages], indent=2))
+def save_session(
+    path: str, session: AgentState | list[Message | dict[str, Any]]
+) -> None:
+    """Write a run to a JSON file, so it can be resumed in another process.
+
+    Takes a whole AgentState, or a bare message list for the conversational
+    case. The state is saved in full - usage, stop reason and any call paused on
+    an approval - because a run waiting on a human is the one most worth
+    resuming later, and a transcript alone cannot carry what it is waiting for.
+    """
+    Path(path).write_text(json.dumps(AgentState.of(session).to_dict(), indent=2))
 
 
-def load_session(path: str) -> list[dict[str, Any]]:
-    """Read a message history written by save_session().
+def load_session(path: str) -> AgentState:
+    """Read a session written by save_session(), resumable as it stands.
 
-    Returns [] when the file does not exist yet, so a first run needs no
-    special case at the call site.
+    Returns an empty state when the file does not exist yet, so a first run
+    needs no special case at the call site. A file holding a bare JSON array is
+    read as a transcript, so one written by hand - or by an older version that
+    saved messages alone - still loads.
     """
     file = Path(path)
     if not file.exists():
-        return []
-    return json.loads(file.read_text())
+        return AgentState()
+    return AgentState.of(json.loads(file.read_text()))
