@@ -137,7 +137,7 @@ a real answer from a truncated run.
 content filter). The partial text is still in output, because discarding it
 would lose the only evidence of what went wrong.
 
-"stopped" is Hooks.after_step ending the run: the caller decided it had gone
+"stopped" is Middleware.after_step ending the run: the caller decided it had gone
 far enough, so there is no answer to trust either."""
 
 

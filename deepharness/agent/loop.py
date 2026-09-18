@@ -23,7 +23,7 @@ from ..tools.toolbox import Ctx, Toolbox, ToolSpec
 from . import turn
 from .context import ContextPolicy
 from .events import StepStarted, ToolFinished, ToolStarted
-from .hooks import Hooks
+from .middleware import Middleware
 from .output import FINAL_TOOL, coerce, final_tool_schema, find_final
 from .state import (
     AgentState,
@@ -82,9 +82,10 @@ class Agent:
     * Permissions decides per call what may run, what needs a human and what
       is refused outright; a call no rule matches falls back to the tool's own
       requires_approval flag.
-    * Hooks is where a caller steps into the loop - rewriting what is sent, what
-      a call runs with, what its result says, and whether to stop early. It does
-      not decide whether a gated call runs; Permissions owns that.
+    * Middleware is where a caller steps into the loop - rewriting what is
+      sent, what a call runs with, what its result says, and whether to stop
+      early. It does not decide whether a gated call runs; Permissions owns
+      that.
     * ContextPolicy bounds what the transcript costs: each tool result is
       truncated as it is recorded, and the model is sent a pruned view while
       state.messages keeps every message.
@@ -101,7 +102,7 @@ class Agent:
         "_budget",
         "_context",
         "_final_schema",
-        "_hooks",
+        "_middleware",
         "_model",
         "_name",
         "_output",
@@ -121,7 +122,7 @@ class Agent:
         budget: Budget | None = None,
         context: ContextPolicy | None = None,
         permissions: Permissions | None = None,
-        hooks: Hooks | None = None,
+        middleware: Middleware | None = None,
         output: type | None = None,
     ):
         self._model = model
@@ -131,7 +132,7 @@ class Agent:
         self._budget = budget or Budget()
         self._context = context or ContextPolicy()
         self._permissions = permissions
-        self._hooks = hooks or Hooks()
+        self._middleware = middleware or Middleware()
         self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
         self._total_usage = TokenUsage(0, 0, 0)
@@ -164,9 +165,9 @@ class Agent:
         return self._context
 
     @property
-    def hooks(self) -> Hooks:
+    def middleware(self) -> Middleware:
         """Where this run steps out to its caller; no-ops unless one was given."""
-        return self._hooks
+        return self._middleware
 
     @property
     def permissions(self) -> Permissions | None:
@@ -278,7 +279,7 @@ class Agent:
             )
 
         for step in range(1, self._budget.steps + 1):
-            response = yield _Ask(self._hooks.before_model(messages) or messages)
+            response = yield _Ask(self._middleware.before_model(messages) or messages)
             self._account_for_usage(response, state, messages)
 
             final = find_final(response) if self._final_schema else None
@@ -345,7 +346,7 @@ class Agent:
                 if pending:
                     return self._result(state, messages, "", "paused", paused=pending)
 
-            if not self._hooks.after_step(
+            if not self._middleware.after_step(
                 step, AgentState(messages=messages, usage=self._total_usage)
             ):
                 return self._result(state, messages, "", "stopped")
@@ -353,16 +354,16 @@ class Agent:
         return self._result(state, messages, "", "step_budget")
 
     def _intercept(self, calls: list[Any]) -> tuple[list[Any], list[Any]]:
-        """The calls a hook let through, rewritten, and the ones it refused.
+        """The calls middleware let through, rewritten, and the ones it refused.
 
         Runs before the permission policy so a rewritten argument is what the
-        policy rules on - a hook must not be able to slip a call past a deny
-        rule by rewriting it afterwards.
+        policy rules on - middleware must not be able to slip a call past a
+        deny rule by rewriting it afterwards.
         """
         wanted: list[Any] = []
         refused: list[Any] = []
         for call in calls:
-            allowed = self._hooks.before_tool(call)
+            allowed = self._middleware.before_tool(call)
             (wanted if allowed is not None else refused).append(allowed or call)
         return wanted, refused
 
@@ -508,15 +509,15 @@ class Agent:
         ]
 
     def _after_tool(self, call: Any, result: Any) -> Any:
-        """One result as the hook leaves it, or untouched if it is a question.
+        """One result as middleware leaves it, or untouched if it is a question.
 
         A tool raising HumanInputRequired has not produced a result at all - the
-        run is about to pause on it - so there is nothing there for a hook to
-        rewrite.
+        run is about to pause on it - so there is nothing there for middleware
+        to rewrite.
         """
         if isinstance(result, HumanInputRequired):
             return result
-        return self._hooks.after_tool(call, result)
+        return self._middleware.after_tool(call, result)
 
     def _finished(self, call: Any, result: Any) -> ToolFinished | None:
         """How one dispatched call ended, or None if it is not over.

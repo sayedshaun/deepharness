@@ -1,11 +1,11 @@
-"""Hooks: stepping into a run without forking the loop."""
+"""Middleware: stepping into a run without forking the loop."""
 
 import pytest
 
 from deepharness.agent import (
     Agent,
-    Hooks,
     Message,
+    Middleware,
     ToolFinished,
     tool,
 )
@@ -53,9 +53,9 @@ def a_run(*responses):
     return ScriptedProvider(list(responses))
 
 
-def test_the_default_hooks_change_nothing():
+def test_default_middleware_changes_nothing():
     provider = a_run(call_turn(), CompletionResponse("done"))
-    agent = Agent(provider, tools=[read_file], hooks=Hooks())
+    agent = Agent(provider, tools=[read_file], middleware=Middleware())
 
     state = agent.run("read it")
 
@@ -63,17 +63,17 @@ def test_the_default_hooks_change_nothing():
     assert RAN == [{"path": "a.txt"}]
 
 
-def test_an_agent_has_hooks_even_when_none_were_given():
-    assert isinstance(Agent().hooks, Hooks)
+def test_an_agent_has_middleware_even_when_none_was_given():
+    assert isinstance(Agent().middleware, Middleware)
 
 
 def test_before_model_changes_what_is_sent_without_recording_it():
-    class Reminding(Hooks):
+    class Reminding(Middleware):
         def before_model(self, messages):
             return [*messages, Message.human("Remember to cite paths.").to_dict()]
 
     provider = a_run(CompletionResponse("done"))
-    agent = Agent(provider, hooks=Reminding())
+    agent = Agent(provider, middleware=Reminding())
 
     state = agent.run("go")
 
@@ -84,7 +84,7 @@ def test_before_model_changes_what_is_sent_without_recording_it():
 def test_before_model_sees_every_turn():
     seen = []
 
-    class Counting(Hooks):
+    class Counting(Middleware):
         def before_model(self, messages):
             seen.append(len(messages))
             return messages
@@ -92,7 +92,7 @@ def test_before_model_sees_every_turn():
     agent = Agent(
         a_run(call_turn(), CompletionResponse("done")),
         tools=[read_file],
-        hooks=Counting(),
+        middleware=Counting(),
     )
 
     agent.run("read it")
@@ -101,7 +101,7 @@ def test_before_model_sees_every_turn():
 
 
 def test_before_tool_rewrites_the_arguments_a_call_runs_with():
-    class Confining(Hooks):
+    class Confining(Middleware):
         def before_tool(self, call):
             call.arguments["path"] = call.arguments["path"].removeprefix("/")
             return call
@@ -109,7 +109,7 @@ def test_before_tool_rewrites_the_arguments_a_call_runs_with():
     agent = Agent(
         a_run(call_turn(arguments={"path": "/etc/passwd"}), CompletionResponse("done")),
         tools=[read_file],
-        hooks=Confining(),
+        middleware=Confining(),
     )
 
     agent.run("read it")
@@ -118,12 +118,12 @@ def test_before_tool_rewrites_the_arguments_a_call_runs_with():
 
 
 def test_before_tool_can_refuse_a_call_and_the_model_is_told():
-    class Refusing(Hooks):
+    class Refusing(Middleware):
         def before_tool(self, call):
             return None
 
     provider = a_run(call_turn(), CompletionResponse("understood"))
-    agent = Agent(provider, tools=[read_file], hooks=Refusing())
+    agent = Agent(provider, tools=[read_file], middleware=Refusing())
 
     state = agent.run("read it")
 
@@ -133,9 +133,9 @@ def test_before_tool_can_refuse_a_call_and_the_model_is_told():
 
 
 def test_a_rewritten_call_is_what_the_policy_rules_on():
-    """A hook must not be able to rewrite a call past a deny rule."""
+    """Middleware must not be able to rewrite a call past a deny rule."""
 
-    class Escalating(Hooks):
+    class Escalating(Middleware):
         def before_tool(self, call):
             call.arguments["path"] = "/etc/shadow"
             return call
@@ -145,7 +145,7 @@ def test_a_rewritten_call_is_what_the_policy_rules_on():
         provider,
         tools=[read_file],
         permissions=Permissions(deny=[Rule("read_file", {"path": "/etc/*"})]),
-        hooks=Escalating(),
+        middleware=Escalating(),
     )
 
     state = agent.run("read it")
@@ -155,14 +155,14 @@ def test_a_rewritten_call_is_what_the_policy_rules_on():
 
 
 def test_after_tool_changes_what_the_model_and_the_caller_both_see():
-    class Redacting(Hooks):
+    class Redacting(Middleware):
         def after_tool(self, call, result):
             return "[redacted]"
 
     agent = Agent(
         a_run(call_turn(), CompletionResponse("done")),
         tools=[read_file],
-        hooks=Redacting(),
+        middleware=Redacting(),
     )
 
     events = list(agent.stream_events("read it"))
@@ -182,7 +182,7 @@ def test_after_tool_sees_a_failure_as_a_value():
         """Fail."""
         raise ValueError("no")
 
-    class Noting(Hooks):
+    class Noting(Middleware):
         def after_tool(self, call, result):
             seen.append(type(result))
             return "handled"
@@ -190,7 +190,7 @@ def test_after_tool_sees_a_failure_as_a_value():
     agent = Agent(
         a_run(call_turn(name="explode", arguments={}), CompletionResponse("done")),
         tools=[explode],
-        hooks=Noting(),
+        middleware=Noting(),
     )
 
     state = agent.run("go")
@@ -200,14 +200,14 @@ def test_after_tool_sees_a_failure_as_a_value():
 
 
 def test_after_tool_leaves_a_question_alone():
-    class Rewriting(Hooks):
+    class Rewriting(Middleware):
         def after_tool(self, call, result):
             return "answered"
 
     agent = Agent(
         a_run(call_turn(name="confirm", arguments={"question": "ok?"})),
         tools=[confirm],
-        hooks=Rewriting(),
+        middleware=Rewriting(),
     )
 
     state = agent.run("go")
@@ -217,12 +217,12 @@ def test_after_tool_leaves_a_question_alone():
 
 
 def test_after_step_can_stop_the_run():
-    class Once(Hooks):
+    class Once(Middleware):
         def after_step(self, step, state):
             return step < 1
 
     provider = a_run(call_turn(), call_turn(), CompletionResponse("done"))
-    agent = Agent(provider, tools=[read_file], hooks=Once())
+    agent = Agent(provider, tools=[read_file], middleware=Once())
 
     state = agent.run("read it twice")
 
@@ -234,7 +234,7 @@ def test_after_step_can_stop_the_run():
 def test_after_step_gets_the_run_so_far():
     snapshots = []
 
-    class Watching(Hooks):
+    class Watching(Middleware):
         def after_step(self, step, state):
             snapshots.append((step, len(state.messages), state.stop_reason))
             return True
@@ -242,7 +242,7 @@ def test_after_step_gets_the_run_so_far():
     agent = Agent(
         a_run(call_turn(), CompletionResponse("done")),
         tools=[read_file],
-        hooks=Watching(),
+        middleware=Watching(),
     )
 
     agent.run("read it")
@@ -251,7 +251,7 @@ def test_after_step_gets_the_run_so_far():
 
 
 def test_after_step_is_not_called_once_the_model_answers():
-    class Loud(Hooks):
+    class Loud(Middleware):
         def __init__(self):
             self.calls = 0
 
@@ -259,15 +259,15 @@ def test_after_step_is_not_called_once_the_model_answers():
             self.calls += 1
             return True
 
-    hooks = Loud()
-    Agent(a_run(CompletionResponse("done")), hooks=hooks).run("go")
+    middleware = Loud()
+    Agent(a_run(CompletionResponse("done")), middleware=middleware).run("go")
 
-    assert hooks.calls == 0
+    assert middleware.calls == 0
 
 
 @pytest.mark.asyncio
-async def test_hooks_work_the_same_on_the_async_path():
-    class Redacting(Hooks):
+async def test_middleware_works_the_same_on_the_async_path():
+    class Redacting(Middleware):
         def before_tool(self, call):
             call.arguments["path"] = "safe.txt"
             return call
@@ -278,7 +278,7 @@ async def test_hooks_work_the_same_on_the_async_path():
     agent = Agent(
         a_run(call_turn(), CompletionResponse("done")),
         tools=[read_file],
-        hooks=Redacting(),
+        middleware=Redacting(),
     )
 
     state = await agent.arun("read it")
