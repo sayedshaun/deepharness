@@ -282,10 +282,16 @@ A Model Context Protocol server's tools as callables. The handshake runs on firs
 | `call` | `async def call(name, arguments) -> str` | Run one tool; raises `MCPError` if the server reports failure. |
 | `connect` / `aclose` | `async def ...() -> None` | Handshake and shutdown; both are idempotent. |
 
-A tool the server did not mark read-only is gated with `requires_approval=True`. `Transport` is
-the seam: `StdioTransport` (a subprocess speaking newline-delimited JSON) and `HTTPTransport`
-(streamable HTTP, JSON or SSE replies, carrying any `Mcp-Session-Id`). A protocol-level failure
-raises `MCPError`.
+A tool the server did not mark read-only is gated with `requires_approval=True`. A
+protocol-level failure raises `MCPError`.
+
+`Transport` is the seam — `request(method, params)`, `notify(method, params)`, `aclose()` —
+with two implementations: `StdioTransport` (a subprocess speaking newline-delimited JSON,
+reading past any notifications to its own reply) and `HTTPTransport` (streamable HTTP, JSON or
+SSE replies, carrying any `Mcp-Session-Id`). The deprecated `2024-11-05` HTTP+SSE transport and
+OAuth are not implemented, and only MCP's tools are — not resources, prompts or sampling.
+Implement `Transport` yourself and pass it to `MCPServer(transport)` to cover a server these
+two do not reach.
 
 ### `Permissions` / `Rule`
 

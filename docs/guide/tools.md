@@ -170,7 +170,9 @@ library.
 ```python
 from deepharness import Agent, MCPServer
 
-async with MCPServer.stdio(["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]) as mcp:
+async with MCPServer.stdio(
+    ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
+) as mcp:
     agent = Agent(llm, tools=await mcp.tools())
     state = await agent.arun("What is in the repo?")
 ```
@@ -190,10 +192,46 @@ that this side cannot inspect, so asking is the right default. Widen it with
 `requires_approval=False` to turn the gate off wholesale.
 
 ```python
-mcp = MCPServer.http("https://tools.internal/mcp", headers={"Authorization": f"Bearer {key}"})
-tools = await mcp.tools()          # list[Callable], ready for Agent(tools=...)
-listed = await mcp.list_tools()    # list[MCPTool] - name, description, schema, read_only
+mcp = MCPServer.http(
+    "https://tools.internal/mcp", headers={"Authorization": f"Bearer {key}"}
+)
+tools = await mcp.tools()  # list[Callable], ready for Agent(tools=...)
+listed = await mcp.list_tools()  # list[MCPTool] - name, description, schema, read_only
 ```
+
+### What is covered, and how to cover the rest
+
+Two transports, which is what current servers speak:
+
+| Transport | Support |
+| --- | --- |
+| stdio (subprocess) | Yes — `MCPServer.stdio(...)`. What local servers use. |
+| Streamable HTTP (spec `2025-06-18`) | Yes — `MCPServer.http(...)`, JSON or SSE replies, session id carried. |
+| HTTP+SSE (spec `2024-11-05`, deprecated) | No. A separate `GET /sse` stream plus a POST endpoint. |
+
+Tools are the whole of what is implemented: MCP's resources, prompts and sampling are not, and
+authentication goes through headers you supply rather than an OAuth flow.
+
+`Transport` is the extension point, so none of that needs a fork. It is three methods —
+`request`, `notify`, `aclose` — and `MCPServer` takes any implementation:
+
+```python
+from deepharness import MCPServer, Transport
+
+
+class MyTransport(Transport):
+    async def request(self, method: str, params: dict) -> dict: ...
+    async def notify(self, method: str, params: dict) -> None: ...
+    async def aclose(self) -> None: ...
+
+
+mcp = MCPServer(MyTransport())
+```
+
+That is also the answer for the deprecated transport: it is the most intricate piece of the
+protocol — a long-lived stream, a background reader, replies correlated by id — and it is being
+retired, so it is left to the caller who actually needs it rather than carried here for
+everyone.
 
 ## Built-in: web search
 

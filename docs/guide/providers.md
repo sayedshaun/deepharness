@@ -41,7 +41,11 @@ enough: an image to look at, a file to read, or the model's own reasoning coming
 from deepharness import Agent, Image, Message, Text
 
 state = await agent.arun(
-    [Message.human([Text("What changed in this screenshot?"), Image.from_path("ui.png")])]
+    [
+        Message.human(
+            [Text("What changed in this screenshot?"), Image.from_path("ui.png")]
+        )
+    ]
 )
 ```
 
