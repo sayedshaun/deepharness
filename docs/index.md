@@ -41,7 +41,7 @@ typed state, and 15 LLM providers behind one interface.
 - **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
   per-call [permission policy](guide/tools.md#permissions-deciding-per-call), a
   [bounded context window](guide/agents.md#context-management), progress events and
-  [hooks](guide/agents.md#hooks) — the parts a run needs once it is long enough to matter.
+  [middleware](guide/agents.md#middleware) — the parts a run needs once it is long enough to matter.
 
 ## Install
 
@@ -75,7 +75,7 @@ Requires Python 3.11+.
 
     ---
 
-    Think/act loops, context management, hooks, budgets, and resumable sessions.
+    Think/act loops, context management, middleware, budgets, and resumable sessions.
 
     [:octicons-arrow-right-24: Agents guide](guide/agents.md)
 

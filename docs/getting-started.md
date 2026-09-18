@@ -91,7 +91,7 @@ async def write(state: State) -> State:
 
 - [Graphs](guide/graph.md) — state, nodes, edges, conditional routing, parallel merging
 - [Agents](guide/agents.md) — the think/act loop, progress events,
-  [context management](guide/agents.md#context-management), [hooks](guide/agents.md#hooks),
+  [context management](guide/agents.md#context-management), [middleware](guide/agents.md#middleware),
   budgets, and [resumable sessions](guide/agents.md#session-persistence)
 - [Tools](guide/tools.md) — writing a tool, the
   [file and shell tools](guide/tools.md#built-in-working-in-a-directory),

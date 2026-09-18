@@ -127,13 +127,56 @@ The rest of what a long run needs:
   `ThinkingDelta` alongside the text, so a tool call is visible rather than dead air.
 - **Stay inside the window.** `ContextPolicy` truncates each tool result and prunes the view
   the model is sent, while `state.messages` keeps everything.
-- **Step into the loop.** `Hooks` rewrites what is sent, what a call runs with, what its result
-  says, or stops the run — without forking the loop.
+- **Step into the loop.** [`Middleware`](#middleware) rewrites what is sent, what a call runs
+  with, what its result says, or stops the run — without forking the loop.
 - **More than text.** `Message.human([Text("what changed?"), Image.from_path("ui.png")])`
   sends images and PDFs; a thinking model's reasoning arrives as `ThinkingDelta` and is
   replayed where the vendor requires it.
 - **Tools from elsewhere.** An [MCP](https://modelcontextprotocol.io) server's tools join the
   same toolbox via `MCPServer.stdio(...)` or `MCPServer.http(...)`.
+
+### Middleware
+
+One object, four optional methods, each a no-op unless you override it — so this is where new
+behaviour goes instead of another `Agent` parameter:
+
+| Method | Called | Return |
+| --- | --- | --- |
+| `before_model(messages)` | Before every model call, on the whole transcript | The messages to send, or `None` for unchanged |
+| `before_tool(call)` | Per requested call, **before** the permission policy | The call, possibly rewritten, or `None` to refuse it |
+| `after_tool(call, result)` | As each result comes back | The result, changed or not |
+| `after_step(step, state)` | End of each step that ran tools | `False` to stop the run |
+
+```python
+from deepharness import Agent, Middleware
+
+
+class Bounded(Middleware):
+    def before_model(self, messages):
+        return [*messages, Message.human("Cite the files you changed.").to_dict()]
+
+    def before_tool(self, call):
+        return None if "--force" in str(call.arguments.get("command", "")) else call
+
+    def after_tool(self, call, result):
+        return scrub_secrets(str(result))
+
+    def after_step(self, step, state):
+        return state.usage.total_tokens < 200_000
+
+
+agent = Agent(llm, tools=[*file_tools(".")], middleware=Bounded())
+```
+
+`before_model`'s return value is sent but **not** recorded, which is what makes it the place
+for a per-turn reminder — it never accumulates. `before_tool` runs *before* `Permissions`, so a
+rewritten argument is what the policy rules on rather than a way around a `deny`. `after_tool`
+sees a failure as a value (`result` is the exception), and whatever it returns is what both the
+transcript and the `ToolFinished` event carry. `after_step` returning `False` ends the run with
+`stop_reason == "stopped"`, so an early exit cannot be mistaken for a reply.
+
+Middleware never decides whether a gated call runs — `Permissions` and `requires_approval` own
+that, so there stays one answer to "why did this call run?".
 
 ## Graphs
 

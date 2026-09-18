@@ -173,16 +173,16 @@ Treat it as a soft bound that keeps a long run away from a hard provider error, 
 to predict a bill. Subclass `ContextPolicy` and override `prune()` to choose differently — the
 loop asks for a view of the transcript and does not care how it was chosen.
 
-## Hooks
+## Middleware
 
-`Hooks` is where you step into the loop without forking it. One object, four optional methods,
+`Middleware` is where you step into the loop without forking it. One object, four optional methods,
 each a no-op unless you override it:
 
 ```python
-from deepharness import Agent, Hooks
+from deepharness import Agent, Middleware
 
 
-class Auditing(Hooks):
+class Auditing(Middleware):
     def before_tool(self, call):
         if "--force" in str(call.arguments.get("command", "")):
             return None  # refuse it; the model is told
@@ -195,7 +195,7 @@ class Auditing(Hooks):
         return state.usage.total_tokens < 200_000
 
 
-agent = Agent(llm, tools=[...], hooks=Auditing())
+agent = Agent(llm, tools=[...], middleware=Auditing())
 ```
 
 | Method | Called | Return |
@@ -224,10 +224,10 @@ Four things worth knowing:
   `state.answered` stays `False` and an early exit cannot be mistaken for a reply. It is not
   called on the step where the model answers.
 
-Hooks never decide whether a gated call runs — `Permissions` and `requires_approval` own that,
-so there stays one answer to "why did this call run?". And the methods are synchronous on
-purpose: `run()` is a real synchronous path, so an async hook would either need a second form
-or work under `arun()` alone. Work that must await belongs in a tool, which the loop already
+Middleware never decides whether a gated call runs — `Permissions` and `requires_approval` own
+that, so there stays one answer to "why did this call run?". And the methods are synchronous on
+purpose: `run()` is a real synchronous path, so an async method here would either need a second
+form or work under `arun()` alone. Work that must await belongs in a tool, which the loop already
 dispatches both ways.
 
 ## Structured output

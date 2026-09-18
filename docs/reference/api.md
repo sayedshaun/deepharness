@@ -18,7 +18,7 @@ Agent(
     budget: Budget | None = None,
     context: ContextPolicy | None = None,
     permissions: Permissions | None = None,
-    hooks: Hooks | None = None,
+    middleware: Middleware | None = None,
     output: type | None = None,
 )
 ```
@@ -37,7 +37,7 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 | `budget` | `Budget` | The run's limits; defaults to `Budget()` when none is passed. Read-only. |
 | `context` | `ContextPolicy` | What the transcript may cost; defaults to `ContextPolicy()`. Read-only. |
 | `permissions` | `Permissions \| None` | Per-call policy; `None` leaves each call to the tool's own `requires_approval`. Read-only. |
-| `hooks` | `Hooks` | Where the run steps out to its caller; no-ops unless one was passed. Read-only. |
+| `middleware` | `Middleware` | Where the run steps out to its caller; no-ops unless one was passed. Read-only. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
 | `output` | `type \| None` | A dataclass; when set, `state.output` is a validated instance of it. |
 
@@ -54,7 +54,7 @@ AgentState(
 ```
 
 What a run consumed and produced. `stop_reason` is one of `"answer"`, `"step_budget"`,
-`"paused"`, `"token_budget"`, `"truncated"` or `"stopped"` (a `Hooks.after_step` early exit).
+`"paused"`, `"token_budget"`, `"truncated"` or `"stopped"` (a `Middleware.after_step` early exit).
 `answered` is `True` only when `stop_reason == "answer"`.
 `AgentState.of(value)` builds one from a prompt string, a list of messages, a dict of known
 fields, or an existing state; an unknown dict key raises `ConfigurationError`.
@@ -120,10 +120,10 @@ tail alone exceeds the budget is sent over it. Non-positive values raise `Config
 | --- | --- | --- |
 | `prune` | `def prune(messages: list[dict]) -> list[dict]` | The transcript as it should be sent; returns the list unchanged when it fits. Override to prune differently. |
 
-### `Hooks`
+### `Middleware`
 
 ```python
-class Hooks:
+class Middleware:
     def before_model(self, messages: list[dict]) -> list[dict] | None: ...
     def before_tool(self, call: ToolCall) -> ToolCall | None: ...
     def after_tool(self, call: ToolCall, result: Any) -> Any: ...
@@ -141,7 +141,7 @@ rather than an ABC, so wanting one method does not mean writing four, and synchr
 | `after_tool` | As each result arrives; `result` is the `Exception` when a tool raised | Replaces what the transcript and the `ToolFinished` event carry. Skipped for a `HumanInputRequired` pause |
 | `after_step` | End of each step that ran tools; never on the answering step | `False` ends the run with `stop_reason == "stopped"` |
 
-Hooks do not decide whether a gated call runs — `Permissions` and `requires_approval` own that.
+Middleware does not decide whether a gated call runs — `Permissions` and `requires_approval` own that.
 
 ### `estimate_tokens`
 

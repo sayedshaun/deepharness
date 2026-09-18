@@ -284,14 +284,14 @@ cannot drift from what it saw.
 
 ## Stepping into the loop
 
-`Hooks` is four optional methods; override only what you need. Here: scrub secrets out of every
+`Middleware` is four optional methods; override only what you need. Here: scrub secrets out of every
 tool result, and stop the run once it has spent enough:
 
 ```python
-from deepharness import Agent, Hooks
+from deepharness import Agent, Middleware
 
 
-class Bounded(Hooks):
+class Bounded(Middleware):
     def after_tool(self, call, result):
         return str(result).replace(SECRET, "[redacted]")
 
@@ -299,12 +299,12 @@ class Bounded(Hooks):
         return state.usage.total_tokens < 200_000
 
 
-agent = Agent(llm, tools=file_tools("."), hooks=Bounded())
+agent = Agent(llm, tools=file_tools("."), middleware=Bounded())
 ```
 
 `after_step` returning `False` ends the run with `stop_reason == "stopped"`, so an early exit
-cannot be mistaken for a reply. Hooks never decide whether a gated call runs — `Permissions`
-owns that. See [hooks](guide/agents.md#hooks).
+cannot be mistaken for a reply. Middleware never decides whether a gated call runs —
+`Permissions` owns that. See [middleware](guide/agents.md#middleware).
 
 ## Asking about an image
 

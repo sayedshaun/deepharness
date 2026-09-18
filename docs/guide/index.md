@@ -17,7 +17,7 @@ you need.
 
     ---
 
-    The think/act loop, streaming and progress events, context management, hooks,
+    The think/act loop, streaming and progress events, context management, middleware,
     budgets, and resumable sessions.
 
     [:octicons-arrow-right-24: Read](agents.md)
