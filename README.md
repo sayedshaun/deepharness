@@ -27,6 +27,40 @@ typed state, and 15 LLM providers behind one interface.
 - **One provider interface, a dozen vendors.** `OpenAI`, `Anthropic`, `Gemini`, and OpenAI-compatible
   gateways (`Groq`, `Together`, `Fireworks`, `DeepSeek`, `Mistral`, `Cerebras`, `OpenRouter`, `XAI`,
   `Ollama`, `LMStudio`, `VLLM`, `LlamaCpp`) all share the same `LLM` interface.
+- **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
+  per-call permission policy, a bounded context window, and progress events — the parts a run
+  needs once it is long enough to matter.
+
+## Working in a directory
+
+An agent that can read a codebase and change it, with the sharp edges gated:
+
+```python
+from deepharness import Agent, ContextPolicy, Permissions, Rule, file_tools, shell_tool
+
+agent = Agent(
+    OpenAI(model="gpt-4o-mini"),
+    tools=[*file_tools("."), shell_tool(".")],
+    context=ContextPolicy(max_tokens=120_000),
+    permissions=Permissions(
+        allow=[
+            "read_file",
+            "list_files",
+            "search_files",
+            Rule("run_command", {"command": "git *"}),
+        ],
+        ask=["write_file", "edit_file", "run_command"],
+        deny=[Rule("run_command", {"command": "*rm -rf*"})],
+    ),
+)
+
+state = await agent.arun("What does the executor do? Add a docstring if it lacks one.")
+```
+
+Every path is resolved inside the workspace root, `deny` beats `allow` beats `ask`, and a run
+that needs a human stops with `stop_reason == "paused"` — resumable later, from disk, with
+`save_session`/`load_session`. Tools from an [MCP](https://modelcontextprotocol.io) server join
+the same toolbox via `MCPServer.stdio(...)` or `MCPServer.http(...)`.
 
 ## Install
 
