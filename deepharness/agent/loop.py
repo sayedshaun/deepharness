@@ -17,6 +17,7 @@ from ..errors import (
     OutputValidationError,
     TokenBudgetExceeded,
 )
+from ..tools.permissions import Permissions
 from ..tools.toolbox import Ctx, Toolbox, ToolSpec
 from . import turn
 from .context import ContextPolicy
@@ -74,6 +75,9 @@ class Agent:
     * total_usage accumulates across every model call this instance makes, not
       per run, and Budget(tokens=...) turns crossing it into TokenBudgetExceeded
       with the partial state attached.
+    * Permissions decides per call what may run, what needs a human and what
+      is refused outright; a call no rule matches falls back to the tool's own
+      requires_approval flag.
     * ContextPolicy bounds what the transcript costs: each tool result is
       truncated as it is recorded, and the model is sent a pruned view while
       state.messages keeps every message.
@@ -93,6 +97,7 @@ class Agent:
         "_model",
         "_name",
         "_output",
+        "_permissions",
         "_system",
         "_tools",
         "_total_usage",
@@ -107,6 +112,7 @@ class Agent:
         name: str = "agent",
         budget: Budget | None = None,
         context: ContextPolicy | None = None,
+        permissions: Permissions | None = None,
         output: type | None = None,
     ):
         self._model = model
@@ -115,6 +121,7 @@ class Agent:
         self._name = name
         self._budget = budget or Budget()
         self._context = context or ContextPolicy()
+        self._permissions = permissions
         self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
         self._total_usage = TokenUsage(0, 0, 0)
@@ -145,6 +152,11 @@ class Agent:
     @property
     def context(self) -> ContextPolicy:
         return self._context
+
+    @property
+    def permissions(self) -> Permissions | None:
+        """What the run may do without asking; None leaves it to each tool."""
+        return self._permissions
 
     @property
     def output(self) -> type | None:
@@ -293,16 +305,23 @@ class Agent:
 
             turn.record_request(messages, response)
             wanted = [call for call in response.tool_calls if call.name != FINAL_TOOL]
-            gated = turn.gated(self._tools, wanted)
-            if gated:
+            ruling = turn.rule(self._tools, wanted, self._permissions)
+            turn.record_denials(messages, ruling.denied)
+            if ruling.paused:
                 # Nothing in this turn runs until the human rules on the gated
                 # call: letting the rest run first would half-apply a turn the
                 # human may be about to refuse.
-                return self._result(state, messages, "", "paused", paused=gated)
+                turn.record_skipped(messages, ruling.allowed)
+                return self._result(state, messages, "", "paused", paused=ruling.paused)
+            if not ruling.allowed:
+                continue  # everything was refused; back to the model with that
 
-            results = yield _Dispatch(wanted)
+            results = yield _Dispatch(ruling.allowed)
             pending = turn.record_results(
-                messages, wanted, results, limit=self._context.tool_result_chars
+                messages,
+                ruling.allowed,
+                results,
+                limit=self._context.tool_result_chars,
             )
             if pending:
                 return self._result(state, messages, "", "paused", paused=pending)

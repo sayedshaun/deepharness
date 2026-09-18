@@ -26,6 +26,7 @@ from deepharness.errors import (
     DeepHarnessError,
     HumanInputRequired,
     OutputValidationError,
+    OutsideWorkspace,
     ProviderError,
     ToolNotFoundError,
 )
@@ -60,7 +61,15 @@ from deepharness.providers import (
     Together,
     TokenUsage,
 )
-from deepharness.tools import SearchResult, TavilySearch
+from deepharness.tools import (
+    Permissions,
+    Rule,
+    SearchResult,
+    TavilySearch,
+    Workspace,
+    file_tools,
+    shell_tool,
+)
 
 __all__ = [
     "FINAL_TOOL",
@@ -98,9 +107,12 @@ __all__ = [
     "OpenAI",
     "OpenRouter",
     "OutputValidationError",
+    "OutsideWorkspace",
     "PendingHumanInput",
+    "Permissions",
     "ProviderError",
     "ResearchResult",
+    "Rule",
     "SearchResult",
     "StepLimitExceeded",
     "StepStarted",
@@ -115,10 +127,13 @@ __all__ = [
     "ToolSpec",
     "ToolStarted",
     "Toolbox",
+    "Workspace",
     "concat",
     "estimate_tokens",
+    "file_tools",
     "load_session",
     "merge_dicts",
     "save_session",
+    "shell_tool",
     "tool",
 ]

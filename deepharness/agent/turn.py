@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..errors import ConfigurationError, HumanInputRequired
+from ..tools.permissions import Decision, Permissions
 from ..tools.toolbox import Toolbox
 from .context import truncate
 from .state import AgentState, Message, PendingHumanInput, as_dict
@@ -91,26 +92,89 @@ class ApprovedCall:
     arguments: dict[str, Any]
 
 
-def gated(tools: Toolbox, calls: list[Any]) -> list[PendingHumanInput]:
-    """Calls a human must allow first, carrying their arguments for later.
+@dataclass(slots=True)
+class Ruling:
+    """One turn's calls, split by what the run is allowed to do with them."""
 
-    Checked before dispatch rather than inside the tool, so a tool marked
-    requires_approval cannot run by accident - and the model cannot route around
-    the gate by declining to ask.
+    allowed: list[Any]
+    paused: list[PendingHumanInput]
+    denied: list[Any]
+
+
+def rule(
+    tools: Toolbox, calls: list[Any], permissions: Permissions | None = None
+) -> Ruling:
+    """Split a turn's calls into the ones to run, to ask about, and to refuse.
+
+    Decided before dispatch rather than inside the tool, so a gated call cannot
+    run by accident - and the model cannot route around the gate by declining to
+    ask. A policy decides per call; without one, or for a call no rule matches,
+    the tool's own requires_approval stands.
     """
-    pending: list[PendingHumanInput] = []
+    allowed: list[Any] = []
+    paused: list[PendingHumanInput] = []
+    denied: list[Any] = []
     for call in calls:
-        if call.name in tools and tools.get(call.name).requires_approval:
-            arguments = dict(call.arguments)
-            pending.append(
-                PendingHumanInput(
-                    call_id=call.id,
-                    name=call.name,
-                    question=f"Run {call.name} with {arguments}?",
-                    arguments=arguments,
+        match _decide(tools, call, permissions):
+            case "deny":
+                denied.append(call)
+            case "ask":
+                arguments = dict(call.arguments)
+                paused.append(
+                    PendingHumanInput(
+                        call_id=call.id,
+                        name=call.name,
+                        question=f"Run {call.name} with {arguments}?",
+                        arguments=arguments,
+                    )
                 )
-            )
-    return pending
+            case _:
+                allowed.append(call)
+    return Ruling(allowed=allowed, paused=paused, denied=denied)
+
+
+def _decide(tools: Toolbox, call: Any, permissions: Permissions | None) -> Decision:
+    if permissions is not None:
+        decision = permissions.decide(call.name, call.arguments)
+        if decision is not None:
+            return decision
+    if call.name in tools and tools.get(call.name).requires_approval:
+        return "ask"
+    return "allow"
+
+
+def record_denials(messages: list[dict[str, Any]], calls: list[Any]) -> None:
+    """Tell the model a call was refused by policy, as that call's result.
+
+    Recorded rather than dropped for two reasons: the model needs to learn it
+    cannot take that route, and a vendor rejects a transcript in which a
+    requested call has no result at all.
+    """
+    for call in calls:
+        messages.append(
+            Message.tool(
+                "Denied by policy: this call is not permitted.",
+                name=call.name,
+                call_id=call.id,
+            ).to_dict()
+        )
+
+
+def record_skipped(messages: list[dict[str, Any]], calls: list[Any]) -> None:
+    """Account for calls the turn never ran because it paused on another one.
+
+    Nothing in a turn runs until the human rules on its gated calls, so these
+    are left unrun - but they were still requested, and a requested call with
+    no result is a transcript a vendor will reject on resume.
+    """
+    for call in calls:
+        messages.append(
+            Message.tool(
+                "Not run: the turn stopped for approval of another call.",
+                name=call.name,
+                call_id=call.id,
+            ).to_dict()
+        )
 
 
 def settle(

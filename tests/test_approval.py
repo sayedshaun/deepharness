@@ -164,7 +164,12 @@ async def test_an_ungated_tool_in_the_same_turn_waits_for_the_ruling():
     state = await agent.arun("check then pay")
 
     assert state.stop_reason == "paused"
-    assert not any(m["role"] == "tool" for m in state.messages)
+    # The ungated tool did not run, but it was requested - so it is accounted
+    # for, or the resumed transcript has a tool call no result answers.
+    assert not any("$1,000,000" in m["content"] for m in state.messages)
+    skipped = [m for m in state.messages if m["role"] == "tool"]
+    assert [m["name"] for m in skipped] == ["balance"]
+    assert skipped[0]["content"].startswith("Not run")
 
 
 def test_approval_works_on_the_sync_path_too():
