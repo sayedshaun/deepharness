@@ -90,7 +90,8 @@ look at a codebase and change it. Both are factories, because each tool closes o
 `Workspace` it may touch — the confinement is injected, not read from global state.
 
 ```python
-from deepharness import Agent, Permissions, Rule, file_tools, shell_tool
+from deepharness import Agent
+from deepharness.tools import Permissions, Rule, file_tools, shell_tool
 
 agent = Agent(
     llm,
@@ -126,7 +127,7 @@ once the tool is `run_command`: `git log` and `rm -rf /` are the same tool. `Per
 decides per call, from the arguments the model actually sent.
 
 ```python
-from deepharness import FileTool, Permissions, Rule, ShellTool
+from deepharness.tools import FileTool, Permissions, Rule, ShellTool
 
 permissions = Permissions(
     allow=[
@@ -201,7 +202,8 @@ hands you its tools as ordinary callables — no protocol SDK, just `httpx` and 
 library.
 
 ```python
-from deepharness import Agent, MCPServer
+from deepharness import Agent
+from deepharness.tools import MCPServer
 
 async with MCPServer.stdio(
     ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
@@ -249,7 +251,7 @@ authentication goes through headers you supply rather than an OAuth flow.
 `request`, `notify`, `aclose` — and `MCPServer` takes any implementation:
 
 ```python
-from deepharness import MCPServer, Transport
+from deepharness.tools import MCPServer, Transport
 
 
 class MyTransport(Transport):
@@ -272,7 +274,8 @@ everyone.
 answer from the live web instead of its training data.
 
 ```python
-from deepharness import Agent, TavilySearch
+from deepharness import Agent
+from deepharness.tools import TavilySearch
 
 search = TavilySearch()  # reads TAVILY_API_KEY, or pass api_key=
 

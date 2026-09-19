@@ -10,6 +10,15 @@ about what they may do, a bounded context window, and progress you can watch.
 
 ### Breaking
 
+- **Imports are layered.** `deepharness` now exports ~27 high-level names instead of 81;
+  everything else comes from the package that owns it — `deepharness.agent`,
+  `deepharness.graph`, `deepharness.providers`, `deepharness.tools`, `deepharness.prebuilt`,
+  `deepharness.errors`. `Agent`, `Graph`, `tool`, `Message`, `Budget`, `Toolbox`, `Ctx`,
+  `AgentState`, `Finished`, `TextDelta`, `Executor`, `DeepHarnessError` and all 15 providers
+  are unchanged; `ContextPolicy`, `Permissions`, `file_tools`, `save_session`, `DeepResearch`,
+  the content blocks, the progress events, the provider wrappers and the specific exceptions
+  all moved one level down. No aliases are kept: an import that moved fails loudly rather than
+  working for one more release.
 - `load_session(path)` returns an `AgentState` rather than `list[dict]`, and `save_session`
   writes the whole state instead of the transcript alone. That is what lets a run paused on an
   approval resume in another process — a messages-only file cannot carry what it is waiting

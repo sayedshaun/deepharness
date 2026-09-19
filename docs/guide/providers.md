@@ -38,7 +38,8 @@ A message's content is a string in the common case, and a list of blocks when te
 enough: an image to look at, a file to read, or the model's own reasoning coming back.
 
 ```python
-from deepharness import Agent, Image, Message, Text
+from deepharness import Agent, Message
+from deepharness.providers import Image, Text
 
 state = await agent.arun(
     [
@@ -65,7 +66,8 @@ payload — and a saved session — is byte-for-byte what it was before blocks e
 Gemini take the matching token budget). What comes back is kept apart from the answer:
 
 ```python
-from deepharness import TextDelta, ThinkingDelta
+from deepharness import TextDelta
+from deepharness.providers import ThinkingDelta
 
 async for event in agent.astream_events("Prove it"):
     match event:
@@ -113,7 +115,8 @@ implementation of it — which means one wrapper covers `generate()`, `agenerate
 streaming paths, and they compose at the call site where the order is visible.
 
 ```python
-from deepharness import Anthropic, Caching, Fallback, OpenAI, RateLimited, Retrying
+from deepharness import Anthropic, OpenAI
+from deepharness.providers import Caching, Fallback, RateLimited, Retrying
 
 llm = Caching(
     RateLimited(
@@ -130,7 +133,8 @@ fallback is what actually talks to a vendor. `llm.inner` reaches the provider un
 ### `Fallback`
 
 ```python
-from deepharness import Fallback, ProviderError
+from deepharness.errors import ProviderError
+from deepharness.providers import Fallback
 
 llm = Fallback(primary, backup, on=(ProviderError,))  # on= is the default
 ```

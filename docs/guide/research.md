@@ -7,7 +7,9 @@ the answers.
 ```python
 import asyncio
 
-from deepharness import DeepResearch, OpenAI, TavilySearch
+from deepharness import OpenAI
+from deepharness.prebuilt import DeepResearch
+from deepharness.tools import TavilySearch
 
 search = TavilySearch()  # reads TAVILY_API_KEY, or pass api_key=
 research = DeepResearch(OpenAI("gpt-4o-mini"), tools=[search.as_tool()])

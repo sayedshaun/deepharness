@@ -97,9 +97,9 @@ editor = Agent(
 An agent that can read a codebase and change it, with the sharp edges gated:
 
 ```python
-from deepharness import (
-    Agent,
-    ContextPolicy,
+from deepharness import Agent
+from deepharness.agent import ContextPolicy
+from deepharness.tools import (
     FileTool,
     Permissions,
     Rule,
@@ -148,7 +148,8 @@ then delegate" — so each one is just another `LLM`. They compose at the call s
 order is visible:
 
 ```python
-from deepharness import Anthropic, Caching, Fallback, OpenAI, RateLimited
+from deepharness import Anthropic, OpenAI
+from deepharness.providers import Caching, Fallback, RateLimited
 
 llm = Caching(
     RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)

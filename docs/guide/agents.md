@@ -83,7 +83,8 @@ one final `Finished` carrying the `AgentState`, because an async generator canno
 value — and in between, what the loop is doing:
 
 ```python
-from deepharness import Finished, StepStarted, TextDelta, ToolFinished, ToolStarted
+from deepharness import Finished, TextDelta
+from deepharness.agent import StepStarted, ToolFinished, ToolStarted
 
 async for event in agent.astream_events("What is 17 * 23?"):
     match event:
@@ -144,7 +145,8 @@ its tools returned, and every later turn pays for all of it again. `ContextPolic
 from both ends.
 
 ```python
-from deepharness import Agent, ContextPolicy
+from deepharness import Agent
+from deepharness.agent import ContextPolicy
 
 agent = Agent(
     llm,
@@ -247,7 +249,7 @@ For anything finer than per-tool — allowing `git log` but not `git push`, both
 answer becomes that call's result:
 
 ```python
-from deepharness import HumanInputRequired
+from deepharness.errors import HumanInputRequired
 
 
 @tool
@@ -273,7 +275,8 @@ The difference matters: an approval defers execution, a question substitutes a r
 across process runs:
 
 ```python
-from deepharness import Agent, Message, load_session, save_session
+from deepharness import Agent, Message
+from deepharness.agent import load_session, save_session
 
 state = load_session("session.json")  # an empty AgentState if the file is new
 state.messages.append(Message.human("Continue where we left off.").to_dict())

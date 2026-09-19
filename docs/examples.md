@@ -105,7 +105,7 @@ overwriting (see [state merging](guide/graph.md#parallel-execution-and-state-mer
 ```python
 from dataclasses import dataclass, field
 
-from deepharness import concat
+from deepharness.graph import concat
 
 
 @dataclass
@@ -194,7 +194,8 @@ resolved inside that root:
 ```python
 import asyncio
 
-from deepharness import Agent, OpenAI, file_tools, shell_tool
+from deepharness import Agent, OpenAI
+from deepharness.tools import file_tools, shell_tool
 
 agent = Agent(
     OpenAI("gpt-4o-mini"),
@@ -219,7 +220,8 @@ instead, which is a stronger guarantee than a rule because there is nothing left
 `Permissions` decides per call, from the arguments the model actually sent:
 
 ```python
-from deepharness import Agent, Permissions, Rule, ShellTool, shell_tool
+from deepharness import Agent
+from deepharness.tools import Permissions, Rule, ShellTool, shell_tool
 
 agent = Agent(
     llm,
@@ -243,7 +245,9 @@ A run that reads files pays for every result again on every later turn. `Context
 both ends of that:
 
 ```python
-from deepharness import Agent, ContextPolicy, file_tools
+from deepharness import Agent
+from deepharness.agent import ContextPolicy
+from deepharness.tools import file_tools
 
 agent = Agent(
     llm,
@@ -263,7 +267,8 @@ Text alone makes an agent look stalled, because most of a long run is tool calls
 never narrates:
 
 ```python
-from deepharness import Finished, StepStarted, TextDelta, ToolFinished, ToolStarted
+from deepharness import Finished, TextDelta
+from deepharness.agent import StepStarted, ToolFinished, ToolStarted
 
 async for event in agent.astream_events("Add a docstring to the executor"):
     match event:
@@ -288,7 +293,8 @@ Caching, rate limiting, retrying and falling back are all `LLM`s, so they stack 
 provider and work on every path at once:
 
 ```python
-from deepharness import Agent, Anthropic, Caching, Fallback, OpenAI, RateLimited
+from deepharness import Agent, Anthropic, OpenAI
+from deepharness.providers import Caching, Fallback, RateLimited
 
 llm = Caching(
     RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)
@@ -308,7 +314,8 @@ because those deltas already reached you. See
 Message content is a string until it needs to be more:
 
 ```python
-from deepharness import Image, Message, Text
+from deepharness import Message
+from deepharness.providers import Image, Text
 
 state = await agent.arun(
     [
@@ -328,7 +335,7 @@ text is still sent as a plain string, so nothing changes for an ordinary convers
 The pause is a returned state, not an exception, so it survives a process boundary:
 
 ```python
-from deepharness import load_session, save_session
+from deepharness.agent import load_session, save_session
 
 state = await agent.arun("Deploy the release branch")
 if state.stop_reason == "paused":
@@ -348,7 +355,8 @@ file, so existing sessions keep loading. See
 An [MCP](https://modelcontextprotocol.io) server's tools join the same toolbox as your own:
 
 ```python
-from deepharness import Agent, MCPServer
+from deepharness import Agent
+from deepharness.tools import MCPServer
 
 async with MCPServer.stdio(
     ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
@@ -379,7 +387,9 @@ report:
 ```python
 import asyncio
 
-from deepharness import DeepResearch, OpenAI, TavilySearch
+from deepharness import OpenAI
+from deepharness.prebuilt import DeepResearch
+from deepharness.tools import TavilySearch
 
 search = TavilySearch()
 research = DeepResearch(OpenAI("gpt-4o-mini"), tools=[search.as_tool()])

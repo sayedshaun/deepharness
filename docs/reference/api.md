@@ -1,5 +1,33 @@
 # API reference
 
+## Imports
+
+A first program's names come from the root; everything else comes from the layer that owns it,
+so an import path says which part of the library a name belongs to.
+
+```python
+from deepharness import Agent, Graph, Message, OpenAI, tool  # ~27 high-level names
+from deepharness.agent import ContextPolicy, StepStarted, save_session
+from deepharness.graph import concat, merge_dicts
+from deepharness.providers import Caching, Fallback, Image, Text
+from deepharness.tools import FileTool, Permissions, file_tools, shell_tool
+from deepharness.prebuilt import DeepResearch
+from deepharness.errors import ProviderError
+```
+
+| Module | Holds |
+| --- | --- |
+| `deepharness` | `Agent`, `AgentState`, `Budget`, `Message`, `Toolbox`, `Ctx`, `tool`, `Finished`, `TextDelta`, `Graph`, `Executor`, `DeepHarnessError`, and all 15 providers |
+| `deepharness.agent` | the loop's own types — `ContextPolicy`, `estimate_tokens`, the progress events, `StopReason`, `PendingHumanInput`, `save_session`/`load_session`, `ToolSpec`, `FINAL_TOOL` |
+| `deepharness.graph` | `NodeSpec`, `concat`, `merge_dicts` |
+| `deepharness.providers` | `LLM` and the wire types, content blocks (`Text`, `Image`, `Document`, `Thinking`), `ReasoningLevel`, and the wrappers `Caching`/`Fallback`/`RateLimited`/`Retrying`/`Wrapping` |
+| `deepharness.tools` | `Permissions`, `Rule`, `FileTool`, `ShellTool`, `Workspace`, `file_tools`, `shell_tool`, `MCPServer`, `Transport`, `TavilySearch` |
+| `deepharness.prebuilt` | `DeepResearch`, `Finding`, `ResearchResult` and its events |
+| `deepharness.errors` | every exception; only `DeepHarnessError` is re-exported at the root |
+
+The root is kept small on purpose: each name there is a promise about stability, and a flat
+namespace of everything stops being discoverable long before it is complete.
+
 The public surface, importable from `deepharness` unless noted otherwise. This page covers
 signatures and behavior only — see the [guide](../guide/agents.md) for narrative
 explanations and examples.
