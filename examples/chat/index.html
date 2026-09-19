@@ -269,7 +269,12 @@ function render(event, ctx) {
       // The gate goes up first: it is the thing you have to act on, and a
       // cosmetic panel failing must never be able to strand a paused run.
       if (event.paused.length) gate(event.paused, ctx);
-      meta.textContent = `${ctx.model} · ${event.usage.total} tokens · stopped: ${event.stop_reason}`;
+      // Cached prompt tokens are already inside the total; showing the split
+      // is the difference between a cheap turn and an expensive one.
+      const cached = event.usage.cached
+        ? ` (${event.usage.cached} cached${event.usage.cache_write ? `, ${event.usage.cache_write} written` : ""})`
+        : "";
+      meta.textContent = `${ctx.model} · ${event.usage.total} tokens${cached} · stopped: ${event.stop_reason}`;
       showFiles(event.files);
       break;
   }

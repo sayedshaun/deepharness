@@ -328,6 +328,7 @@ def _usage(metadata: dict[str, Any] | None) -> Usage | None:
         prompt="promptTokenCount",
         completion="candidatesTokenCount",
         total="totalTokenCount",
+        cached="cachedContentTokenCount",
     )
     if usage is not None and metadata:
         usage.completion_tokens += metadata.get("thoughtsTokenCount", 0)

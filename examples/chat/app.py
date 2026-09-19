@@ -222,6 +222,8 @@ class Session:
                 "prompt": state.usage.prompt_tokens,
                 "completion": state.usage.completion_tokens,
                 "total": state.usage.total_tokens,
+                "cached": state.usage.cached_tokens,
+                "cache_write": state.usage.cache_write_tokens,
             },
             "paused": self.pending,
             "files": self.files(),

@@ -101,6 +101,22 @@ llm = Anthropic("claude-3-5-sonnet-20241022", cache_prompt=True, max_concurrency
 
 `cache_prompt=True` (Anthropic) puts a cache breakpoint on the system prompt and the last tool
 definition, which covers the part of a request that is identical on every turn of every run.
+Most other vendors cache prefixes automatically and charge less for them.
+
+What it saved shows up in usage: `usage.cached_tokens` is the part of `prompt_tokens` served
+from the vendor's cache, and `usage.cache_write_tokens` is what it charged to put a prefix
+there. Both sit *inside* `prompt_tokens` rather than being deducted from it — a cached token
+still occupies the context window — so `Budget(tokens=…)` counts the full figure and these two
+are there to tell a cheap turn from an expensive one.
+
+```python
+state = await agent.arun("…")
+print(state.usage.prompt_tokens, state.usage.cached_tokens)  # 383 377
+```
+
+This is not the same as [`Caching`](#caching), which skips the request entirely: prompt caching
+makes a *new* request cheaper by reusing its prefix, and helps a conversation that keeps
+growing — exactly where a response cache cannot.
 
 `max_concurrency=` caps requests in flight for that provider. A graph wave or a `DeepResearch`
 fan-out otherwise opens as many connections as it has branches, which is the usual way a run

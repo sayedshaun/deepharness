@@ -17,6 +17,8 @@ def token_usage(usage: Any) -> TokenUsage | None:
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
         total_tokens=usage.total_tokens,
+        cached_tokens=usage.cached_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
     )
 
 
@@ -72,17 +74,31 @@ class ToolCall:
 
 @dataclass(slots=True)
 class TokenUsage:
-    """Token counts for one completion, normalized across vendors."""
+    """Token counts for one completion, normalized across vendors.
+
+    cached_tokens is the part of prompt_tokens the vendor served from its prompt
+    cache rather than recomputing, and cache_write_tokens is what it charged to
+    put a prefix there. Both are reported rather than deducted: they are already
+    inside prompt_tokens, and a cached token still occupies the context window
+    even when it costs less - so Budget keeps counting the full figure.
+
+    Both default to zero, so a vendor that does not cache, or does not say,
+    reports nothing rather than a guess.
+    """
 
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
 
     def __add__(self, other: TokenUsage) -> TokenUsage:
         return TokenUsage(
             prompt_tokens=self.prompt_tokens + other.prompt_tokens,
             completion_tokens=self.completion_tokens + other.completion_tokens,
             total_tokens=self.total_tokens + other.total_tokens,
+            cached_tokens=self.cached_tokens + other.cached_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
         )
 
 

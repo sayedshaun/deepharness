@@ -388,7 +388,11 @@ class AnthropicMessage:
         return cls(
             content=[AnthropicContentBlock.from_json(block) for block in blocks],
             usage=usage_from(
-                data.get("usage"), prompt="input_tokens", completion="output_tokens"
+                data.get("usage"),
+                prompt="input_tokens",
+                completion="output_tokens",
+                cached="cache_read_input_tokens",
+                cache_write="cache_creation_input_tokens",
             ),
             finish_reason=finish_reason_from(data.get("stop_reason"), _FINISH_REASONS),
         )
@@ -488,6 +492,10 @@ class AnthropicStream:
             prompt_tokens=prompt,
             completion_tokens=completion,
             total_tokens=prompt + completion,
+            cached_tokens=usage.get("cache_read_input_tokens", current.cached_tokens),
+            cache_write_tokens=usage.get(
+                "cache_creation_input_tokens", current.cache_write_tokens
+            ),
         )
 
     def response(self) -> CompletionResponse:

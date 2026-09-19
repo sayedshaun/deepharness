@@ -66,6 +66,10 @@ about what they may do, a bounded context window, and progress you can watch.
   dependency. `Transport` is the extension point for anything those two do not reach.
 - **Anthropic prompt caching.** `cache_prompt=True` puts a cache breakpoint on the system
   prompt and the last tool definition.
+- **Cache counts in usage.** `TokenUsage` gains `cached_tokens` and `cache_write_tokens`, read
+  from each vendor's own field, so a turn whose prompt was mostly a cache read is no longer
+  indistinguishable from one that paid for all of it. Both are inside `prompt_tokens`;
+  `Budget` still counts the full figure.
 - **Concurrency cap.** `max_concurrency=` on any provider bounds its in-flight requests, held
   across retries and for a stream's whole body.
 - **DeepResearch.** `DeepResearch` plans sub-questions, researches them in parallel and

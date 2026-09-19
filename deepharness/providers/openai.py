@@ -343,6 +343,7 @@ class OpenAIChatCompletion:
                 prompt="prompt_tokens",
                 completion="completion_tokens",
                 total="total_tokens",
+                cached="prompt_tokens_details.cached_tokens",
             ),
         )
 
@@ -366,10 +367,12 @@ class OpenAIStream:
 
     def feed(self, data: dict[str, Any]) -> TextDelta | ThinkingDelta | None:
         if usage := data.get("usage"):
-            self._usage = Usage(
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
+            self._usage = usage_from(
+                usage,
+                prompt="prompt_tokens",
+                completion="completion_tokens",
+                total="total_tokens",
+                cached="prompt_tokens_details.cached_tokens",
             )
         choices = data.get("choices") or []
         if not choices:

@@ -438,6 +438,27 @@ everywhere, transport regardless. The streaming pair is optional: the base class
 Vendors that speak REST share their request sequence through `RestCompletions` rather than by
 inheriting it (see `providers/rest.py`).
 
+### `TokenUsage`
+
+```python
+TokenUsage(
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    cached_tokens: int = 0,
+    cache_write_tokens: int = 0,
+)
+```
+
+`cached_tokens` is the part of `prompt_tokens` the vendor served from its prompt cache;
+`cache_write_tokens` is what it charged to put a prefix there. Both are **inside**
+`prompt_tokens`, reported rather than deducted — a cached token still occupies the context
+window, so `Budget(tokens=…)` keeps counting the full figure. Read from
+`prompt_tokens_details.cached_tokens` (OpenAI, DeepSeek, llama.cpp),
+`cache_read_input_tokens` / `cache_creation_input_tokens` (Anthropic) and
+`cachedContentTokenCount` (Gemini); zero when a vendor does not report them. `+` sums every
+field, which is how `agent.total_usage` accumulates.
+
 ### Content blocks
 
 ```python
