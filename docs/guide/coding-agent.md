@@ -258,17 +258,3 @@ asyncio.run(main())
 
 Sixty lines, and every decision in it is visible: which tools exist, what runs unasked, what
 stops, how big a request may get, and where the conversation lives between runs.
-
-## The same thing with a UI
-
-[`examples/chat`](https://github.com/sayedshaun/deepharness/tree/main/examples/chat) is this
-agent behind a page: the transcript, tool calls as they happen, the reasoning panel, an
-approval card with **Approve & run** / **Reject**, and a file list showing what it wrote.
-
-```bash
-pip install -e ".[examples]"
-make chat        # then open http://127.0.0.1:8765
-```
-
-It defaults to a fresh temporary workspace, because an agent holding a shell should not be
-pointed at a repository unless someone says so out loud.
