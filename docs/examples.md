@@ -187,6 +187,9 @@ state = await agent.arun("What plan is Acme on?", deps=Deps(db=db, tenant="acme"
 
 ## An agent working in a directory
 
+For the whole thing assembled — permissions, approvals, context and sessions — see
+[building a coding agent](guide/coding-agent.md). The short version:
+
 `file_tools()` and `shell_tool()` are the difference between an agent that talks about a
 codebase and one that reads it. Both close over a `Workspace`, so every path the model sends is
 resolved inside that root:

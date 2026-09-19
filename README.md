@@ -115,6 +115,9 @@ agent = Agent(
 state = await agent.arun("What does the executor do? Add a docstring if it lacks one.")
 ```
 
+A full walkthrough — approvals, context, sessions, and a sixty-line script that runs — is in
+[Building a coding agent](https://sayedshaun.github.io/deepharness/guide/coding-agent/).
+
 Every path is resolved inside the workspace root, `deny` beats `allow` beats `ask`, and a run
 that needs a human stops with `stop_reason == "paused"` — resumable later, in another process,
 because `save_session`/`load_session` round-trip the whole state, pending approval included.

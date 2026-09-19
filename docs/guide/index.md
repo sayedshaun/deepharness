@@ -31,6 +31,14 @@ you need.
 
     [:octicons-arrow-right-24: Read](tools.md)
 
+-   :material-code-braces:{ .lg .middle } **Coding agent**
+
+    ---
+
+    An agent that reads a codebase and changes it, assembled one decision at a time.
+
+    [:octicons-arrow-right-24: Read](coding-agent.md)
+
 -   :material-cloud-outline:{ .lg .middle } **Providers**
 
     ---

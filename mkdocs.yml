@@ -74,6 +74,7 @@ nav:
       - Graphs: guide/graph.md
       - Agents: guide/agents.md
       - Tools: guide/tools.md
+      - Coding agent: guide/coding-agent.md
       - Providers: guide/providers.md
       - Deep research: guide/research.md
   - Examples: examples.md

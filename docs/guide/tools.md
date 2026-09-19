@@ -85,6 +85,10 @@ agent = Agent(llm, name="assistant", tools=[get_weather])
 
 ## Built-in: working in a directory
 
+!!! tip
+    This section is the reference for each tool. For putting them together into a working
+    coding agent, see [building a coding agent](coding-agent.md).
+
 `file_tools()` and `shell_tool()` are what turns an agent into a harness: an agent that can
 look at a codebase and change it. Both are factories, because each tool closes over the
 `Workspace` it may touch — the confinement is injected, not read from global state.

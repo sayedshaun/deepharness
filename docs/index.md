@@ -81,6 +81,14 @@ Requires Python 3.11+.
 
     [:octicons-arrow-right-24: Agents guide](guide/agents.md)
 
+-   :material-code-braces:{ .lg .middle } **Build a coding agent**
+
+    ---
+
+    Tools, permissions, approvals, context and sessions, one decision at a time.
+
+    [:octicons-arrow-right-24: Coding agent guide](guide/coding-agent.md)
+
 -   :material-hammer-wrench:{ .lg .middle } **Tools & permissions**
 
     ---
