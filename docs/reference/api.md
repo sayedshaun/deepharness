@@ -10,7 +10,7 @@ from deepharness import Agent, Graph, Message, OpenAI, tool  # ~27 high-level na
 from deepharness.agent import ContextPolicy, StepStarted, save_session
 from deepharness.graph import concat, merge_dicts
 from deepharness.providers import Caching, Fallback, Image, Text
-from deepharness.tools import FileTool, Permissions, file_tools, shell_tool
+from deepharness.tools import Permissions, ToolName, file_tools, shell_tool
 from deepharness.prebuilt import DeepResearch
 from deepharness.errors import ProviderError
 ```
@@ -21,7 +21,7 @@ from deepharness.errors import ProviderError
 | `deepharness.agent` | the loop's own types — `ContextPolicy`, `estimate_tokens`, the progress events, `StopReason`, `PendingHumanInput`, `save_session`/`load_session`, `ToolSpec`, `FINAL_TOOL` |
 | `deepharness.graph` | `NodeSpec`, `concat`, `merge_dicts` |
 | `deepharness.providers` | `LLM` and the wire types, content blocks (`Text`, `Image`, `Document`, `Thinking`), `ReasoningLevel`, and the wrappers `Caching`/`Fallback`/`RateLimited`/`Retrying`/`Wrapping` |
-| `deepharness.tools` | `Permissions`, `Rule`, `FileTool`, `ShellTool`, `Workspace`, `file_tools`, `shell_tool`, `MCPServer`, `Transport`, `TavilySearch` |
+| `deepharness.tools` | `Permissions`, `Rule`, `ToolName`, `Workspace`, `file_tools`, `shell_tool`, `MCPServer`, `Transport`, `TavilySearch` |
 | `deepharness.prebuilt` | `DeepResearch`, `Finding`, `ResearchResult` and its events |
 | `deepharness.errors` | every exception; only `DeepHarnessError` is re-exported at the root |
 
@@ -342,7 +342,7 @@ where `None` means no rule applied and the tool's own `requires_approval` stands
 `allow` beats `ask`.
 
 A rule may be written three ways: the decorated tool itself (read for the name it is
-registered under), a `FileTool`/`ShellTool` member, or a string name or `fnmatch` pattern.
+registered under), a `ToolName` member, or a string name or `fnmatch` pattern.
 `Rule` narrows by argument patterns, also `fnmatch`; an argument a rule mentions but the call
 omits does not match. `Rule.is_pattern` says whether a rule names a tool or a shape.
 
@@ -351,15 +351,16 @@ whose silence would be unsafe. `Agent` refuses at construction when a gate names
 not registered, since a misspelled deny rule matches nothing and allows what it was written to
 stop. Allow rules and pattern rules are not checked.
 
-### `FileTool` / `ShellTool`
+### `ToolName`
 
 ```python
-FileTool.READ | LIST | SEARCH | WRITE | EDIT  # "read_file", "list_files", ...
-ShellTool.RUN  # "run_command"
+ToolName.READ_FILE  # "read_file"; also LIST_FILES, SEARCH_FILES, WRITE_FILE,
+ToolName.RUN_COMMAND  # "run_command"                             EDIT_FILE
 ```
 
-The names `file_tools()` and `shell_tool()` register, as `StrEnum`s — a member is a `str`, so
-it works anywhere a name or a `Rule`'s tool is expected.
+The names the built-in tools register under, as one `StrEnum` — a member is a `str`, so it
+works anywhere a name or a `Rule`'s tool is expected. One enum rather than one per module, so
+nothing sits a letter of case away from the factory that builds the tools.
 
 ## Graphs & execution
 

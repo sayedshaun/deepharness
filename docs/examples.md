@@ -221,15 +221,15 @@ instead, which is a stronger guarantee than a rule because there is nothing left
 
 ```python
 from deepharness import Agent
-from deepharness.tools import Permissions, Rule, ShellTool, shell_tool
+from deepharness.tools import Permissions, Rule, ToolName, shell_tool
 
 agent = Agent(
     llm,
     tools=[shell_tool(".")],
     permissions=Permissions(
-        allow=[Rule(ShellTool.RUN, {"command": "git log*"})],
-        ask=[ShellTool.RUN],
-        deny=[Rule(ShellTool.RUN, {"command": "*rm -rf*"})],
+        allow=[Rule(ToolName.RUN_COMMAND, {"command": "git log*"})],
+        ask=[ToolName.RUN_COMMAND],
+        deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
     ),
 )
 ```

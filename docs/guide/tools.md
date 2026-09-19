@@ -127,17 +127,17 @@ once the tool is `run_command`: `git log` and `rm -rf /` are the same tool. `Per
 decides per call, from the arguments the model actually sent.
 
 ```python
-from deepharness.tools import FileTool, Permissions, Rule, ShellTool
+from deepharness.tools import Permissions, Rule, ToolName
 
 permissions = Permissions(
     allow=[
-        FileTool.READ,
-        FileTool.LIST,
-        FileTool.SEARCH,
-        Rule(ShellTool.RUN, {"command": "git log*"}),
+        ToolName.READ_FILE,
+        ToolName.LIST_FILES,
+        ToolName.SEARCH_FILES,
+        Rule(ToolName.RUN_COMMAND, {"command": "git log*"}),
     ],
-    ask=[FileTool.WRITE, FileTool.EDIT, ShellTool.RUN],
-    deny=[Rule(ShellTool.RUN, {"command": "*rm -rf*"})],
+    ask=[ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.RUN_COMMAND],
+    deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
 )
 
 agent = Agent(llm, tools=[*file_tools("."), shell_tool(".")], permissions=permissions)
@@ -149,13 +149,12 @@ Three forms, and they mean the same thing:
 
 ```python
 Permissions(ask=[write_file])  # the tool itself, when it is in scope
-Permissions(ask=[FileTool.WRITE])  # the built-in names, as a StrEnum
+Permissions(ask=[ToolName.WRITE_FILE])  # the built-in names, as a StrEnum
 Permissions(ask=["write_file"])  # a name, or a pattern like "write_*"
 ```
 
 Prefer a tool or an enum member where you can: your editor renames them with the code, and a
-typo is a `NameError` instead of a rule that silently matches nothing. `FileTool` and
-`ShellTool` are `StrEnum`s, so a member *is* a string — usable as a `Rule`'s tool and matched
+typo is a `NameError` instead of a rule that silently matches nothing. `ToolName` is a `StrEnum`, so a member *is* a string — usable as a `Rule`'s tool and matched
 by `fnmatch` with no conversion. Passing the tool itself reads the name it was registered
 under, so a tool renamed with `@tool(name=...)` still matches what the model sees.
 

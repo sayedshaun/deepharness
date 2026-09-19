@@ -99,23 +99,16 @@ An agent that can read a codebase and change it, with the sharp edges gated:
 ```python
 from deepharness import Agent
 from deepharness.agent import ContextPolicy
-from deepharness.tools import (
-    FileTool,
-    Permissions,
-    Rule,
-    ShellTool,
-    file_tools,
-    shell_tool,
-)
+from deepharness.tools import Permissions, Rule, ToolName, file_tools, shell_tool
 
 agent = Agent(
     OpenAI(model="gpt-4o-mini"),
     tools=[*file_tools("."), shell_tool(".")],
     context=ContextPolicy(max_tokens=120_000),
     permissions=Permissions(
-        allow=[FileTool.READ, FileTool.LIST, FileTool.SEARCH],
-        ask=[FileTool.WRITE, FileTool.EDIT, ShellTool.RUN],
-        deny=[Rule(ShellTool.RUN, {"command": "*rm -rf*"})],
+        allow=[ToolName.READ_FILE, ToolName.LIST_FILES, ToolName.SEARCH_FILES],
+        ask=[ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.RUN_COMMAND],
+        deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
     ),
 )
 
