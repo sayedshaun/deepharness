@@ -5,6 +5,21 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .providers.base import TokenUsage
 
+__all__ = [
+    "ConcurrentUpdateError",
+    "ConfigurationError",
+    "DeepHarnessError",
+    "ExecutionError",
+    "HumanInputRequired",
+    "MCPError",
+    "OutputValidationError",
+    "OutsideWorkspace",
+    "ProviderError",
+    "StepLimitExceeded",
+    "TokenBudgetExceeded",
+    "ToolNotFoundError",
+]
+
 
 class DeepHarnessError(Exception):
     """Base class for all errors raised by deepharness."""

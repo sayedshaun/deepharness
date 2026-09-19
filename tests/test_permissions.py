@@ -200,7 +200,7 @@ def test_a_renamed_tool_is_matched_by_the_name_the_model_sees():
 
 
 def test_the_built_in_names_are_available_as_enums():
-    from deepharness import FileTool, ShellTool
+    from deepharness.tools import FileTool, ShellTool
 
     permissions = Permissions(allow=[FileTool.READ], deny=[Rule(ShellTool.RUN)])
 
