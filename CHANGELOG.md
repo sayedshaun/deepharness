@@ -31,7 +31,10 @@ about what they may do, a bounded context window, and progress you can watch.
   are gated by default.
 - **Permissions.** `Permissions(allow=…, ask=…, deny=…)` with `Rule("run_command", {"command":
   "git *"})` decides per call, from the arguments the model actually sent. `deny` beats `allow`
-  beats `ask`; a call no rule matches falls back to the tool's own `requires_approval`.
+  beats `ask`; a call no rule matches falls back to the tool's own `requires_approval`. A rule
+  can name a tool by passing the tool itself or a `FileTool`/`ShellTool` member instead of a
+  string, and a deny or ask rule naming an unregistered tool is refused at construction —
+  a misspelled one would match nothing and allow what it was written to stop.
 - **Context management.** `ContextPolicy` truncates each tool result and, with `max_tokens`
   set, prunes the view the model is sent while `state.messages` keeps every message. Pruning
   never drops the system prompt, never orphans a tool result and always keeps the last
