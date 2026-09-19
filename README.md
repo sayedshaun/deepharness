@@ -134,6 +134,17 @@ The rest of what a long run needs:
 - **Tools from elsewhere.** An [MCP](https://modelcontextprotocol.io) server's tools join the
   same toolbox via `MCPServer.stdio(...)` or `MCPServer.http(...)`.
 
+### Seeing it work
+
+`examples/chat` is a static page plus a small FastAPI backend that drives a real agent against
+a real model — tool calls, a permission gate you rule on, progress events, and a workspace
+panel showing what it wrote:
+
+```bash
+pip install -e ".[examples]"
+python examples/chat/app.py     # a fresh temp workspace, printed at startup
+```
+
 ### Wrapping a provider
 
 Caching, rate limiting, retrying and falling back are all "do something around a model call,

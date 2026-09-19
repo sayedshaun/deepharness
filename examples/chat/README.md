@@ -1,0 +1,55 @@
+# Chat UI
+
+A static page and a small FastAPI backend for driving a real agent against a
+real model — the fastest way to see the harness work end to end: tools running
+in a workspace, a permission gate stopping a write until you allow it, progress
+events as they happen, and a conversation that keeps its state across turns.
+
+```bash
+pip install -e ".[examples]"
+python examples/chat/app.py
+# open http://127.0.0.1:8765
+```
+
+By default it points at a llama.cpp server over its OpenAI-compatible endpoint
+and works in a **fresh temporary directory**, printed at startup. An agent with
+a shell should not be aimed at a repository unless you say so:
+
+```bash
+python examples/chat/app.py \
+  --base-url https://your-host/llamacpp/v1 \
+  --model unsloth/gemma-4-E4B-it-GGUF \
+  --workspace ./scratch \
+  --port 8765
+```
+
+Every flag also reads from the environment (`DEEPHARNESS_CHAT_WORKSPACE`, …), so
+`uvicorn examples.chat.app:app` works too.
+
+## What it exercises
+
+| Part | How you see it |
+| --- | --- |
+| `file_tools` / `shell_tool` | tool calls in the transcript; the workspace panel updates as files appear |
+| `Workspace` | ask it to read `../../etc/passwd` and watch the call fail with `OutsideWorkspace` |
+| `Permissions` | `write_file`, `edit_file` and `run_command` stop for a ruling; `read_file` and friends just run |
+| deny rules | ask for `rm -rf .` — the call is refused and the model is told |
+| progress events | `StepStarted`, `ToolStarted`/`ToolFinished` and `ThinkingDelta` render as they arrive |
+| `ContextPolicy` | long tool results arrive truncated, with the marker visible |
+| pausing and resuming | **Approve & run** replays the call with the model's own arguments; **Reject** tells it no |
+
+Typing a new message while a gate is open counts as a refusal: the pending call
+is recorded as denied rather than dropped, so the model learns it and the
+transcript keeps a result for every call it asked for.
+
+## Shape
+
+- `app.py` — the backend. One `Session` owns the agent, the workspace and the
+  conversation; each turn streams server-sent events. A paused state stays here
+  rather than going to the browser, because an approval is a decision about what
+  this process will run.
+- `index.html` — the page. No build step, no CDN, no framework.
+
+It is a development toy: one session, no authentication, and it hands a model a
+shell. FastAPI and uvicorn are example dependencies — the library itself still
+needs only `httpx`.
