@@ -97,21 +97,25 @@ editor = Agent(
 An agent that can read a codebase and change it, with the sharp edges gated:
 
 ```python
-from deepharness import Agent, ContextPolicy, Permissions, Rule, file_tools, shell_tool
+from deepharness import (
+    Agent,
+    ContextPolicy,
+    FileTool,
+    Permissions,
+    Rule,
+    ShellTool,
+    file_tools,
+    shell_tool,
+)
 
 agent = Agent(
     OpenAI(model="gpt-4o-mini"),
     tools=[*file_tools("."), shell_tool(".")],
     context=ContextPolicy(max_tokens=120_000),
     permissions=Permissions(
-        allow=[
-            "read_file",
-            "list_files",
-            "search_files",
-            Rule("run_command", {"command": "git *"}),
-        ],
-        ask=["write_file", "edit_file", "run_command"],
-        deny=[Rule("run_command", {"command": "*rm -rf*"})],
+        allow=[FileTool.READ, FileTool.LIST, FileTool.SEARCH],
+        ask=[FileTool.WRITE, FileTool.EDIT, ShellTool.RUN],
+        deny=[Rule(ShellTool.RUN, {"command": "*rm -rf*"})],
     ),
 )
 

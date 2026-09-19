@@ -126,24 +126,57 @@ once the tool is `run_command`: `git log` and `rm -rf /` are the same tool. `Per
 decides per call, from the arguments the model actually sent.
 
 ```python
+from deepharness import FileTool, Permissions, Rule, ShellTool
+
 permissions = Permissions(
     allow=[
-        "read_file",
-        "list_files",
-        "search_files",
-        Rule("run_command", {"command": "git log*"}),
+        FileTool.READ,
+        FileTool.LIST,
+        FileTool.SEARCH,
+        Rule(ShellTool.RUN, {"command": "git log*"}),
     ],
-    ask=["write_file", "edit_file", "run_command"],
-    deny=[Rule("run_command", {"command": "*rm -rf*"})],
+    ask=[FileTool.WRITE, FileTool.EDIT, ShellTool.RUN],
+    deny=[Rule(ShellTool.RUN, {"command": "*rm -rf*"})],
 )
 
 agent = Agent(llm, tools=[*file_tools("."), shell_tool(".")], permissions=permissions)
 ```
 
-A rule is a tool-name pattern, optionally narrowed to arguments; both sides are `fnmatch`
-globs. A bare string is the name pattern alone, so `allow=["read_file"]` and
-`allow=[Rule("read_file")]` mean the same thing. A rule that mentions an argument the call did
-not send does not match — an absent argument cannot be vouched for.
+### Naming a tool in a rule
+
+Three forms, and they mean the same thing:
+
+```python
+Permissions(ask=[write_file])  # the tool itself, when it is in scope
+Permissions(ask=[FileTool.WRITE])  # the built-in names, as a StrEnum
+Permissions(ask=["write_file"])  # a name, or a pattern like "write_*"
+```
+
+Prefer a tool or an enum member where you can: your editor renames them with the code, and a
+typo is a `NameError` instead of a rule that silently matches nothing. `FileTool` and
+`ShellTool` are `StrEnum`s, so a member *is* a string — usable as a `Rule`'s tool and matched
+by `fnmatch` with no conversion. Passing the tool itself reads the name it was registered
+under, so a tool renamed with `@tool(name=...)` still matches what the model sees.
+
+A string stays necessary for patterns (`"read_*"`) and for tools defined elsewhere, so it is
+never wrong — just unchecked.
+
+**A deny or ask rule naming a tool the agent does not have is refused at construction:**
+
+```python
+Agent(llm, tools=[shell_tool(".")], permissions=Permissions(deny=[Rule("run_comand")]))
+# ConfigurationError: permission rules deny or ask about unregistered tools: run_comand.
+# Registered tools: run_command. ...
+```
+
+That typo would otherwise match nothing, and a deny rule matching nothing silently allows
+exactly what it was written to stop. An **allow** rule is not checked, because one that matches
+nothing is inert — the call falls back to the tool's own `requires_approval` — so a policy
+shared between agents may allow tools only some of them have. Pattern rules are never checked;
+they are meant not to name one tool.
+
+A rule narrowed to arguments matches both sides as `fnmatch` globs, and a rule that mentions an
+argument the call did not send does not match — an absent argument cannot be vouched for.
 
 `deny` wins over `allow`, which wins over `ask`. That ordering is what makes a policy safe to
 widen: adding an `allow` can never quietly override a `deny` already written down.

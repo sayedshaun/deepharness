@@ -219,15 +219,15 @@ instead, which is a stronger guarantee than a rule because there is nothing left
 `Permissions` decides per call, from the arguments the model actually sent:
 
 ```python
-from deepharness import Agent, Permissions, Rule, shell_tool
+from deepharness import Agent, Permissions, Rule, ShellTool, shell_tool
 
 agent = Agent(
     llm,
     tools=[shell_tool(".")],
     permissions=Permissions(
-        allow=[Rule("run_command", {"command": "git log*"})],
-        ask=["run_command"],
-        deny=[Rule("run_command", {"command": "*rm -rf*"})],
+        allow=[Rule(ShellTool.RUN, {"command": "git log*"})],
+        ask=[ShellTool.RUN],
+        deny=[Rule(ShellTool.RUN, {"command": "*rm -rf*"})],
     ),
 )
 ```

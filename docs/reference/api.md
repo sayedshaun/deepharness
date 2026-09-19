@@ -300,18 +300,38 @@ two do not reach.
 ```python
 Permissions(
     *,
-    allow: Iterable[str | Rule] = (),
-    ask: Iterable[str | Rule] = (),
-    deny: Iterable[str | Rule] = (),
+    allow: Iterable[RuleLike] = (),
+    ask: Iterable[RuleLike] = (),
+    deny: Iterable[RuleLike] = (),
 )
 Rule(tool: str, arguments: dict[str, str] | None = None)
+
+RuleLike = str | Rule | Callable[..., Any]   # a name or pattern, a Rule, or the tool itself
 ```
 
 Decides per call what may run. `decide(name, arguments) -> "allow" | "ask" | "deny" | None`,
 where `None` means no rule applied and the tool's own `requires_approval` stands. `deny` beats
-`allow` beats `ask`. A `Rule` matches the tool name as an `fnmatch` glob, narrowed by argument
-patterns; a bare string is the name pattern alone. An argument a rule mentions but the call
-omits does not match.
+`allow` beats `ask`.
+
+A rule may be written three ways: the decorated tool itself (read for the name it is
+registered under), a `FileTool`/`ShellTool` member, or a string name or `fnmatch` pattern.
+`Rule` narrows by argument patterns, also `fnmatch`; an argument a rule mentions but the call
+omits does not match. `Rule.is_pattern` says whether a rule names a tool or a shape.
+
+`Permissions.rules` is every rule; `Permissions.gates` is the deny and ask rules — the ones
+whose silence would be unsafe. `Agent` refuses at construction when a gate names a tool it has
+not registered, since a misspelled deny rule matches nothing and allows what it was written to
+stop. Allow rules and pattern rules are not checked.
+
+### `FileTool` / `ShellTool`
+
+```python
+FileTool.READ | LIST | SEARCH | WRITE | EDIT  # "read_file", "list_files", ...
+ShellTool.RUN  # "run_command"
+```
+
+The names `file_tools()` and `shell_tool()` register, as `StrEnum`s — a member is a `str`, so
+it works anywhere a name or a `Rule`'s tool is expected.
 
 ## Graphs & execution
 
