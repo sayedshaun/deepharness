@@ -973,3 +973,27 @@ async def test_anthropic_leaves_the_prompt_uncached_by_default():
     await provider.agenerate([{"role": "system", "content": "be terse"}])
 
     assert client.post.await_args.kwargs["json"]["system"] == "be terse"
+
+
+async def test_openai_reasoning_becomes_a_thinking_block():
+    client = make_client(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "391",
+                        "reasoning_content": "17 x 23 = 391",
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
+    provider = OpenAI(model="gpt-test", api_key="x", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "17*23?"}])
+
+    assert result.content == "391"
+    assert result.thinking == "17 x 23 = 391"
+    assert [type(block).__name__ for block in result.blocks] == ["Thinking", "Text"]

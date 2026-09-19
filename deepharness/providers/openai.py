@@ -14,6 +14,7 @@ from deepharness.providers.base import (
     FinishReason,
     ReasoningLevel,
     TextDelta,
+    ThinkingDelta,
     ToolCall,
     token_usage,
     without_none,
@@ -37,6 +38,11 @@ from deepharness.providers.wire import (
 )
 
 _BASE_URL = "https://api.openai.com/v1"
+_REASONING_KEYS = ("reasoning_content", "reasoning")
+"""Where an OpenAI-compatible server puts the model's thinking. Not in OpenAI's
+own schema, which is why there are two spellings: llama.cpp and DeepSeek send
+reasoning_content, OpenRouter sends reasoning. Chat Completions has no field
+for it at all, so a server that reasons has to invent one."""
 _FINISH_REASONS: dict[str, FinishReason] = {
     "stop": "stop",
     "tool_calls": "stop",
@@ -260,12 +266,26 @@ def _from_openai_response(completion: OpenAIChatCompletion) -> CompletionRespons
         ToolCall(id=call.id, name=call.name, arguments=load_arguments(call.arguments))
         for call in completion.message.tool_calls
     ]
+    blocks: list[Thinking | Text] = []
+    if completion.message.reasoning:
+        blocks.append(Thinking(completion.message.reasoning))
+    if completion.message.content:
+        blocks.append(Text(completion.message.content))
     return CompletionResponse(
         content=completion.message.content or "",
         tool_calls=tool_calls,
         usage=token_usage(completion.usage),
         finish_reason=completion.finish_reason,
+        blocks=blocks,
     )
+
+
+def _reasoning(data: dict[str, Any]) -> str | None:
+    """The thinking a server sent, under whichever name it uses for it."""
+    for key in _REASONING_KEYS:
+        if value := data.get(key):
+            return str(value)
+    return None
 
 
 @dataclass(slots=True)
@@ -288,6 +308,7 @@ class OpenAIToolCall:
 class OpenAIMessage:
     content: str | None = None
     tool_calls: list[OpenAIToolCall] = field(default_factory=list)
+    reasoning: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> OpenAIMessage:
@@ -296,6 +317,7 @@ class OpenAIMessage:
             tool_calls=[
                 OpenAIToolCall.from_json(call) for call in data.get("tool_calls") or []
             ],
+            reasoning=_reasoning(data),
         )
 
 
@@ -333,15 +355,16 @@ class OpenAIStream:
     keyed by index because that is the only field present on every fragment.
     """
 
-    __slots__ = ("_calls", "_finish_reason", "_text", "_usage")
+    __slots__ = ("_calls", "_finish_reason", "_text", "_thinking", "_usage")
 
     def __init__(self) -> None:
         self._text: list[str] = []
+        self._thinking: list[str] = []
         self._calls: dict[int, dict[str, Any]] = {}
         self._usage: Usage | None = None
         self._finish_reason: FinishReason = "stop"
 
-    def feed(self, data: dict[str, Any]) -> TextDelta | None:
+    def feed(self, data: dict[str, Any]) -> TextDelta | ThinkingDelta | None:
         if usage := data.get("usage"):
             self._usage = Usage(
                 prompt_tokens=usage.get("prompt_tokens", 0),
@@ -365,6 +388,11 @@ class OpenAIStream:
             function = fragment.get("function") or {}
             call["name"] = function.get("name") or call["name"]
             call["arguments"] += function.get("arguments") or ""
+        # Reasoning first: a chunk carrying both is the model finishing a
+        # thought and starting to answer, and that is the order it happened in.
+        if (thinking := _reasoning(delta)) is not None:
+            self._thinking.append(thinking)
+            return ThinkingDelta(thinking)
         text = delta.get("content")
         if not text:
             return None
@@ -372,8 +400,14 @@ class OpenAIStream:
         return TextDelta(text)
 
     def response(self) -> CompletionResponse:
+        text = "".join(self._text)
+        blocks: list[Thinking | Text] = []
+        if self._thinking:
+            blocks.append(Thinking("".join(self._thinking)))
+        if text:
+            blocks.append(Text(text))
         return CompletionResponse(
-            content="".join(self._text),
+            content=text,
             tool_calls=[
                 ToolCall(
                     id=call["id"] or None,
@@ -385,4 +419,5 @@ class OpenAIStream:
             ],
             usage=token_usage(self._usage),
             finish_reason=self._finish_reason,
+            blocks=blocks,
         )

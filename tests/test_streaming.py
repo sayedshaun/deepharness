@@ -8,8 +8,10 @@ from deepharness.providers.base import (
     Completed,
     CompletionResponse,
     TextDelta,
+    ThinkingDelta,
     TokenUsage,
 )
+from deepharness.providers.content import Text, Thinking
 from deepharness.providers.gemini import GeminiStream
 from deepharness.providers.openai import OpenAIStream
 
@@ -485,3 +487,37 @@ def test_anthropic_stream_defaults_to_stop():
     )
 
     assert reader.response().finish_reason == "stop"
+
+
+def test_openai_stream_keeps_reasoning_apart_from_the_answer():
+    """llama.cpp and DeepSeek send thinking as reasoning_content deltas."""
+    reader = OpenAIStream()
+
+    deltas = feed_all(
+        reader,
+        [
+            {"choices": [{"delta": {"reasoning_content": "17 x 23 "}}]},
+            {"choices": [{"delta": {"reasoning_content": "is 391"}}]},
+            {"choices": [{"delta": {"content": "391"}}]},
+        ],
+    )
+    response = reader.response()
+
+    assert deltas == [
+        ThinkingDelta("17 x 23 "),
+        ThinkingDelta("is 391"),
+        TextDelta("391"),
+    ]
+    assert response.content == "391"
+    assert response.thinking == "17 x 23 is 391"
+    assert response.blocks == [Thinking("17 x 23 is 391"), Text("391")]
+
+
+def test_openai_stream_accepts_the_other_spelling_of_reasoning():
+    """OpenRouter calls the same field `reasoning`."""
+    reader = OpenAIStream()
+
+    assert reader.feed({"choices": [{"delta": {"reasoning": "hmm"}}]}) == ThinkingDelta(
+        "hmm"
+    )
+    assert reader.response().thinking == "hmm"
