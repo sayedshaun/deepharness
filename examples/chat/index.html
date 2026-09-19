@@ -155,6 +155,18 @@ function el(tag, className, text) {
 
 function scroll() { log.scrollTop = log.scrollHeight; }
 
+/** Show a script error in the transcript: a silent one looks like a hang. */
+function complain(what) {
+  const box = el("details", "event");
+  const summary = el("summary");
+  summary.append(el("span", "tag bad", "page error"));
+  box.append(summary, el("pre", null, String(what)));
+  (log.querySelector(".turn:last-child") ?? log).append(box);
+}
+window.addEventListener("error", (event) => complain(event.error ?? event.message));
+window.addEventListener("unhandledrejection", (event) => complain(event.reason));
+
+
 function turn(who, text) {
   const wrap = el("div", `turn ${who === "You" ? "you" : ""}`);
   wrap.append(el("div", "who", who), el("div", "bubble", text ?? ""));
@@ -254,9 +266,11 @@ function render(event, ctx) {
       holder.append(details([el("span", "tag bad", "error")], event.message));
       break;
     case "done":
+      // The gate goes up first: it is the thing you have to act on, and a
+      // cosmetic panel failing must never be able to strand a paused run.
+      if (event.paused.length) gate(event.paused, ctx);
       meta.textContent = `${ctx.model} · ${event.usage.total} tokens · stopped: ${event.stop_reason}`;
       showFiles(event.files);
-      if (event.paused.length) gate(event.paused, ctx);
       break;
   }
   scroll();
@@ -289,8 +303,9 @@ async function rule(url, callId, box, ctx) {
 function showFiles(files) {
   filesEl.replaceChildren();
   if (!files.length) {
-    filesEl.append(el("li", null, "")).firstChild;
-    filesEl.lastChild.append(el("span", null, "empty"));
+    const empty = el("li");
+    empty.append(el("span", null, "empty"));
+    filesEl.append(empty);
     return;
   }
   for (const file of files) {

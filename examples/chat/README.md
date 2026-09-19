@@ -47,6 +47,17 @@ Typing a new message while a gate is open counts as a refusal: the pending call
 is recorded as denied rather than dropped, so the model learns it and the
 transcript keeps a result for every call it asked for.
 
+## Tests
+
+```bash
+node examples/chat/ui_test.mjs
+```
+
+The page has no build step, so this stubs the DOM calls it makes and exercises the
+script directly — mostly guarding the path that matters: a paused run must put up
+its approval gate even when nothing else renders. A slip in the file panel once
+swallowed that gate, which looks exactly like a hung agent.
+
 ## Shape
 
 - `app.py` — the backend. One `Session` owns the agent, the workspace and the
