@@ -9,5 +9,9 @@ __pycache__/
 experiment.py
 test.py
 temp.py
+temp/
 site/
 dist/
+
+# The chat example's default durable workspace.
+scratch/

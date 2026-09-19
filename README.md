@@ -1,14 +1,15 @@
 <div align="center">
 <h1><img src="https://raw.githubusercontent.com/sayedshaun/deepharness/main/docs/assets/logo.png" width="220" alt="DeepHarness logo"><br>DeepHarness</h1>
 
-**Compose LLM agents into typed, concurrent workflows.**
+**A harness for LLM agents: workspace tools, permissions, and typed, concurrent workflows.**
 
-Build agent workflows as a graph of plain Python functions: parallel branches,
-typed state, and 15 LLM providers behind one interface.
+Build agents that read and change a codebase under an explicit permission policy, and compose
+them as a graph of plain Python functions: parallel branches, typed state, and 15 LLM providers
+behind one interface.
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![CI](https://github.com/sayedshaun/deepharness/actions/workflows/test.yml/badge.svg)](https://github.com/sayedshaun/deepharness/actions/workflows/test.yml) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
 
-[Install](#install) · [Quickstart](#quickstart) · [Graphs](#graphs) · [Providers](#providers) · [Docs](https://sayedshaun.github.io/deepharness/) · [Contributing](CONTRIBUTING.md)
+[Install](#install) · [Quickstart](#quickstart) · [Harness](#working-in-a-directory) · [Graphs](#graphs) · [Providers](#providers) · [Docs](https://sayedshaun.github.io/deepharness/) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -27,6 +28,9 @@ typed state, and 15 LLM providers behind one interface.
 - **One provider interface, a dozen vendors.** `OpenAI`, `Anthropic`, `Gemini`, and OpenAI-compatible
   gateways (`Groq`, `Together`, `Fireworks`, `DeepSeek`, `Mistral`, `Cerebras`, `OpenRouter`, `XAI`,
   `Ollama`, `LMStudio`, `VLLM`, `LlamaCpp`) all share the same `LLM` interface.
+- **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
+  per-call permission policy, a bounded context window, and progress events — the parts a run
+  needs once it is long enough to matter.
 
 ## Install
 
@@ -87,6 +91,90 @@ editor = Agent(
     tools=[researcher.as_tool(description="Look up facts on a topic.")],
 )
 ```
+
+## Working in a directory
+
+An agent that can read a codebase and change it, with the sharp edges gated:
+
+```python
+from deepharness import Agent
+from deepharness.agent import ContextPolicy
+from deepharness.tools import Permissions, Rule, ToolName, file_tools, shell_tool
+
+agent = Agent(
+    OpenAI(model="gpt-4o-mini"),
+    tools=[*file_tools("."), shell_tool(".")],
+    context=ContextPolicy(max_tokens=120_000),
+    permissions=Permissions(
+        allow=[ToolName.READ_FILE, ToolName.LIST_FILES, ToolName.SEARCH_FILES],
+        ask=[ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.RUN_COMMAND],
+        deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
+    ),
+)
+
+state = await agent.arun("What does the executor do? Add a docstring if it lacks one.")
+```
+
+A full walkthrough — approvals, context, sessions, and a sixty-line script that runs — is in
+[Building a coding agent](https://sayedshaun.github.io/deepharness/guide/coding-agent/).
+
+Every path is resolved inside the workspace root, `deny` beats `allow` beats `ask`, and a run
+that needs a human stops with `stop_reason == "paused"` — resumable later, in another process,
+because `save_session`/`load_session` round-trip the whole state, pending approval included.
+
+The rest of what a long run needs:
+
+- **Watch it work.** `astream_events()` emits `StepStarted`, `ToolStarted`, `ToolFinished` and
+  `ThinkingDelta` alongside the text, so a tool call is visible rather than dead air.
+- **Stay inside the window.** `ContextPolicy` truncates each tool result and prunes the view
+  the model is sent, while `state.messages` keeps everything.
+- **Wrap the model, not the loop.** [`Caching`, `RateLimited`, `Retrying` and
+  `Fallback`](#wrapping-a-provider) are themselves `LLM`s, so they work on the sync path, the
+  async path and streaming alike.
+- **More than text.** `Message.human([Text("what changed?"), Image.from_path("ui.png")])`
+  sends images and PDFs; a thinking model's reasoning arrives as `ThinkingDelta` and is
+  replayed where the vendor requires it.
+- **Tools from elsewhere.** An [MCP](https://modelcontextprotocol.io) server's tools join the
+  same toolbox via `MCPServer.stdio(...)` or `MCPServer.http(...)`.
+
+### Seeing it work
+
+`examples/chat` is a static page plus a small FastAPI backend that drives a real agent against
+a real model — tool calls, a permission gate you rule on, progress events, and a workspace
+panel showing what it wrote:
+
+```bash
+pip install -e ".[examples]"
+make chat                       # then open http://127.0.0.1:8765
+```
+
+### Wrapping a provider
+
+Caching, rate limiting, retrying and falling back are all "do something around a model call,
+then delegate" — so each one is just another `LLM`. They compose at the call site, where the
+order is visible:
+
+```python
+from deepharness import Anthropic, OpenAI
+from deepharness.providers import Caching, Fallback, RateLimited
+
+llm = Caching(
+    RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)
+)
+
+agent = Agent(llm, tools=file_tools("."))
+```
+
+| Wrapper | What it does |
+| --- | --- |
+| `Fallback(primary, *others)` | Moves to the next provider when one raises `ProviderError`. A stream that fails *before* its first event falls back; one that fails partway does not, since those deltas already reached you. |
+| `Caching(llm, maxsize=256, ttl=None)` | Serves a repeated request from an LRU. Put it in front of a deterministic setup only. |
+| `RateLimited(llm, rps=…, burst=…)` | Token bucket. Each caller reserves a slot and waits its own turn, so simultaneous requests leave in order at the configured rate. |
+| `Retrying(llm, attempts=2)` | Asks again when a turn comes back with no text *and* no tool call — the transport already retries 429s and 5xx. |
+
+Because these are `LLM` implementations rather than a middleware stack, one wrapper covers
+`run()`, `arun()` and streaming at once — and `Fallback(on=(ProviderError,))` deliberately does
+not catch bare `Exception`, so a bug in your own code never reads as a flaky vendor.
 
 ## Graphs
 

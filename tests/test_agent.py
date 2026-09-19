@@ -740,3 +740,21 @@ async def test_a_complete_answer_is_still_an_answer():
 
     assert result.stop_reason == "answer"
     assert result.answered is True
+
+
+def test_cache_counts_accumulate_across_calls():
+    """An agent's running total has to carry the cache split, not drop it."""
+    usage = TokenUsage(10, 2, 12, cached_tokens=8, cache_write_tokens=1) + TokenUsage(
+        20, 3, 23, cached_tokens=15, cache_write_tokens=0
+    )
+
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (
+        30,
+        5,
+        35,
+    )
+    assert (usage.cached_tokens, usage.cache_write_tokens) == (23, 1)
+
+
+def test_usage_without_cache_counts_still_compares_equal():
+    assert TokenUsage(3, 4, 7) == TokenUsage(3, 4, 7, 0, 0)

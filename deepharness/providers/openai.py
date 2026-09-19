@@ -13,9 +13,19 @@ from deepharness.providers.base import (
     CompletionResponse,
     FinishReason,
     ReasoningLevel,
+    TextDelta,
+    ThinkingDelta,
     ToolCall,
     token_usage,
     without_none,
+)
+from deepharness.providers.content import (
+    Document,
+    Image,
+    Text,
+    Thinking,
+    parse,
+    text_of,
 )
 from deepharness.providers.rest import RestCompletions, RestLLM
 from deepharness.providers.wire import (
@@ -28,6 +38,11 @@ from deepharness.providers.wire import (
 )
 
 _BASE_URL = "https://api.openai.com/v1"
+_REASONING_KEYS = ("reasoning_content", "reasoning")
+"""Where an OpenAI-compatible server puts the model's thinking. Not in OpenAI's
+own schema, which is why there are two spellings: llama.cpp and DeepSeek send
+reasoning_content, OpenRouter sends reasoning. Chat Completions has no field
+for it at all, so a server that reasons has to invent one."""
 _FINISH_REASONS: dict[str, FinishReason] = {
     "stop": "stop",
     "tool_calls": "stop",
@@ -95,6 +110,7 @@ class OpenAI(RestLLM):
         stream_usage: bool = True,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
+        max_concurrency: int | None = None,
     ):
         if api_key is None and self.env_key:
             api_key = os.environ.get(self.env_key)
@@ -105,7 +121,11 @@ class OpenAI(RestLLM):
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         resolved_base_url = base_url or self.default_base_url
         self._http = HTTPClient(
-            resolved_base_url, headers=headers, client=client, sync_client=sync_client
+            resolved_base_url,
+            headers=headers,
+            client=client,
+            sync_client=sync_client,
+            max_concurrency=max_concurrency,
         )
         self._rest = RestCompletions(self._http, self)
         self._model = model
@@ -163,7 +183,9 @@ def _to_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             converted.append(
                 {
                     "role": "assistant",
-                    "content": message.get("content") or None,
+                    # An assistant turn takes text only here, and its thinking
+                    # is not replayable through Chat Completions anyway.
+                    "content": text_of(message.get("content")) or None,
                     "tool_calls": [
                         {
                             "id": call["id"],
@@ -182,13 +204,50 @@ def _to_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 {
                     "role": "tool",
                     "tool_call_id": message.get("tool_call_id", ""),
-                    "content": message["content"],
+                    "content": text_of(message.get("content")),
                 }
             )
         else:
-            converted.append(dict(message))
+            entry = dict(message)
+            entry["content"] = _to_openai_content(message.get("content"))
+            converted.append(entry)
 
     return converted
+
+
+def _to_openai_content(content: Any) -> str | list[dict[str, Any]]:
+    """One message's content as OpenAI parts, or a plain string if that is all.
+
+    The string form is kept for plain text so an ordinary conversation's payload
+    is unchanged; anything else becomes the multipart form, which is the only
+    one that can carry an image or a file.
+    """
+    blocks = parse(content)
+    if all(isinstance(block, Text) for block in blocks):
+        return text_of(blocks)
+
+    parts: list[dict[str, Any]] = []
+    for block in blocks:
+        match block:
+            case Text():
+                parts.append({"type": "text", "text": block.text})
+            case Image():
+                parts.append(
+                    {"type": "image_url", "image_url": {"url": block.data_url}}
+                )
+            case Document():
+                parts.append(
+                    {
+                        "type": "file",
+                        "file": {
+                            "filename": block.name or "document",
+                            "file_data": block.data_url,
+                        },
+                    }
+                )
+            case Thinking():
+                continue
+    return parts
 
 
 def _to_openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
@@ -207,12 +266,26 @@ def _from_openai_response(completion: OpenAIChatCompletion) -> CompletionRespons
         ToolCall(id=call.id, name=call.name, arguments=load_arguments(call.arguments))
         for call in completion.message.tool_calls
     ]
+    blocks: list[Thinking | Text] = []
+    if completion.message.reasoning:
+        blocks.append(Thinking(completion.message.reasoning))
+    if completion.message.content:
+        blocks.append(Text(completion.message.content))
     return CompletionResponse(
         content=completion.message.content or "",
         tool_calls=tool_calls,
         usage=token_usage(completion.usage),
         finish_reason=completion.finish_reason,
+        blocks=blocks,
     )
+
+
+def _reasoning(data: dict[str, Any]) -> str | None:
+    """The thinking a server sent, under whichever name it uses for it."""
+    for key in _REASONING_KEYS:
+        if value := data.get(key):
+            return str(value)
+    return None
 
 
 @dataclass(slots=True)
@@ -235,6 +308,7 @@ class OpenAIToolCall:
 class OpenAIMessage:
     content: str | None = None
     tool_calls: list[OpenAIToolCall] = field(default_factory=list)
+    reasoning: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> OpenAIMessage:
@@ -243,6 +317,7 @@ class OpenAIMessage:
             tool_calls=[
                 OpenAIToolCall.from_json(call) for call in data.get("tool_calls") or []
             ],
+            reasoning=_reasoning(data),
         )
 
 
@@ -268,6 +343,7 @@ class OpenAIChatCompletion:
                 prompt="prompt_tokens",
                 completion="completion_tokens",
                 total="total_tokens",
+                cached="prompt_tokens_details.cached_tokens",
             ),
         )
 
@@ -280,20 +356,23 @@ class OpenAIStream:
     keyed by index because that is the only field present on every fragment.
     """
 
-    __slots__ = ("_calls", "_finish_reason", "_text", "_usage")
+    __slots__ = ("_calls", "_finish_reason", "_text", "_thinking", "_usage")
 
     def __init__(self) -> None:
         self._text: list[str] = []
+        self._thinking: list[str] = []
         self._calls: dict[int, dict[str, Any]] = {}
         self._usage: Usage | None = None
         self._finish_reason: FinishReason = "stop"
 
-    def feed(self, data: dict[str, Any]) -> str | None:
+    def feed(self, data: dict[str, Any]) -> TextDelta | ThinkingDelta | None:
         if usage := data.get("usage"):
-            self._usage = Usage(
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
+            self._usage = usage_from(
+                usage,
+                prompt="prompt_tokens",
+                completion="completion_tokens",
+                total="total_tokens",
+                cached="prompt_tokens_details.cached_tokens",
             )
         choices = data.get("choices") or []
         if not choices:
@@ -312,14 +391,26 @@ class OpenAIStream:
             function = fragment.get("function") or {}
             call["name"] = function.get("name") or call["name"]
             call["arguments"] += function.get("arguments") or ""
+        # Reasoning first: a chunk carrying both is the model finishing a
+        # thought and starting to answer, and that is the order it happened in.
+        if (thinking := _reasoning(delta)) is not None:
+            self._thinking.append(thinking)
+            return ThinkingDelta(thinking)
         text = delta.get("content")
-        if text:
-            self._text.append(text)
-        return text
+        if not text:
+            return None
+        self._text.append(text)
+        return TextDelta(text)
 
     def response(self) -> CompletionResponse:
+        text = "".join(self._text)
+        blocks: list[Thinking | Text] = []
+        if self._thinking:
+            blocks.append(Thinking("".join(self._thinking)))
+        if text:
+            blocks.append(Text(text))
         return CompletionResponse(
-            content="".join(self._text),
+            content=text,
             tool_calls=[
                 ToolCall(
                     id=call["id"] or None,
@@ -331,4 +422,5 @@ class OpenAIStream:
             ],
             usage=token_usage(self._usage),
             finish_reason=self._finish_reason,
+            blocks=blocks,
         )

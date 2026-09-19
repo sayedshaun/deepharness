@@ -43,15 +43,25 @@ class Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 def usage_from(
-    usage: Any, *, prompt: str, completion: str, total: str | None = None
+    usage: Any,
+    *,
+    prompt: str,
+    completion: str,
+    total: str | None = None,
+    cached: str | None = None,
+    cache_write: str | None = None,
 ) -> Usage | None:
     """One vendor's token counts under its own key names, or None if it sent none.
 
     total is optional because Anthropic reports only the two halves; summing them
-    here keeps that quirk out of the response types.
+    here keeps that quirk out of the response types. cached and cache_write are
+    optional for the same reason - a vendor that does not cache reports neither,
+    and a dotted name reaches into the nested object OpenAI puts its counts in.
     """
     if not usage:
         return None
@@ -63,7 +73,25 @@ def usage_from(
         total_tokens=usage.get(total, 0)
         if total
         else prompt_tokens + completion_tokens,
+        cached_tokens=_dig(usage, cached),
+        cache_write_tokens=_dig(usage, cache_write),
     )
+
+
+def _dig(usage: dict[str, Any], path: str | None) -> int:
+    """A count under a dotted path, or 0 - vendors nest these differently.
+
+    OpenAI puts cache reads in prompt_tokens_details.cached_tokens; Anthropic
+    and Gemini keep theirs at the top level.
+    """
+    if not path:
+        return 0
+    value: Any = usage
+    for key in path.split("."):
+        if not isinstance(value, dict):
+            return 0
+        value = value.get(key)
+    return value if isinstance(value, int) else 0
 
 
 def load_arguments(raw: str) -> dict[str, Any]:

@@ -6,16 +6,19 @@ from typing import Any
 
 import httpx
 
-from ..errors import ProviderError
+from ..errors import ConfigurationError, ProviderError
 from ..http import HTTPClient
 from .base import (
     CompletionResponse,
     FinishReason,
     ReasoningLevel,
+    TextDelta,
+    ThinkingDelta,
     ToolCall,
     token_usage,
     without_none,
 )
+from .content import Document, Image, Text, Thinking, merge, parse
 from .rest import RestCompletions, RestLLM
 from .wire import Usage, clip, finish_reason_from, usage_from
 
@@ -63,6 +66,7 @@ class Gemini(RestLLM):
         reasoning_effort: ReasoningLevel | None = None,
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
+        max_concurrency: int | None = None,
     ):
         if api_key is None:
             api_key = next(
@@ -76,6 +80,7 @@ class Gemini(RestLLM):
             headers={"x-goog-api-key": api_key or ""},
             client=client,
             sync_client=sync_client,
+            max_concurrency=max_concurrency,
         )
         self._rest = RestCompletions(self._http, self)
         self._model = model
@@ -149,8 +154,38 @@ def _to_gemini_content(message: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "role": _ROLE_MAP.get(role, "user"),
-        "parts": [{"text": message["content"]}],
+        "parts": _to_gemini_parts(message.get("content")),
     }
+
+
+def _to_gemini_parts(content: Any) -> list[dict[str, Any]]:
+    """One message's content as Gemini parts.
+
+    Thinking is not replayed: Gemini does not require its own reasoning back,
+    and a thought part sent as plain text would read as the model's own answer.
+    """
+    parts: list[dict[str, Any]] = []
+    for block in parse(content):
+        match block:
+            case Text():
+                parts.append({"text": block.text})
+            case Image() | Document() if block.data:
+                parts.append(
+                    {
+                        "inline_data": {
+                            "mime_type": block.media_type,
+                            "data": block.data,
+                        }
+                    }
+                )
+            case Image():
+                raise ConfigurationError(
+                    "Gemini takes inline image data, not a URL; use "
+                    "Image.from_path() or upload the file first"
+                )
+            case Thinking():
+                continue
+    return parts or [{"text": ""}]
 
 
 def _to_gemini_tool(tool: dict[str, Any]) -> dict[str, Any]:
@@ -168,18 +203,25 @@ def _to_gemini_tool(tool: dict[str, Any]) -> dict[str, Any]:
 
 
 def _from_gemini_response(response: GeminiResponse) -> CompletionResponse:
-    text = "".join(part.text for part in response.parts if part.text)
     tool_calls = [
         ToolCall(name=part.name, arguments=dict(part.args))
         for part in response.parts
         if part.name
     ]
     return CompletionResponse(
-        content=text,
+        blocks=_blocks(response.parts),
         tool_calls=tool_calls,
         usage=token_usage(response.usage),
         finish_reason=response.finish_reason or "stop",
     )
+
+
+def _blocks(parts: list[GeminiPart]) -> list[Text | Thinking]:
+    return [
+        Thinking(part.text) if part.thought else Text(part.text)
+        for part in parts
+        if part.text
+    ]
 
 
 class GeminiStream:
@@ -190,15 +232,15 @@ class GeminiStream:
     reassemble, only to collect.
     """
 
-    __slots__ = ("_calls", "_finish_reason", "_text", "_usage")
+    __slots__ = ("_blocks", "_calls", "_finish_reason", "_usage")
 
     def __init__(self) -> None:
-        self._text: list[str] = []
+        self._blocks: list[Text | Thinking] = []
         self._calls: list[ToolCall] = []
         self._usage: Usage | None = None
         self._finish_reason: FinishReason = "stop"
 
-    def feed(self, data: dict[str, Any]) -> str | None:
+    def feed(self, data: dict[str, Any]) -> TextDelta | ThinkingDelta | None:
         chunk = GeminiResponse.from_json(data)
         if chunk.usage is not None:
             self._usage = chunk.usage
@@ -209,14 +251,19 @@ class GeminiStream:
             for part in chunk.parts
             if part.name
         )
-        text = "".join(part.text for part in chunk.parts if part.text)
-        if text:
-            self._text.append(text)
-        return text or None
+        blocks = _blocks(chunk.parts)
+        self._blocks.extend(blocks)
+        # One chunk mixing thought and answer is possible but rare; reporting
+        # the reasoning first matches the order Gemini sends the parts in.
+        thinking = "".join(b.text for b in blocks if isinstance(b, Thinking))
+        if thinking:
+            return ThinkingDelta(thinking)
+        text = "".join(b.text for b in blocks if isinstance(b, Text))
+        return TextDelta(text) if text else None
 
     def response(self) -> CompletionResponse:
         return CompletionResponse(
-            content="".join(self._text),
+            blocks=merge(self._blocks),
             tool_calls=list(self._calls),
             usage=token_usage(self._usage),
             finish_reason=self._finish_reason,
@@ -228,6 +275,9 @@ class GeminiPart:
     text: str | None = None
     name: str | None = None
     args: dict[str, Any] = field(default_factory=dict)
+    thought: bool = False
+    """Gemini marks a reasoning part with `thought: true` and sends it in the
+    same parts list as the answer, so without this the two run together."""
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> GeminiPart:
@@ -236,6 +286,7 @@ class GeminiPart:
             text=data.get("text"),
             name=call.get("name"),
             args=call.get("args") or {},
+            thought=bool(data.get("thought")),
         )
 
 
@@ -277,6 +328,7 @@ def _usage(metadata: dict[str, Any] | None) -> Usage | None:
         prompt="promptTokenCount",
         completion="candidatesTokenCount",
         total="totalTokenCount",
+        cached="cachedContentTokenCount",
     )
     if usage is not None and metadata:
         usage.completion_tokens += metadata.get("thoughtsTokenCount", 0)

@@ -1,44 +1,40 @@
+"""A harness for LLM agents: workspace tools, permissions, and typed workflows.
+
+What a first program needs is here; everything else lives in the layer it
+belongs to, so a name's import path says which part of the library owns it:
+
+    deepharness.agent      the think/act loop's own types - context policy,
+                           progress events, sessions
+    deepharness.graph      node specs and the reducers for merging branches
+    deepharness.providers  wire types, content blocks, and the wrappers that
+                           cache, retry, rate limit or fall back
+    deepharness.tools      writing a tool, the workspace tools, permissions,
+                           MCP servers, web search
+    deepharness.prebuilt   ready-made workflows such as DeepResearch
+    deepharness.errors     every exception but the base class
+
+Keeping the root small is deliberate: everything exported here is a promise
+about stability, and a flat namespace of everything stops being discoverable
+somewhere well before it is complete.
+"""
+
 from deepharness.agent import (
-    FINAL_TOOL,
     Agent,
     AgentState,
     Budget,
     Ctx,
     Finished,
     Message,
-    PendingHumanInput,
-    StopReason,
-    TokenBudgetExceeded,
     Toolbox,
-    ToolSpec,
-    load_session,
-    save_session,
     tool,
 )
-from deepharness.errors import (
-    ConfigurationError,
-    DeepHarnessError,
-    HumanInputRequired,
-    OutputValidationError,
-    ProviderError,
-    ToolNotFoundError,
-)
-from deepharness.graph import (
-    ConcurrentUpdateError,
-    ExecutionError,
-    Executor,
-    Graph,
-    NodeSpec,
-    StepLimitExceeded,
-    concat,
-    merge_dicts,
-)
+from deepharness.errors import DeepHarnessError
+from deepharness.graph import Executor, Graph
 from deepharness.providers import (
     VLLM,
     XAI,
     Anthropic,
     Cerebras,
-    Completed,
     DeepSeek,
     Fireworks,
     Gemini,
@@ -51,12 +47,9 @@ from deepharness.providers import (
     OpenRouter,
     TextDelta,
     Together,
-    TokenUsage,
 )
-from deepharness.tools import SearchResult, TavilySearch
 
 __all__ = [
-    "FINAL_TOOL",
     "VLLM",
     "XAI",
     "Agent",
@@ -64,45 +57,24 @@ __all__ = [
     "Anthropic",
     "Budget",
     "Cerebras",
-    "Completed",
-    "ConcurrentUpdateError",
-    "ConfigurationError",
     "Ctx",
     "DeepHarnessError",
     "DeepSeek",
-    "ExecutionError",
     "Executor",
     "Finished",
     "Fireworks",
     "Gemini",
     "Graph",
     "Groq",
-    "HumanInputRequired",
     "LMStudio",
     "LlamaCpp",
     "Message",
     "Mistral",
-    "NodeSpec",
     "Ollama",
     "OpenAI",
     "OpenRouter",
-    "OutputValidationError",
-    "PendingHumanInput",
-    "ProviderError",
-    "SearchResult",
-    "StepLimitExceeded",
-    "StopReason",
-    "TavilySearch",
     "TextDelta",
     "Together",
-    "TokenBudgetExceeded",
-    "TokenUsage",
-    "ToolNotFoundError",
-    "ToolSpec",
     "Toolbox",
-    "concat",
-    "load_session",
-    "merge_dicts",
-    "save_session",
     "tool",
 ]

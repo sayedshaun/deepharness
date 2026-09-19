@@ -8,16 +8,21 @@ from typing import Any
 from deepharness.providers.base import (
     LLM,
     TextDelta,
+    ThinkingDelta,
     TokenUsage,
 )
 
 from ..errors import (
     ConfigurationError,
+    HumanInputRequired,
     OutputValidationError,
     TokenBudgetExceeded,
 )
+from ..tools.permissions import Permissions
 from ..tools.toolbox import Ctx, Toolbox, ToolSpec
 from . import turn
+from .context import ContextPolicy
+from .events import StepStarted, ToolFinished, ToolStarted
 from .output import FINAL_TOOL, coerce, final_tool_schema, find_final
 from .state import (
     AgentState,
@@ -28,8 +33,15 @@ from .state import (
     StopReason,
 )
 
-AgentEvent = TextDelta | Finished
-"""What streaming a run emits: prose as it arrives, then the final state."""
+AgentEvent = (
+    TextDelta | ThinkingDelta | StepStarted | ToolStarted | ToolFinished | Finished
+)
+"""What streaming a run emits: the run's progress, then the final state.
+
+Prose arrives as TextDelta, reasoning as ThinkingDelta, and the rest is what the
+loop is doing between those - a step beginning, a tool starting and finishing -
+ending with the one Finished that carries the AgentState. A caller interested in
+text alone wants astream() and never sees these."""
 
 
 @dataclass(slots=True)
@@ -66,6 +78,14 @@ class Agent:
     * total_usage accumulates across every model call this instance makes, not
       per run, and Budget(tokens=...) turns crossing it into TokenBudgetExceeded
       with the partial state attached.
+    * Permissions decides per call what may run, what needs a human and what
+      is refused outright; a call no rule matches falls back to the tool's own
+      requires_approval flag. A deny or ask rule naming a tool that is not
+      registered is refused at construction, because a misspelled one matches
+      nothing and fails open.
+    * ContextPolicy bounds what the transcript costs: each tool result is
+      truncated as it is recorded, and the model is sent a pruned view while
+      state.messages keeps every message.
     * Every public entry point - arun, run, astream, stream - is the same loop;
       only the I/O differs. See astream_events for the one async driver.
 
@@ -77,10 +97,12 @@ class Agent:
 
     __slots__ = (
         "_budget",
+        "_context",
         "_final_schema",
         "_model",
         "_name",
         "_output",
+        "_permissions",
         "_system",
         "_tools",
         "_total_usage",
@@ -94,6 +116,8 @@ class Agent:
         system: str | None = None,
         name: str = "agent",
         budget: Budget | None = None,
+        context: ContextPolicy | None = None,
+        permissions: Permissions | None = None,
         output: type | None = None,
     ):
         self._model = model
@@ -101,6 +125,9 @@ class Agent:
         self._system = system
         self._name = name
         self._budget = budget or Budget()
+        self._context = context or ContextPolicy()
+        self._permissions = permissions
+        _check_rules(self._tools, permissions)
         self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
         self._total_usage = TokenUsage(0, 0, 0)
@@ -127,6 +154,15 @@ class Agent:
     @property
     def budget(self) -> Budget:
         return self._budget
+
+    @property
+    def context(self) -> ContextPolicy:
+        return self._context
+
+    @property
+    def permissions(self) -> Permissions | None:
+        """What the run may do without asking; None leaves it to each tool."""
+        return self._permissions
 
     @property
     def output(self) -> type | None:
@@ -228,7 +264,9 @@ class Agent:
         approved = turn.settle(state, messages, self._name)
         if approved:
             results = yield _Dispatch(approved)
-            turn.record_results(messages, approved, results)
+            turn.record_results(
+                messages, approved, results, limit=self._context.tool_result_chars
+            )
 
         for _ in range(self._budget.steps):
             response = yield _Ask(messages)
@@ -251,7 +289,9 @@ class Agent:
                 return self._result(state, messages, answer, "answer")
 
             if not response.tool_calls:
-                messages.append(Message.ai(response.content).to_dict())
+                messages.append(
+                    Message.ai(response.blocks or response.content).to_dict()
+                )
                 if self._final_schema is not None:
                     # output= was asked for, so plain prose is not an answer yet.
                     messages.append(
@@ -273,17 +313,25 @@ class Agent:
 
             turn.record_request(messages, response)
             wanted = [call for call in response.tool_calls if call.name != FINAL_TOOL]
-            gated = turn.gated(self._tools, wanted)
-            if gated:
+            ruling = turn.rule(self._tools, wanted, self._permissions)
+            turn.record_unrun(messages, ruling.denied, turn.DENIED)
+            if ruling.paused:
                 # Nothing in this turn runs until the human rules on the gated
                 # call: letting the rest run first would half-apply a turn the
                 # human may be about to refuse.
-                return self._result(state, messages, "", "paused", paused=gated)
+                turn.record_unrun(messages, ruling.allowed, turn.NOT_RUN)
+                return self._result(state, messages, "", "paused", paused=ruling.paused)
 
-            results = yield _Dispatch(wanted)
-            pending = turn.record_results(messages, wanted, results)
-            if pending:
-                return self._result(state, messages, "", "paused", paused=pending)
+            if ruling.allowed:
+                results = yield _Dispatch(ruling.allowed)
+                pending = turn.record_results(
+                    messages,
+                    ruling.allowed,
+                    results,
+                    limit=self._context.tool_result_chars,
+                )
+                if pending:
+                    return self._result(state, messages, "", "paused", paused=pending)
 
         return self._result(state, messages, "", "step_budget")
 
@@ -335,24 +383,32 @@ class Agent:
         turns = self._turns(state, turn.prepare(state, self._system))
         schemas = self._schemas()
         outcome: Any = None
+        step = 0
         try:
             while True:
                 request = turns.send(outcome)
                 if isinstance(request, _Ask):
+                    step += 1
+                    yield StepStarted(step)
                     async for event in self._model.astream_events(
-                        request.messages, tools=schemas
+                        self._context.prune(request.messages), tools=schemas
                     ):
-                        if isinstance(event, TextDelta):
+                        if isinstance(event, TextDelta | ThinkingDelta):
                             yield event
                         else:
                             outcome = event.response
                 else:
+                    for call in request.calls:
+                        yield ToolStarted(call.name, call.arguments, call.id)
                     outcome = await asyncio.gather(
                         *(
                             self._call_tool(call.name, call.arguments, ctx)
                             for call in request.calls
                         )
                     )
+                    for call, result in zip(request.calls, outcome, strict=True):
+                        if (finished := self._finished(call, result)) is not None:
+                            yield finished
         except StopIteration as done:
             yield Finished(done.value)
 
@@ -369,22 +425,29 @@ class Agent:
         turns = self._turns(state, turn.prepare(state, self._system))
         schemas = self._schemas()
         outcome: Any = None
+        step = 0
         try:
             while True:
                 request = turns.send(outcome)
                 if isinstance(request, _Ask):
+                    step += 1
+                    yield StepStarted(step)
                     for event in self._model.stream_events(
-                        request.messages, tools=schemas
+                        self._context.prune(request.messages), tools=schemas
                     ):
-                        if isinstance(event, TextDelta):
+                        if isinstance(event, TextDelta | ThinkingDelta):
                             yield event
                         else:
                             outcome = event.response
                 else:
-                    outcome = [
-                        self._call_tool_sync(call.name, call.arguments, ctx)
-                        for call in request.calls
-                    ]
+                    results: list[Any] = []
+                    for call in request.calls:
+                        yield ToolStarted(call.name, call.arguments, call.id)
+                        result = self._call_tool_sync(call.name, call.arguments, ctx)
+                        results.append(result)
+                        if (finished := self._finished(call, result)) is not None:
+                            yield finished
+                    outcome = results
         except StopIteration as done:
             yield Finished(done.value)
 
@@ -402,6 +465,18 @@ class Agent:
             if isinstance(event, TextDelta):
                 yield event.text
 
+    def _finished(self, call: Any, result: Any) -> ToolFinished | None:
+        """How one dispatched call ended, or None if it is not over.
+
+        A tool that asked a human has produced no result yet - the run is about
+        to pause on it - so it gets no event rather than one reporting its own
+        question as an error.
+        """
+        if isinstance(result, HumanInputRequired):
+            return None
+        content, failed = turn.render(result, limit=self._context.tool_result_chars)
+        return ToolFinished(call.name, content, failed, call.id)
+
     async def _call_tool(self, name: str, arguments: dict[str, Any], ctx: Ctx) -> Any:
         try:
             return await self._tools.call(name, ctx=ctx, **arguments)
@@ -417,3 +492,32 @@ class Agent:
             raise
         except Exception as exc:  # noqa: BLE001 - see turn.record_results
             return exc
+
+
+def _check_rules(tools: Toolbox, permissions: Permissions | None) -> None:
+    """Refuse a gating rule that names a tool this agent does not have.
+
+    A misspelled rule matches no call at all, which for a deny rule means the
+    thing it was written to forbid runs. Silence is the worst outcome here, so
+    it is an error at construction rather than a surprise at runtime.
+
+    Only the gating rules are checked - see Permissions.gates - and pattern
+    rules are left alone, since they are meant not to name one tool.
+    """
+    if permissions is None or not tools:
+        return
+    unknown = sorted(
+        {
+            rule.tool
+            for rule in permissions.gates
+            if not rule.is_pattern and rule.tool not in tools
+        }
+    )
+    if unknown:
+        known = ", ".join(sorted(tools.names())) or "none"
+        raise ConfigurationError(
+            f"permission rules deny or ask about unregistered tools: "
+            f"{', '.join(unknown)}. Registered tools: {known}. A rule that "
+            f"names no tool matches no call, so it would silently allow what it "
+            f"was written to stop"
+        )

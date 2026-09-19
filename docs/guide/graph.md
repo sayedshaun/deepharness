@@ -78,7 +78,7 @@ Declare a reducer in the field's `metadata`, so the merge policy lives with the 
 ```python
 from dataclasses import dataclass, field
 
-from deepharness import concat
+from deepharness.graph import concat
 
 
 @dataclass
@@ -125,7 +125,7 @@ it raises `StepLimitExceeded`, with the partial state on `.state` so a runaway l
 inspectable:
 
 ```python
-from deepharness import StepLimitExceeded
+from deepharness.graph import StepLimitExceeded
 
 try:
     result = await executor.run(max_steps=20)
@@ -214,7 +214,7 @@ A node that raises is wrapped in `ExecutionError`, carrying the node name and th
 exception:
 
 ```python
-from deepharness import ExecutionError
+from deepharness.graph import ExecutionError
 
 try:
     await executor.run()

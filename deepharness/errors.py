@@ -5,6 +5,21 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .providers.base import TokenUsage
 
+__all__ = [
+    "ConcurrentUpdateError",
+    "ConfigurationError",
+    "DeepHarnessError",
+    "ExecutionError",
+    "HumanInputRequired",
+    "MCPError",
+    "OutputValidationError",
+    "OutsideWorkspace",
+    "ProviderError",
+    "StepLimitExceeded",
+    "TokenBudgetExceeded",
+    "ToolNotFoundError",
+]
+
 
 class DeepHarnessError(Exception):
     """Base class for all errors raised by deepharness."""
@@ -22,11 +37,33 @@ class ToolNotFoundError(DeepHarnessError, KeyError):
     """Raised when a Toolbox is asked for a tool that isn't registered."""
 
 
+class OutsideWorkspace(DeepHarnessError, ValueError):
+    """Raised when a tool is asked for a path outside its workspace root.
+
+    Reaches the model as that call's result, since a model that asked for the
+    wrong path can correct itself - but the read never happens.
+    """
+
+    def __init__(self, path: str, root: Any):
+        self.path = path
+        self.root = root
+        super().__init__(f"path {path!r} is outside the workspace root {root}")
+
+
 class OutputValidationError(DeepHarnessError):
     """Raised when a model's structured answer does not fit the output= shape.
 
     Handed back to the model as the failing call's result rather than ending
     the run, so it can correct the fields and answer again.
+    """
+
+
+class MCPError(DeepHarnessError):
+    """Raised when an MCP server refuses a call, fails, or answers unusably.
+
+    A tool call that fails on the server reaches the model as that call's
+    result, same as a local tool raising - the run continues, and the model gets
+    a turn to try something else.
     """
 
 

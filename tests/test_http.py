@@ -1,10 +1,15 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
-from deepharness.errors import ProviderError
+from deepharness.errors import ConfigurationError, ProviderError
 from deepharness.http import DEFAULT_TIMEOUT, HTTPClient
+
+_real_sleep = asyncio.sleep
+"""Bound before the autouse fixture replaces asyncio.sleep: a test about
+requests overlapping needs the event loop to actually yield."""
 
 
 @pytest.fixture(autouse=True)
@@ -164,3 +169,63 @@ async def test_aclose_releases_both_pools():
 
     client.aclose.assert_awaited_once()
     sync_client.close.assert_called_once()
+
+
+def _peak_counter():
+    """A transport that records how many requests were ever in flight at once."""
+    state = {"now": 0, "peak": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        state["now"] += 1
+        state["peak"] = max(state["peak"], state["now"])
+        await _real_sleep(0.01)
+        state["now"] -= 1
+        return httpx.Response(200, json={"ok": True})
+
+    return state, httpx.MockTransport(handler)
+
+
+def _client(transport, **kwargs):
+    return HTTPClient(
+        "http://test",
+        client=httpx.AsyncClient(base_url="http://test", transport=transport),
+        **kwargs,
+    )
+
+
+async def test_a_concurrency_cap_holds_requests_in_flight():
+    """A fan-out of agents must not open more sockets than the cap allows."""
+    state, transport = _peak_counter()
+    client = _client(transport, max_concurrency=2)
+
+    await asyncio.gather(*(client.post("/x") for _ in range(6)))
+
+    assert state["peak"] == 2
+
+
+async def test_requests_are_uncapped_by_default():
+    state, transport = _peak_counter()
+    client = _client(transport)
+
+    await asyncio.gather(*(client.post("/x") for _ in range(4)))
+
+    assert state["peak"] == 4
+
+
+def test_a_meaningless_cap_is_refused():
+    with pytest.raises(ConfigurationError):
+        HTTPClient("http://test", max_concurrency=0)
+
+
+def test_a_capped_client_survives_a_second_event_loop():
+    """A contended asyncio primitive binds to its loop; the cap must not."""
+    state, transport = _peak_counter()
+    client = _client(transport, max_concurrency=2)
+
+    async def four():
+        await asyncio.gather(*(client.post("/x") for _ in range(4)))
+
+    asyncio.run(four())
+    asyncio.run(four())  # a provider outliving one asyncio.run() is normal
+
+    assert state["peak"] == 2

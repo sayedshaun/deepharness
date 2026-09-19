@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..errors import ConfigurationError, HumanInputRequired
+from ..tools.permissions import Decision, Permissions
 from ..tools.toolbox import Toolbox
+from .context import truncate
 from .state import AgentState, Message, PendingHumanInput, as_dict
 
 
@@ -31,7 +33,7 @@ def record_request(messages: list[dict[str, Any]], response: Any) -> None:
     """Record the assistant turn that asked for tools."""
     messages.append(
         Message.ai(
-            response.content,
+            response.blocks or response.content,
             tool_calls=[
                 {"id": call.id, "name": call.name, "arguments": call.arguments}
                 for call in response.tool_calls
@@ -40,10 +42,23 @@ def record_request(messages: list[dict[str, Any]], response: Any) -> None:
     )
 
 
+def render(result: Any, *, limit: int | None = None) -> tuple[str, bool]:
+    """One tool outcome as the text the model sees, and whether it failed.
+
+    Shared with the ToolFinished event rather than rendered twice, so a caller
+    watching a run cannot be shown something the model was never sent.
+    """
+    failed = isinstance(result, Exception)
+    content = f"Error: {result!r}" if failed else str(result)
+    return truncate(content, limit), failed
+
+
 def record_results(
     messages: list[dict[str, Any]],
     calls: list[Any],
     results: list[Any],
+    *,
+    limit: int | None = None,
 ) -> list[PendingHumanInput]:
     """Record one turn's tool outcomes, returning any that need a human.
 
@@ -57,7 +72,7 @@ def record_results(
         if isinstance(result, HumanInputRequired):
             pending.append(PendingHumanInput(call.id, call.name, result.question))
             continue
-        content = f"Error: {result!r}" if isinstance(result, Exception) else str(result)
+        content, _ = render(result, limit=limit)
         messages.append(
             Message.tool(content, name=call.name, call_id=call.id).to_dict()
         )
@@ -77,26 +92,74 @@ class ApprovedCall:
     arguments: dict[str, Any]
 
 
-def gated(tools: Toolbox, calls: list[Any]) -> list[PendingHumanInput]:
-    """Calls a human must allow first, carrying their arguments for later.
+@dataclass(slots=True)
+class Ruling:
+    """One turn's calls, split by what the run is allowed to do with them."""
 
-    Checked before dispatch rather than inside the tool, so a tool marked
-    requires_approval cannot run by accident - and the model cannot route around
-    the gate by declining to ask.
+    allowed: list[Any]
+    paused: list[PendingHumanInput]
+    denied: list[Any]
+
+
+def rule(
+    tools: Toolbox, calls: list[Any], permissions: Permissions | None = None
+) -> Ruling:
+    """Split a turn's calls into the ones to run, to ask about, and to refuse.
+
+    Decided before dispatch rather than inside the tool, so a gated call cannot
+    run by accident - and the model cannot route around the gate by declining to
+    ask. A policy decides per call; without one, or for a call no rule matches,
+    the tool's own requires_approval stands.
     """
-    pending: list[PendingHumanInput] = []
+    allowed: list[Any] = []
+    paused: list[PendingHumanInput] = []
+    denied: list[Any] = []
     for call in calls:
-        if call.name in tools and tools.get(call.name).requires_approval:
-            arguments = dict(call.arguments)
-            pending.append(
-                PendingHumanInput(
-                    call_id=call.id,
-                    name=call.name,
-                    question=f"Run {call.name} with {arguments}?",
-                    arguments=arguments,
+        match _decide(tools, call, permissions):
+            case "deny":
+                denied.append(call)
+            case "ask":
+                arguments = dict(call.arguments)
+                paused.append(
+                    PendingHumanInput(
+                        call_id=call.id,
+                        name=call.name,
+                        question=f"Run {call.name} with {arguments}?",
+                        arguments=arguments,
+                    )
                 )
-            )
-    return pending
+            case _:
+                allowed.append(call)
+    return Ruling(allowed=allowed, paused=paused, denied=denied)
+
+
+def _decide(tools: Toolbox, call: Any, permissions: Permissions | None) -> Decision:
+    if permissions is not None:
+        decision = permissions.decide(call.name, call.arguments)
+        if decision is not None:
+            return decision
+    if call.name in tools and tools.get(call.name).requires_approval:
+        return "ask"
+    return "allow"
+
+
+DENIED = "Denied by policy: this call is not permitted."
+"""A permission rule refused the call outright."""
+
+NOT_RUN = "Not run: the turn stopped for approval of another call."
+"""The turn paused on a gated call, so this one was left unrun."""
+
+
+def record_unrun(messages: list[dict[str, Any]], calls: list[Any], note: str) -> None:
+    """Account for calls that were requested but never ran, and say why.
+
+    Recorded rather than dropped for two reasons: the model needs to learn it
+    cannot take that route, and a vendor rejects a transcript in which a
+    requested call has no result at all - which is what a resumed run would
+    otherwise send.
+    """
+    for call in calls:
+        messages.append(Message.tool(note, name=call.name, call_id=call.id).to_dict())
 
 
 def settle(

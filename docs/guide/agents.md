@@ -80,21 +80,37 @@ tool turn simply yields no text.
 
 When you need the result too, use `astream_events()`. It yields `TextDelta` as text arrives and
 one final `Finished` carrying the `AgentState`, because an async generator cannot return a
-value:
+value — and in between, what the loop is doing:
 
 ```python
 from deepharness import Finished, TextDelta
+from deepharness.agent import StepStarted, ToolFinished, ToolStarted
 
 async for event in agent.astream_events("What is 17 * 23?"):
     match event:
+        case StepStarted(step):
+            print(f"\n— step {step}")
         case TextDelta(text):
             print(text, end="", flush=True)
+        case ToolStarted(name, arguments, _):
+            print(f"{name}({arguments}) …")
+        case ToolFinished(name, result, failed, _):
+            print(f"{name} {'failed' if failed else 'ok'}: {result}")
         case Finished(state):
             print(f"\nstopped because: {state.stop_reason}")
 ```
 
-`stream()`/`stream_events()` are the synchronous counterparts. A provider that cannot stream
-raises `NotImplementedError` naming itself, rather than yielding nothing.
+Most of a long run's wall clock goes on tool calls the model never narrates, so text alone
+makes an agent look stalled. `StepStarted.step` is 1-based and capped by `Budget.steps`;
+`ToolFinished.result` is the text the model will read — already truncated by the
+[context policy](#context-management), so what you display is what the model saw. A tool that
+raised sets `failed`, and the run still continues, since the error goes back to the model as
+that call's result. A tool that asked a human reports no `ToolFinished`: it has no result yet,
+and the run is about to pause on it.
+
+`stream()`/`stream_events()` are the synchronous counterparts, and there tools run one at a
+time, so each tool's pair of events surrounds its own call rather than the whole turn's.
+`astream()`/`stream()` yield text alone and never see the rest.
 
 ## Token usage and budgets
 
@@ -121,6 +137,43 @@ normally with `stop_reason == "step_budget"` and an empty `output`.
 `Budget(steps=1)` is the single-shot case: one model call, no turn to react to a tool result.
 Handy for a classify-or-extract step, but an agent with tools will stop at `"step_budget"`
 rather than answering whenever it calls one.
+
+## Context management
+
+A think/act loop grows its own transcript: every turn appends the model's request and whatever
+its tools returned, and every later turn pays for all of it again. `ContextPolicy` bounds that
+from both ends.
+
+```python
+from deepharness import Agent
+from deepharness.agent import ContextPolicy
+
+agent = Agent(
+    llm,
+    tools=[read_file],
+    context=ContextPolicy(max_tokens=100_000, tool_result_chars=8_000),
+)
+```
+
+`tool_result_chars` (default 8000) bounds each tool result as it is recorded, eliding the
+middle and saying how much went missing — the middle rather than the tail because a long
+result usually says what it is at the top and how it ended at the bottom. This is on by
+default: one oversized result is the usual way a long run dies, since it is re-sent with every
+turn after it.
+
+`max_tokens` bounds the whole transcript and is **off** by default. Set it somewhere under the
+model's real window and the loop sends a pruned view — oldest turns dropped, with a note in
+their place — while `state.messages` keeps every message, so nothing is lost to you that only
+had to be kept from the provider. Pruning never drops the leading system prompt, never orphans
+a tool result from the turn that requested it, and always keeps the last `keep_last` messages
+(default 4). A transcript whose tail alone exceeds the budget is therefore sent over it: a
+bound is not worth breaking a turn's tool-call pairing for.
+
+The token figure behind `max_tokens` is an estimate (`estimate_tokens`, roughly four
+characters per token) rather than a real tokenizer, which would mean a per-vendor dependency.
+Treat it as a soft bound that keeps a long run away from a hard provider error, not as a way
+to predict a bill. Subclass `ContextPolicy` and override `prune()` to choose differently — the
+loop asks for a view of the transcript and does not care how it was chosen.
 
 ## Structured output
 
@@ -186,11 +239,19 @@ raises `ConfigurationError` rather than silently continuing.
 The gate lives on the tool, not in the prompt, so a model cannot route around it by declining to
 ask. And if a turn requests a gated call alongside ordinary ones, **nothing** in that turn runs
 until the ruling — a half-applied turn the human is about to refuse would be worse than waiting.
+Those unrun calls are still recorded as not run, because a requested call that no result answers
+is a transcript vendors reject when the run resumes.
+
+For anything finer than per-tool — allowing `git log` but not `git push`, both of which are
+`run_command` — see [Permissions](tools.md#permissions-deciding-per-call).
 
 **A question — the tool wants to ask you something.** Raise `HumanInputRequired` and the human's
 answer becomes that call's result:
 
 ```python
+from deepharness.errors import HumanInputRequired
+
+
 @tool
 def confirm(question: str) -> str:
     """Ask the operator something."""
@@ -210,18 +271,36 @@ The difference matters: an approval defers execution, a question substitutes a r
 
 ## Session persistence
 
-`state.messages` is a list of wire-form dicts, so `save_session`/`load_session` round-trip it
-through JSON — resume a conversation across process runs:
+`save_session`/`load_session` round-trip a whole `AgentState` through JSON, so a run resumes
+across process runs:
 
 ```python
-from deepharness import Agent, Message, load_session, save_session
+from deepharness import Agent, Message
+from deepharness.agent import load_session, save_session
 
-messages = load_session("session.json")  # [] if the file doesn't exist yet
-messages.append(Message.human("Continue where we left off."))
+state = load_session("session.json")  # an empty AgentState if the file is new
+state.messages.append(Message.human("Continue where we left off.").to_dict())
 
-state = await agent.arun({"messages": messages})
-save_session("session.json", state.messages)
+state = await agent.arun(state)
+save_session("session.json", state)
 ```
+
+The whole state is saved, not just the transcript — usage, stop reason, and any call
+[paused on an approval](#human-in-the-loop). That last one is the point: a run waiting on a
+human is the one most worth resuming later, and it is the one a messages-only file cannot
+carry.
+
+```python
+state = load_session("session.json")
+if state.stop_reason == "paused":
+    state = await agent.arun(state.approve())  # the gated tool runs now
+```
+
+`save_session` also accepts a bare message list for the conversational case, and
+`load_session` reads a file holding a bare JSON array as a transcript — so a session written
+by hand, or by a version that saved messages alone, still loads. Structured `output` is stored
+as plain data and comes back as a dict rather than your dataclass; reconstructing the type
+would mean trusting an import path out of a file.
 
 ## Messages
 

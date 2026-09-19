@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import time
+import weakref
 from collections.abc import AsyncGenerator, Generator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from typing import Any
 
 import httpx
 
-from .errors import ProviderError
+from .errors import ConfigurationError, ProviderError
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _MAX_RETRIES = 3
@@ -63,7 +64,7 @@ class HTTPClient:
     ProviderError, so a caller has one exception type to handle rather than two.
     """
 
-    __slots__ = ("_async_client", "_sync_client")
+    __slots__ = ("_async_client", "_gates", "_max_concurrency", "_sync_client")
 
     def __init__(
         self,
@@ -72,6 +73,7 @@ class HTTPClient:
         client: httpx.AsyncClient | None = None,
         sync_client: httpx.Client | None = None,
         timeout: httpx.Timeout | float | None = None,
+        max_concurrency: int | None = None,
     ):
         self._async_client = client or httpx.AsyncClient(
             base_url=base_url, headers=headers, timeout=timeout or DEFAULT_TIMEOUT
@@ -79,6 +81,18 @@ class HTTPClient:
         self._sync_client = sync_client or httpx.Client(
             base_url=base_url, headers=headers, timeout=timeout or DEFAULT_TIMEOUT
         )
+        if max_concurrency is not None and max_concurrency < 1:
+            raise ConfigurationError(
+                f"max_concurrency must be at least 1 when set, got {max_concurrency}"
+            )
+        self._max_concurrency = max_concurrency
+        # One semaphore per event loop, made on first use rather than in
+        # __init__: a contended asyncio primitive binds to the loop that
+        # awaited it and raises in any other, and a provider built at import
+        # time routinely outlives a script's first asyncio.run().
+        self._gates: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, asyncio.Semaphore
+        ] = weakref.WeakKeyDictionary()
 
     async def aclose(self) -> None:
         """Release both clients' connection pools."""
@@ -93,7 +107,27 @@ class HTTPClient:
         """
         self._sync_client.close()
 
+    def _gate(self) -> Any:
+        """The concurrency gate for the running loop, or a no-op when uncapped.
+
+        In-flight requests are what a rate limiter counts, so the gate is held
+        across retries and for a stream's whole body - releasing it early would
+        let the cap be exceeded by exactly the requests already backing off.
+        """
+        if self._max_concurrency is None:
+            return nullcontext()
+        loop = asyncio.get_running_loop()
+        gate = self._gates.get(loop)
+        if gate is None:
+            gate = asyncio.Semaphore(self._max_concurrency)
+            self._gates[loop] = gate
+        return gate
+
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        async with self._gate():
+            return await self._post(url, **kwargs)
+
+    async def _post(self, url: str, **kwargs: Any) -> httpx.Response:
         for attempt in range(_MAX_ATTEMPTS):
             try:
                 response = await self._async_client.post(url, **kwargs)
@@ -131,6 +165,13 @@ class HTTPClient:
 
     @asynccontextmanager
     async def stream(
+        self, method: str, url: str, **kwargs: Any
+    ) -> AsyncGenerator[httpx.Response]:
+        async with self._gate(), self._stream(method, url, **kwargs) as response:
+            yield response
+
+    @asynccontextmanager
+    async def _stream(
         self, method: str, url: str, **kwargs: Any
     ) -> AsyncGenerator[httpx.Response]:
         started = False

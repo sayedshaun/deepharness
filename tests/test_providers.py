@@ -942,3 +942,112 @@ def test_openai_still_sends_a_key_when_given_one():
     provider = OpenAI(model="gpt-test", api_key="secret")
 
     assert provider._http._async_client.headers["authorization"] == "Bearer secret"
+
+
+async def test_anthropic_puts_a_cache_breakpoint_on_the_prompt_and_tools():
+    client = make_client({"content": [{"type": "text", "text": "hi"}]})
+    provider = Anthropic(
+        model="claude-test", api_key="x", client=client, cache_prompt=True
+    )
+
+    await provider.agenerate(
+        [{"role": "system", "content": "be terse"}, {"role": "user", "content": "hi"}],
+        tools=[
+            {"name": "a", "description": "", "parameters": {}},
+            {"name": "b", "description": "", "parameters": {}},
+        ],
+    )
+
+    body = client.post.await_args.kwargs["json"]
+    assert body["system"] == [
+        {"type": "text", "text": "be terse", "cache_control": {"type": "ephemeral"}}
+    ]
+    assert "cache_control" not in body["tools"][0]
+    assert body["tools"][1]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_anthropic_leaves_the_prompt_uncached_by_default():
+    client = make_client({"content": [{"type": "text", "text": "hi"}]})
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+
+    await provider.agenerate([{"role": "system", "content": "be terse"}])
+
+    assert client.post.await_args.kwargs["json"]["system"] == "be terse"
+
+
+async def test_openai_reasoning_becomes_a_thinking_block():
+    client = make_client(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "391",
+                        "reasoning_content": "17 x 23 = 391",
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
+    provider = OpenAI(model="gpt-test", api_key="x", client=client)
+
+    result = await provider.agenerate([{"role": "user", "content": "17*23?"}])
+
+    assert result.content == "391"
+    assert result.thinking == "17 x 23 = 391"
+    assert [type(block).__name__ for block in result.blocks] == ["Thinking", "Text"]
+
+
+async def test_openai_reports_tokens_served_from_its_prompt_cache():
+    client = make_client(
+        {
+            "choices": [{"message": {"role": "assistant", "content": "hi"}}],
+            "usage": {
+                "prompt_tokens": 74,
+                "completion_tokens": 3,
+                "total_tokens": 77,
+                "prompt_tokens_details": {"cached_tokens": 69},
+            },
+        }
+    )
+    provider = OpenAI(model="gpt-test", api_key="x", client=client)
+
+    usage = (await provider.agenerate([{"role": "user", "content": "hi"}])).usage
+
+    assert (usage.prompt_tokens, usage.cached_tokens) == (74, 69)
+    assert usage.cache_write_tokens == 0
+
+
+async def test_anthropic_reports_cache_reads_and_writes_separately():
+    client = make_client(
+        {
+            "content": [{"type": "text", "text": "hi"}],
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 4,
+                "cache_read_input_tokens": 900,
+                "cache_creation_input_tokens": 120,
+            },
+        }
+    )
+    provider = Anthropic(model="claude-test", api_key="x", client=client)
+
+    usage = (await provider.agenerate([{"role": "user", "content": "hi"}])).usage
+
+    assert usage.cached_tokens == 900
+    assert usage.cache_write_tokens == 120
+
+
+async def test_a_provider_that_reports_no_cache_counts_zero():
+    client = make_client(
+        {
+            "choices": [{"message": {"role": "assistant", "content": "hi"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+        }
+    )
+    provider = OpenAI(model="gpt-test", api_key="x", client=client)
+
+    usage = (await provider.agenerate([{"role": "user", "content": "hi"}])).usage
+
+    assert (usage.cached_tokens, usage.cache_write_tokens) == (0, 0)

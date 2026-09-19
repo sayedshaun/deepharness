@@ -8,8 +8,10 @@ from deepharness.providers.base import (
     Completed,
     CompletionResponse,
     TextDelta,
+    ThinkingDelta,
     TokenUsage,
 )
+from deepharness.providers.content import Text, Thinking
 from deepharness.providers.gemini import GeminiStream
 from deepharness.providers.openai import OpenAIStream
 
@@ -30,7 +32,7 @@ def test_openai_stream_collects_text():
         ],
     )
 
-    assert deltas == ["Hel", "lo", None]
+    assert deltas == [TextDelta("Hel"), TextDelta("lo"), None]
     assert reader.response() == CompletionResponse(content="Hello")
 
 
@@ -171,7 +173,7 @@ def test_anthropic_stream_collects_text_and_usage():
     )
     response = reader.response()
 
-    assert [d for d in deltas if d] == ["Hi"]
+    assert [d for d in deltas if d] == [TextDelta("Hi")]
     assert response.content == "Hi"
     assert response.usage == TokenUsage(4, 6, 10)
 
@@ -267,7 +269,7 @@ def test_gemini_stream_collects_text_and_whole_function_calls():
     )
     response = reader.response()
 
-    assert [d for d in deltas if d] == ["Hel", "lo"]
+    assert [d for d in deltas if d] == [TextDelta("Hel"), TextDelta("lo")]
     assert response.content == "Hello"
     assert response.tool_calls[0].arguments == {"a": 1}
     assert response.usage == TokenUsage(3, 4, 7)
@@ -485,3 +487,37 @@ def test_anthropic_stream_defaults_to_stop():
     )
 
     assert reader.response().finish_reason == "stop"
+
+
+def test_openai_stream_keeps_reasoning_apart_from_the_answer():
+    """llama.cpp and DeepSeek send thinking as reasoning_content deltas."""
+    reader = OpenAIStream()
+
+    deltas = feed_all(
+        reader,
+        [
+            {"choices": [{"delta": {"reasoning_content": "17 x 23 "}}]},
+            {"choices": [{"delta": {"reasoning_content": "is 391"}}]},
+            {"choices": [{"delta": {"content": "391"}}]},
+        ],
+    )
+    response = reader.response()
+
+    assert deltas == [
+        ThinkingDelta("17 x 23 "),
+        ThinkingDelta("is 391"),
+        TextDelta("391"),
+    ]
+    assert response.content == "391"
+    assert response.thinking == "17 x 23 is 391"
+    assert response.blocks == [Thinking("17 x 23 is 391"), Text("391")]
+
+
+def test_openai_stream_accepts_the_other_spelling_of_reasoning():
+    """OpenRouter calls the same field `reasoning`."""
+    reader = OpenAIStream()
+
+    assert reader.feed({"choices": [{"delta": {"reasoning": "hmm"}}]}) == ThinkingDelta(
+        "hmm"
+    )
+    assert reader.response().thinking == "hmm"

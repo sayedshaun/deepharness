@@ -6,8 +6,17 @@ from deepharness.providers.base import (
     ReasoningLevel,
     StreamEvent,
     TextDelta,
+    ThinkingDelta,
     TokenUsage,
     ToolCall,
+)
+from deepharness.providers.content import (
+    Block,
+    Content,
+    Document,
+    Image,
+    Text,
+    Thinking,
 )
 from deepharness.providers.gateways import (
     VLLM,
@@ -25,29 +34,48 @@ from deepharness.providers.gateways import (
 )
 from deepharness.providers.gemini import Gemini
 from deepharness.providers.openai import OpenAI
+from deepharness.providers.wrappers import (
+    Caching,
+    Fallback,
+    RateLimited,
+    Retrying,
+    Wrapping,
+)
 
 __all__ = [
     "LLM",
     "VLLM",
     "XAI",
     "Anthropic",
+    "Block",
+    "Caching",
     "Cerebras",
     "Completed",
     "CompletionResponse",
+    "Content",
     "DeepSeek",
+    "Document",
+    "Fallback",
     "Fireworks",
     "Gemini",
     "Groq",
+    "Image",
     "LMStudio",
     "LlamaCpp",
     "Mistral",
     "Ollama",
     "OpenAI",
     "OpenRouter",
+    "RateLimited",
     "ReasoningLevel",
+    "Retrying",
     "StreamEvent",
+    "Text",
     "TextDelta",
+    "Thinking",
+    "ThinkingDelta",
     "Together",
     "TokenUsage",
     "ToolCall",
+    "Wrapping",
 ]

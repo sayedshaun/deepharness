@@ -1,5 +1,6 @@
 site_name: DeepHarness
-site_description: Compose LLM agents into typed, concurrent workflows.
+# Quoted: the colon in the tagline would otherwise read as a YAML mapping.
+site_description: "A harness for LLM agents: workspace tools, permissions, and typed, concurrent workflows."
 site_url: https://sayedshaun.github.io/deepharness/
 repo_name: deepharness
 repo_url: https://github.com/sayedshaun/deepharness
@@ -73,7 +74,9 @@ nav:
       - Graphs: guide/graph.md
       - Agents: guide/agents.md
       - Tools: guide/tools.md
+      - Coding agent: guide/coding-agent.md
       - Providers: guide/providers.md
+      - Deep research: guide/research.md
   - Examples: examples.md
   - API reference: reference/api.md
 

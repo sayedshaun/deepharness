@@ -8,11 +8,12 @@ title: DeepHarness
 
 # DeepHarness
 
-<p class="sa-tagline">Compose LLM agents into typed, concurrent workflows.</p>
+<p class="sa-tagline">A harness for LLM agents: workspace tools, permissions, and typed, concurrent workflows.</p>
 
 <p class="sa-subtitle">
-Build agent workflows as a graph of plain Python functions: parallel branches,
-typed state, and 15 LLM providers behind one interface.
+Build agents that read and change a codebase under an explicit permission policy, and
+compose them as a graph of plain Python functions: parallel branches, typed state, and
+15 LLM providers behind one interface.
 </p>
 
 [Get started :octicons-arrow-right-24:](getting-started.md){ .md-button .md-button--primary }
@@ -38,6 +39,11 @@ typed state, and 15 LLM providers behind one interface.
   are offloaded to threads so a blocking call never stalls the event loop.
 - **Agents are optional.** The graph engine has no idea what an LLM is. Use it for plain
   function orchestration, or drop an [`Agent`](guide/agents.md) inside a node.
+- **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
+  per-call [permission policy](guide/tools.md#permissions-deciding-per-call), a
+  [bounded context window](guide/agents.md#context-management), progress events and
+  progress events and [provider wrappers](guide/providers.md#wrapping-a-provider) — the parts
+  a run needs once it is long enough to matter.
 
 ## Install
 
@@ -71,9 +77,25 @@ Requires Python 3.11+.
 
     ---
 
-    Think/act loops, tools, token budgets, and session persistence.
+    Think/act loops, context management, progress events, budgets, and resumable sessions.
 
     [:octicons-arrow-right-24: Agents guide](guide/agents.md)
+
+-   :material-code-braces:{ .lg .middle } **Build a coding agent**
+
+    ---
+
+    Tools, permissions, approvals, context and sessions, one decision at a time.
+
+    [:octicons-arrow-right-24: Coding agent guide](guide/coding-agent.md)
+
+-   :material-hammer-wrench:{ .lg .middle } **Tools & permissions**
+
+    ---
+
+    Workspace-confined file and shell tools, MCP servers, and per-call rules.
+
+    [:octicons-arrow-right-24: Tools guide](guide/tools.md)
 
 -   :material-api:{ .lg .middle } **API reference**
 
