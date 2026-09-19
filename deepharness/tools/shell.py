@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,12 @@ from .workspace import Workspace
 
 _DEFAULT_TIMEOUT_SECONDS = 60
 _DEFAULT_MAX_CHARS = 30_000
+
+
+class ShellTool(StrEnum):
+    """The name shell_tool() registers. See FileTool for why this is a StrEnum."""
+
+    RUN = "run_command"
 
 
 def shell_tool(

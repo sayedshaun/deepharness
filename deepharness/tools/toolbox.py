@@ -227,6 +227,10 @@ class Toolbox:
             raise ToolNotFoundError(f"Unknown tool: {name}")
         return self._tools[name]
 
+    def names(self) -> tuple[str, ...]:
+        """The names the model sees, which is what a permission rule matches."""
+        return tuple(self._tools)
+
     def schemas(self) -> list[dict[str, Any]]:
         return [spec.to_schema() for spec in self._tools.values()]
 

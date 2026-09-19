@@ -178,3 +178,91 @@ def test_the_tool_flag_still_applies_where_no_rule_does():
     )
 
     assert agent.run("deploy").stop_reason == "paused"
+
+
+# --- How a rule may be written ------------------------------------------------
+
+
+def test_a_tool_can_be_passed_instead_of_its_name():
+    permissions = Permissions(allow=[read_file], ask=[deploy])
+
+    assert permissions.decide("read_file", {"path": "a"}) == "allow"
+    assert permissions.decide("deploy", {}) == "ask"
+
+
+def test_a_renamed_tool_is_matched_by_the_name_the_model_sees():
+    @tool(name="fetch")
+    def get_it(url: str) -> str:
+        """Fetch a URL."""
+        return url
+
+    assert Permissions(deny=[get_it]).decide("fetch", {"url": "x"}) == "deny"
+
+
+def test_the_built_in_names_are_available_as_enums():
+    from deepharness import FileTool, ShellTool
+
+    permissions = Permissions(allow=[FileTool.READ], deny=[Rule(ShellTool.RUN)])
+
+    assert isinstance(FileTool.READ, str)
+    assert permissions.decide("read_file", {"path": "a"}) == "allow"
+    assert permissions.decide("run_command", {"command": "ls"}) == "deny"
+
+
+def test_something_that_is_not_a_rule_is_refused():
+    with pytest.raises(ConfigurationError, match="must be a tool"):
+        Permissions(allow=[42])
+
+
+def test_a_rule_knows_whether_it_is_a_pattern():
+    assert not Rule("read_file").is_pattern
+    assert Rule("read_*").is_pattern
+    assert Rule("read_file?").is_pattern
+
+
+# --- Rules are checked against the toolbox ------------------------------------
+
+
+def test_a_rule_naming_an_unregistered_tool_is_refused():
+    """A misspelled deny rule matches nothing, so the thing it forbids runs."""
+    provider = ScriptedProvider([CompletionResponse("done")])
+
+    with pytest.raises(ConfigurationError, match="run_comand"):
+        Agent(
+            provider,
+            tools=[run_command],
+            permissions=Permissions(deny=[Rule("run_comand", {"command": "*rm*"})]),
+        )
+
+
+def test_the_error_lists_what_is_registered():
+    provider = ScriptedProvider([CompletionResponse("done")])
+
+    with pytest.raises(ConfigurationError, match="Registered tools: read_file"):
+        Agent(provider, tools=[read_file], permissions=Permissions(ask=["reed_file"]))
+
+
+def test_an_allow_rule_may_name_a_tool_this_agent_does_not_have():
+    """One policy shared between agents with different toolboxes."""
+    house = Permissions(allow=["read_file", "search_web"], ask=["deploy"])
+
+    agent = Agent(tools=[read_file, deploy], permissions=house)
+
+    assert agent.permissions is house
+
+
+def test_a_pattern_rule_is_not_checked_against_the_toolbox():
+    provider = ScriptedProvider([CompletionResponse("done")])
+
+    agent = Agent(
+        provider, tools=[read_file], permissions=Permissions(allow=["*_file", "read_*"])
+    )
+
+    assert agent.permissions is not None
+
+
+def test_a_policy_on_an_agent_with_no_tools_is_left_alone():
+    """A graph placeholder or a sub-agent may carry a policy it does not use yet."""
+    agent = Agent(permissions=Permissions(allow=["read_file"]))
+
+    assert agent.tools.names() == ()

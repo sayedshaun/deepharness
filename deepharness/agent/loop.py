@@ -80,7 +80,9 @@ class Agent:
       with the partial state attached.
     * Permissions decides per call what may run, what needs a human and what
       is refused outright; a call no rule matches falls back to the tool's own
-      requires_approval flag.
+      requires_approval flag. A deny or ask rule naming a tool that is not
+      registered is refused at construction, because a misspelled one matches
+      nothing and fails open.
     * ContextPolicy bounds what the transcript costs: each tool result is
       truncated as it is recorded, and the model is sent a pruned view while
       state.messages keeps every message.
@@ -125,6 +127,7 @@ class Agent:
         self._budget = budget or Budget()
         self._context = context or ContextPolicy()
         self._permissions = permissions
+        _check_rules(self._tools, permissions)
         self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
         self._total_usage = TokenUsage(0, 0, 0)
@@ -489,3 +492,32 @@ class Agent:
             raise
         except Exception as exc:  # noqa: BLE001 - see turn.record_results
             return exc
+
+
+def _check_rules(tools: Toolbox, permissions: Permissions | None) -> None:
+    """Refuse a gating rule that names a tool this agent does not have.
+
+    A misspelled rule matches no call at all, which for a deny rule means the
+    thing it was written to forbid runs. Silence is the worst outcome here, so
+    it is an error at construction rather than a surprise at runtime.
+
+    Only the gating rules are checked - see Permissions.gates - and pattern
+    rules are left alone, since they are meant not to name one tool.
+    """
+    if permissions is None or not tools:
+        return
+    unknown = sorted(
+        {
+            rule.tool
+            for rule in permissions.gates
+            if not rule.is_pattern and rule.tool not in tools
+        }
+    )
+    if unknown:
+        known = ", ".join(sorted(tools.names())) or "none"
+        raise ConfigurationError(
+            f"permission rules deny or ask about unregistered tools: "
+            f"{', '.join(unknown)}. Registered tools: {known}. A rule that "
+            f"names no tool matches no call, so it would silently allow what it "
+            f"was written to stop"
+        )
