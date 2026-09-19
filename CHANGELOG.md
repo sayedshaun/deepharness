@@ -55,7 +55,9 @@ about what they may do, a bounded context window, and progress you can watch.
   content is still sent, and saved, as a plain string.
 - **Reasoning round-trips.** Thinking arrives as `ThinkingDelta`, is available as
   `response.thinking`, is kept in the transcript, and is replayed to Anthropic with its
-  signature — required after a tool call, and previously lost.
+  signature — required after a tool call, and previously lost. OpenAI-compatible servers are
+  read too: `reasoning_content` (llama.cpp, DeepSeek) and `reasoning` (OpenRouter), in both
+  the response and the stream.
 - **Provider wrappers.** `Fallback`, `Caching`, `RateLimited` and `Retrying` are themselves
   `LLM`s, so one wrapper covers the sync path, the async path and streaming:
   `Caching(RateLimited(Fallback(a, b), rps=2))`. `Wrapping` is the base for your own.

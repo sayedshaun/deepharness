@@ -38,7 +38,8 @@ Every flag also reads from the environment (`DEEPHARNESS_CHAT_WORKSPACE`, …), 
 | `Workspace` | ask it to read `../../etc/passwd` and watch the call fail with `OutsideWorkspace` |
 | `Permissions` | `write_file`, `edit_file` and `run_command` stop for a ruling; `read_file` and friends just run |
 | deny rules | ask for `rm -rf .` — the call is refused and the model is told |
-| progress events | `StepStarted`, `ToolStarted`/`ToolFinished` and `ThinkingDelta` render as they arrive |
+| progress events | `StepStarted` and `ToolStarted`/`ToolFinished` render as they arrive |
+| reasoning | a thinking model's working streams into its own panel, open while it thinks and folded away once the answer starts |
 | `ContextPolicy` | long tool results arrive truncated, with the marker visible |
 | pausing and resuming | **Approve & run** replays the call with the model's own arguments; **Reject** tells it no |
 

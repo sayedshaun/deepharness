@@ -78,7 +78,13 @@ async for event in agent.astream_events("Prove it"):
 ```
 
 `response.thinking` has the whole of it after the fact, and `state.messages` keeps it as a
-`Thinking` block on the assistant turn. That last part matters on Anthropic: it requires the
+`Thinking` block on the assistant turn.
+
+Chat Completions has no field for reasoning, so a server that reasons invents one: llama.cpp
+and DeepSeek send `reasoning_content`, OpenRouter sends `reasoning`. Both spellings are read,
+in the response and in the stream, so an OpenAI-compatible reasoning model surfaces its
+thinking here without any configuration — `Gemini` uses `thought` parts and `Anthropic` its own
+thinking blocks, and all three arrive as the same `ThinkingDelta`. That last part matters on Anthropic: it requires the
 thinking block back, with its signature, on the request that follows a tool call — so a run
 that dropped it would lose the model's chain exactly where a long task depends on it. Thinking
 is replayed only where it is required and accepted; OpenAI and Gemini get text alone.

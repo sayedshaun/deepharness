@@ -61,6 +61,12 @@
     font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto;
   }
   .tag { font: 11px var(--mono); padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .think > summary { color: var(--accent); }
+  .think pre { color: var(--muted); font-style: italic; }
+  .think[open] > summary .dots::after {
+    content: "…"; animation: blink 1.2s steps(4, end) infinite;
+  }
+  @keyframes blink { 0%, 100% { opacity: 0.3 } 50% { opacity: 1 } }
   .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
   .step { color: var(--muted); font: 12px var(--mono); text-align: center; margin: 4px 0; }
   .gate {
@@ -223,13 +229,25 @@ function render(event, ctx) {
     }
     case "thinking":
       if (!ctx.thinking) {
-        ctx.thinking = details([el("span", "tag", "thinking")], "");
+        ctx.thinking = details([el("span", "tag", "reasoning"), el("span", "dots")], "");
+        ctx.thinking.className = "event think";
+        ctx.thinking.open = true;   // watchable while it happens
         holder.append(ctx.thinking);
       }
       ctx.thinking.querySelector("pre").textContent += event.text;
       break;
     case "text":
-      if (!ctx.text) { ctx.text = el("div", "bubble", ""); holder.append(ctx.text); }
+      if (!ctx.text) {
+        // The answer has started, so the working folds away - it stays one
+        // click from view rather than pushing the reply off the screen.
+        if (ctx.thinking) {
+          ctx.thinking.open = false;
+          const chars = ctx.thinking.querySelector("pre").textContent.length;
+          ctx.thinking.querySelector(".dots").textContent = ` ${chars} chars`;
+        }
+        ctx.text = el("div", "bubble", "");
+        holder.append(ctx.text);
+      }
       ctx.text.textContent += event.text;
       break;
     case "error":
