@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from enum import StrEnum
 from fnmatch import fnmatchcase
 from typing import Any, Literal
 
@@ -18,6 +19,26 @@ from ..errors import ConfigurationError
 
 Decision = Literal["allow", "ask", "deny"]
 """What may happen to one call: run it, pause for a human, or refuse it."""
+
+
+class ToolName(StrEnum):
+    """The names the built-in tools register under, for writing rules against.
+
+    One enum for all of them rather than one per module: they are a single
+    thing - the names a policy refers to - and `ToolName.RUN_COMMAND` cannot be
+    mistaken for `shell_tool`, the function that builds it.
+
+    A StrEnum because a member *is* a str: usable as a Rule's tool, matched by
+    fnmatch, and compared to what a provider sends, with no conversion. A typo
+    is caught by an editor rather than by a rule that silently matches nothing.
+    """
+
+    READ_FILE = "read_file"
+    LIST_FILES = "list_files"
+    SEARCH_FILES = "search_files"
+    WRITE_FILE = "write_file"
+    EDIT_FILE = "edit_file"
+    RUN_COMMAND = "run_command"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,9 +94,9 @@ class Permissions:
     A rule is given as a tool, a name pattern, or a `Rule`:
 
         Permissions(
-            allow=[read_file, list_files, Rule("run_command", {"command": "git *"})],
-            deny=[Rule("run_command", {"command": "*rm -rf*"})],
-            ask=[FileTool.WRITE, FileTool.EDIT],
+            allow=[read_file, list_files, Rule(ToolName.RUN_COMMAND, {"command": "git *"})],
+            deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
+            ask=[ToolName.WRITE_FILE, ToolName.EDIT_FILE],
         )
 
     Passing the tool itself is worth preferring where it is in scope: an editor

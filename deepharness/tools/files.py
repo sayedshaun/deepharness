@@ -9,7 +9,6 @@ model is shown, so they are written for it.
 from __future__ import annotations
 
 from collections.abc import Callable
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -18,21 +17,6 @@ from .workspace import Workspace
 
 _DEFAULT_MAX_BYTES = 200_000
 _DEFAULT_MAX_MATCHES = 200
-
-
-class FileTool(StrEnum):
-    """The names file_tools() registers, for writing permission rules against.
-
-    A StrEnum because a member is a str: it can be compared, used as a Rule's
-    tool, and matched by fnmatch with no conversion - while a typo is caught by
-    an editor rather than by a rule that silently matches nothing.
-    """
-
-    READ = "read_file"
-    LIST = "list_files"
-    SEARCH = "search_files"
-    WRITE = "write_file"
-    EDIT = "edit_file"
 
 
 def file_tools(
