@@ -7,9 +7,13 @@ events as they happen, and a conversation that keeps its state across turns.
 
 ```bash
 pip install -e ".[examples]"
-python examples/chat/app.py
+make chat                      # or: .venv/bin/python examples/chat/app.py
 # open http://127.0.0.1:8765
 ```
+
+`make chat` uses the project's virtualenv. Running `python examples/chat/app.py`
+directly only works with that environment activated — otherwise the system
+Python has neither `fastapi` nor `deepharness` on its path.
 
 By default it points at a llama.cpp server over its OpenAI-compatible endpoint
 and works in a **fresh temporary directory**, printed at startup. An agent with

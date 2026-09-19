@@ -1,4 +1,4 @@
-.PHONY: fmt test docs
+.PHONY: fmt test docs chat
 
 fmt:
 	python -m ruff format .
@@ -9,3 +9,6 @@ test:
 
 docs:
 	python -m mkdocs serve
+
+chat:
+	python examples/chat/app.py --workspace ./scratch

@@ -329,10 +329,12 @@ def main() -> None:
     Path(settings.workspace).expanduser().mkdir(parents=True, exist_ok=True)
     session = Session(settings)
 
-    print(f"workspace : {session.workspace.root}")
-    print(f"model     : {settings.model}")
-    print(f"endpoint  : {settings.base_url}")
-    print(f"open      : http://127.0.0.1:{args.port}\n")
+    # flush, because this banner is the only thing telling a reader where the
+    # workspace is - and it is routinely redirected to a log.
+    print(f"workspace : {session.workspace.root}", flush=True)
+    print(f"model     : {settings.model}", flush=True)
+    print(f"endpoint  : {settings.base_url}", flush=True)
+    print(f"open      : http://127.0.0.1:{args.port}\n", flush=True)
     uvicorn.run(
         create_app(session), host="127.0.0.1", port=args.port, log_level="warning"
     )

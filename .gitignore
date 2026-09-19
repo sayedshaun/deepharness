@@ -12,3 +12,6 @@ temp.py
 temp/
 site/
 dist/
+
+# The chat example's default durable workspace.
+scratch/

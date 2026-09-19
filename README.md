@@ -142,7 +142,7 @@ panel showing what it wrote:
 
 ```bash
 pip install -e ".[examples]"
-python examples/chat/app.py     # a fresh temp workspace, printed at startup
+make chat                       # then open http://127.0.0.1:8765
 ```
 
 ### Wrapping a provider
