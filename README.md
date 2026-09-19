@@ -1,10 +1,11 @@
 <div align="center">
 <h1><img src="https://raw.githubusercontent.com/sayedshaun/deepharness/main/docs/assets/logo.png" width="220" alt="DeepHarness logo"><br>DeepHarness</h1>
 
-**Compose LLM agents into typed, concurrent workflows.**
+**A harness for LLM agents: workspace tools, permissions, and typed, concurrent workflows.**
 
-Build agent workflows as a graph of plain Python functions: parallel branches,
-typed state, and 15 LLM providers behind one interface.
+Build agents that read and change a codebase under an explicit permission policy, and compose
+them as a graph of plain Python functions: parallel branches, typed state, and 15 LLM providers
+behind one interface.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![CI](https://github.com/sayedshaun/deepharness/actions/workflows/test.yml/badge.svg)](https://github.com/sayedshaun/deepharness/actions/workflows/test.yml) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
 
