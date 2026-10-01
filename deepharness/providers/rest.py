@@ -37,18 +37,23 @@ class Wire(Protocol):
         stream: bool = False,
     ) -> Any:
         """The request body, as an object exposing to_json()."""
+        ...
 
     def endpoint(self, *, stream: bool = False) -> str:
         """Path to POST to. Some vendors have a separate streaming endpoint."""
+        ...
 
     def request_args(self, *, stream: bool = False) -> dict[str, Any]:
         """Extra request arguments - query parameters, mostly."""
+        ...
 
     def parse_response(self, response: httpx.Response) -> CompletionResponse:
         """One completion response, normalized."""
+        ...
 
     def accumulator(self) -> StreamAccumulator:
         """A fresh reader for one stream of this vendor's SSE payloads."""
+        ...
 
 
 class StreamAccumulator(Protocol):
@@ -66,9 +71,11 @@ class StreamAccumulator(Protocol):
         instead of prose, and a caller showing the two the same way is showing
         the model talking over itself.
         """
+        ...
 
     def response(self) -> CompletionResponse:
         """The whole turn, once the stream has ended."""
+        ...
 
 
 class RestCompletions:
