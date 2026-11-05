@@ -97,7 +97,7 @@ class Ruling:
     """One turn's calls, split by what the run is allowed to do with them."""
 
     allowed: list[Any]
-    """Calls to run, in the model's order - run() executes them in sequence."""
+    """Calls to run, in the model's order - kept whenever one of them asks."""
     paused: list[PendingHumanInput]
     denied: list[Any]
     ask: list[bool] = field(default_factory=list)

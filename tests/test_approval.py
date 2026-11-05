@@ -1,5 +1,6 @@
 """requires_approval: a gated call defers until a human allows it."""
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -316,6 +317,45 @@ def test_calls_the_toolbox_asks_about_keep_the_models_order():
     assert ran == ["write_file", "run_tests"]
     results = [m["tool_call_id"] for m in state.messages if m["role"] == "tool"]
     assert results == ["a", "b"]
+
+
+async def test_arun_waits_for_the_ruling_before_running_later_calls():
+    ran = []
+
+    @tool(requires_approval=True)
+    def write_file() -> str:
+        """Write the file."""
+        ran.append("write_file")
+        return "written"
+
+    @tool
+    def run_tests() -> str:
+        """Run the tests."""
+        ran.append("run_tests")
+        return "passed"
+
+    async def approve(name, arguments):
+        await asyncio.sleep(0.05)  # a human taking their time
+        ran.append(f"asked {name}")
+        return True
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id="a", name="write_file", arguments={}),
+                    ToolCall(id="b", name="run_tests", arguments={}),
+                ],
+            ),
+            CompletionResponse(content="done"),
+        ]
+    )
+    toolbox = Toolbox([write_file, run_tests], approve=approve)
+
+    await Agent(provider, tools=toolbox).arun("write then test")
+
+    assert ran == ["asked write_file", "write_file", "run_tests"]
 
 
 def test_a_toolbox_that_can_ask_works_on_the_sync_path():
