@@ -327,8 +327,8 @@ wire form:
 ```python
 from deepharness import Message
 
-Message.system("You are a concise assistant.").to_dict()  # {"role": "system", "content": "..."}
-Message.human("What's the weather in Oslo?").to_dict()  # {"role": "user", "content": "..."}
+Message.system("Be concise.").to_dict()  # {"role": "system", "content": "..."}
+Message.human("Weather in Oslo?").to_dict()  # {"role": "user", "content": "..."}
 Message.ai("It's 22°C and sunny.").to_dict()  # {"role": "assistant", "content": "..."}
 Message.tool("22°C, sunny", name="get_weather").to_dict()
 # {"role": "tool", "content": "...", "name": "get_weather"}
