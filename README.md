@@ -71,7 +71,8 @@ print(result.output)
 ```
 
 Every entry point comes in both flavours — `run()` / `arun()` and `stream()` / `astream()` —
-so the same agent drops into a script or an event loop unchanged:
+so the same agent drops into a script or an event loop unchanged. The snippets below that
+`await` belong inside an `async def` run with `asyncio.run(...)`:
 
 ```python
 result = await agent.arun("Weather in Oslo?")
@@ -90,14 +91,18 @@ editor = Agent(
     name="editor",
     tools=[researcher.as_tool(description="Look up facts on a topic.")],
 )
+
+state = await editor.arun("What is the capital of Norway?")
 ```
+
+`as_tool()` returns an async tool, so drive the outer agent with `arun()`.
 
 ## Working in a directory
 
 An agent that can read a codebase and change it, with the sharp edges gated:
 
 ```python
-from deepharness import Agent
+from deepharness import Agent, OpenAI
 from deepharness.agent import ContextPolicy
 from deepharness.tools import Permissions, Rule, ToolName, file_tools, shell_tool
 
@@ -145,8 +150,9 @@ then delegate" — so each one is just another `LLM`. They compose at the call s
 order is visible:
 
 ```python
-from deepharness import Anthropic, OpenAI
+from deepharness import Agent, Anthropic, OpenAI
 from deepharness.providers import Caching, Fallback, RateLimited
+from deepharness.tools import file_tools
 
 llm = Caching(
     RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)
