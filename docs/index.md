@@ -42,7 +42,7 @@ compose them as a graph of plain Python functions: parallel branches, typed stat
 - **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
   per-call [permission policy](guide/tools.md#permissions-deciding-per-call), a
   [bounded context window](guide/agents.md#context-management), progress events and
-  progress events and [provider wrappers](guide/providers.md#wrapping-a-provider) — the parts
+  [provider wrappers](guide/providers.md#wrapping-a-provider) — the parts
   a run needs once it is long enough to matter.
 
 ## Install
