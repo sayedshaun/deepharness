@@ -235,8 +235,8 @@ Toolbox(tools: Iterable[Callable] = ())
 | `register` | `def register(func: Callable) -> Callable` | Registers a function as a tool. |
 | `get` | `def get(name: str) -> ToolSpec` | Looks up a registered tool by name. |
 | `schemas` | `def schemas() -> list[dict]` | Returns tool schemas, ready to pass to a provider. |
-| `call` | `async def call(name: str, **kwargs) -> Any` | Invokes a tool by name, awaiting it if async. |
-| `call_sync` | `def call_sync(name: str, **kwargs) -> Any` | Invokes a tool synchronously; raises if it's async. |
+| `call` | `async def call(name: str, arguments: dict \| None = None) -> Any` | Invokes a tool by name, awaiting it if async. |
+| `call_sync` | `def call_sync(name: str, arguments: dict \| None = None) -> Any` | Invokes a tool synchronously; raises if it's async. |
 
 ### `Workspace`
 
