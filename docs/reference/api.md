@@ -157,7 +157,9 @@ a tokenizer — a real count would mean a per-vendor dependency.
 ### `AgentEvent`
 
 ```python
-AgentEvent = TextDelta | ThinkingDelta | StepStarted | ToolStarted | ToolFinished | Finished
+AgentEvent = (
+    TextDelta | ThinkingDelta | StepStarted | ToolStarted | ToolFinished | Finished
+)
 ```
 
 What `astream_events()`/`stream_events()` emit.
