@@ -8,13 +8,12 @@ title: DeepHarness
 
 # DeepHarness
 
-<p class="sa-tagline">A general-purpose framework for LLM agents and typed, concurrent workflows.</p>
+<p class="sa-tagline">A harness for LLM agents: tools, permissions, and typed, concurrent workflows.</p>
 
 <p class="sa-subtitle">
-Build agents with tools, structured output, permissions and human approval, and compose
-them as a graph of plain Python functions: parallel branches, typed state, and 15 LLM
-providers behind one interface. One small core for assistants, research pipelines, coding
-agents and anything in between.
+Build agents that call tools under an explicit permission policy and pause for human
+approval, and compose them as a graph of plain Python functions: parallel branches, typed
+state, and 15 LLM providers behind one interface.
 </p>
 
 [Get started :octicons-arrow-right-24:](getting-started.md){ .md-button .md-button--primary }
