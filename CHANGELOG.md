@@ -87,8 +87,13 @@ about what they may do, a bounded context window, and progress you can watch.
 
 ### Fixed
 
-- A capped provider used in a second event loop no longer raises: the concurrency gate is now
-  per loop, because a contended asyncio primitive binds to the loop that awaited it.
+- A provider used in a second event loop no longer fails with "Event loop is closed": each
+  loop gets its own async HTTP client and concurrency gate, so calling `asyncio.run(...)`
+  twice with one provider works.
+- A graph skips everything a skipped conditional branch alone leads to, rather than running
+  it anyway, and settles such skips regardless of the order nodes were registered in.
+- With `Toolbox(approve=...)`, `arun()` runs a turn holding a gated call in the model's order,
+  so no later call runs while the approver is still deciding.
 - A stdio MCP server that writes notifications before its reply is understood; the client reads
   past them to the message matching its request id.
 - Gemini thinking tokens count as completion tokens, so the three usage numbers add up.
