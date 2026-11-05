@@ -64,7 +64,14 @@ class HTTPClient:
     ProviderError, so a caller has one exception type to handle rather than two.
     """
 
-    __slots__ = ("_async_client", "_gates", "_max_concurrency", "_sync_client")
+    __slots__ = (
+        "_client",
+        "_clients",
+        "_config",
+        "_gates",
+        "_max_concurrency",
+        "_sync_client",
+    )
 
     def __init__(
         self,
@@ -75,12 +82,17 @@ class HTTPClient:
         timeout: httpx.Timeout | float | None = None,
         max_concurrency: int | None = None,
     ):
-        self._async_client = client or httpx.AsyncClient(
-            base_url=base_url, headers=headers, timeout=timeout or DEFAULT_TIMEOUT
-        )
-        self._sync_client = sync_client or httpx.Client(
-            base_url=base_url, headers=headers, timeout=timeout or DEFAULT_TIMEOUT
-        )
+        self._config: dict[str, Any] = {
+            "base_url": base_url,
+            "headers": headers,
+            "timeout": timeout or DEFAULT_TIMEOUT,
+        }
+        self._client = client
+        # One async client per event loop, for the same reason as the gates
+        # below: its pooled connections belong to the loop that opened them, so
+        # a second asyncio.run() reusing them fails with "Event loop is closed".
+        self._clients: dict[asyncio.AbstractEventLoop, httpx.AsyncClient] = {}
+        self._sync_client = sync_client or httpx.Client(**self._config)
         if max_concurrency is not None and max_concurrency < 1:
             raise ConfigurationError(
                 f"max_concurrency must be at least 1 when set, got {max_concurrency}"
@@ -95,8 +107,16 @@ class HTTPClient:
         ] = weakref.WeakKeyDictionary()
 
     async def aclose(self) -> None:
-        """Release both clients' connection pools."""
-        await self._async_client.aclose()
+        """Release the sync pool and the running loop's async pool.
+
+        A pool opened in an earlier, now closed loop cannot be closed from
+        this one; its connections died with that loop and it is just dropped.
+        """
+        if self._client is not None:
+            await self._client.aclose()
+        client = self._clients.pop(asyncio.get_running_loop(), None)
+        if client is not None:
+            await client.aclose()
         self._sync_client.close()
 
     def close(self) -> None:
@@ -106,6 +126,21 @@ class HTTPClient:
         so a caller outside one can still clean up what generate() opened.
         """
         self._sync_client.close()
+
+    def _async_client(self) -> httpx.AsyncClient:
+        """The async client for the running loop; a caller's own is used as given."""
+        if self._client is not None:
+            return self._client
+        loop = asyncio.get_running_loop()
+        client = self._clients.get(loop)
+        if client is None:
+            self._clients = {
+                other: kept
+                for other, kept in self._clients.items()
+                if not other.is_closed()
+            }
+            client = self._clients[loop] = httpx.AsyncClient(**self._config)
+        return client
 
     def _gate(self) -> Any:
         """The concurrency gate for the running loop, or a no-op when uncapped.
@@ -130,7 +165,7 @@ class HTTPClient:
     async def _post(self, url: str, **kwargs: Any) -> httpx.Response:
         for attempt in range(_MAX_ATTEMPTS):
             try:
-                response = await self._async_client.post(url, **kwargs)
+                response = await self._async_client().post(url, **kwargs)
             except httpx.TransportError as exc:
                 if attempt == _MAX_RETRIES:
                     raise _transport_failure(url, exc) from exc
@@ -178,7 +213,9 @@ class HTTPClient:
         for attempt in range(_MAX_ATTEMPTS):
             delay = None
             try:
-                async with self._async_client.stream(method, url, **kwargs) as response:
+                async with self._async_client().stream(
+                    method, url, **kwargs
+                ) as response:
                     if (
                         response.status_code in _RETRYABLE_STATUS_CODES
                         and attempt < _MAX_RETRIES
