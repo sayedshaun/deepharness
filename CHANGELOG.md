@@ -3,27 +3,7 @@
 Notable changes, newest first. This project is pre-1.0: while the major version is `0`, a
 breaking change raises the minor version.
 
-## Unreleased
-
-### Breaking
-
-- `save_session` and `load_session` are removed. Where a run is stored is the application's
-  choice, so the library keeps only the serialization: `state.to_dict()` and
-  `AgentState.from_dict(data)`. The equivalent of the old pair is
-  `Path(p).write_text(json.dumps(state.to_dict()))` and
-  `AgentState.from_dict(json.loads(Path(p).read_text()))`.
-- `Toolbox.call` and `Toolbox.call_sync` take the tool's arguments as one dict:
-  `toolbox.call("add", {"a": 1, "b": 2})` instead of `toolbox.call("add", a=1, b=2)`. As
-  keywords they could collide with the method's own parameters, so a tool with a `name`
-  argument could not be called, and an `ask` argument could switch off the approval gate.
-
-### Added
-
-- `Toolbox(approve=fn)` checks `fn(name, arguments)` before running a `requires_approval`
-  call, wherever the toolbox is called from; a refusal raises `ToolDenied`. Without it an
-  `Agent` pauses as before.
-
-## 0.3.0 — 2026-09-19
+## 0.3.0 — 2026-11-05
 
 The release that makes an agent usable for long runs: tools that work in a directory, rules
 about what they may do, a bounded context window, and progress you can watch.
@@ -35,21 +15,25 @@ about what they may do, a bounded context window, and progress you can watch.
   `deepharness.graph`, `deepharness.providers`, `deepharness.tools`, `deepharness.prebuilt`,
   `deepharness.errors`. `Agent`, `Graph`, `tool`, `Message`, `Budget`, `Toolbox`, `Ctx`,
   `AgentState`, `Finished`, `TextDelta`, `Executor`, `DeepHarnessError` and all 15 providers
-  are unchanged; `ContextPolicy`, `Permissions`, `file_tools`, `save_session`, `DeepResearch`,
+  are unchanged; `ContextPolicy`, `Permissions`, `file_tools`, `DeepResearch`,
   the content blocks, the progress events, the provider wrappers and the specific exceptions
   all moved one level down. No aliases are kept: an import that moved fails loudly rather than
   working for one more release.
-- `load_session(path)` returns an `AgentState` rather than `list[dict]`, and `save_session`
-  writes the whole state instead of the transcript alone. That is what lets a run paused on an
-  approval resume in another process — a messages-only file cannot carry what it is waiting
-  for. Passing the result to `run()`/`arun()` is unchanged; iterating it is not. A file holding
-  a bare JSON array still loads as a transcript.
+- `save_session` and `load_session` are removed. Where a run is stored is the application's
+  choice, so the library keeps only the serialization: `state.to_dict()` and
+  `AgentState.from_dict(data)`. The equivalent of the old pair is
+  `Path(p).write_text(json.dumps(state.to_dict()))` and
+  `AgentState.from_dict(json.loads(Path(p).read_text()))`.
 - Each tool result is truncated to 8000 characters as it is recorded
   (`ContextPolicy.tool_result_chars`). Pass `None` to keep the old unbounded behaviour.
 - A turn that pauses for approval now records its unrun calls in the transcript. Without it, a
   resumed run sends a tool call no result answers, which vendors reject.
 - `StreamAccumulator.feed()` returns a `StreamEvent` instead of `str | None`, so a payload can
   carry reasoning rather than prose. Only affects code implementing a provider by hand.
+- `Toolbox.call` and `Toolbox.call_sync` take the tool's arguments as one dict:
+  `toolbox.call("add", {"a": 1, "b": 2})` instead of `toolbox.call("add", a=1, b=2)`. As
+  keywords they could collide with the method's own parameters, so a tool with a `name`
+  argument could not be called, and an `ask` argument could switch off the approval gate.
 
 ### Added
 
@@ -97,6 +81,9 @@ about what they may do, a bounded context window, and progress you can watch.
 - **Web search.** `TavilySearch` wraps Tavily's API as a tool.
 - **`LlamaCpp`** provider for llama.cpp's server.
 - **Graph diagrams.** A built `Graph` renders as a terminal diagram.
+- `Toolbox(approve=fn)` checks `fn(name, arguments)` before running a `requires_approval`
+  call, wherever the toolbox is called from; a refusal raises `ToolDenied`. Without it an
+  `Agent` pauses as before.
 
 ### Fixed
 
