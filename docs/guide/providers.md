@@ -4,19 +4,20 @@ Every provider implements the same interface, so swapping vendors is a one-line 
 
 | Method                                          | Returns              |
 | ------------------------------------------------ | --------------------- |
-| `await agenerate(messages, tools=None)`          | `CompletionResponse`  |
-| `generate(messages, tools=None)`                 | `CompletionResponse`  |
-| `async for chunk in astream(messages, tools=None)` | text deltas         |
-| `for chunk in stream(messages, tools=None)`      | text deltas           |
+| `await agenerate(messages, *, tools=None)`          | `CompletionResponse`  |
+| `generate(messages, *, tools=None)`                 | `CompletionResponse`  |
+| `async for chunk in astream(messages, *, tools=None)` | text deltas         |
+| `for chunk in stream(messages, *, tools=None)`      | text deltas           |
+
+Snippets that `await` belong inside an `async def` run with `asyncio.run(...)`, or paste them
+into `python -m asyncio`.
 
 ```python
 from deepharness import Anthropic, Gemini, OpenAI
 
 llm = OpenAI(model="gpt-4o-mini", api_key="sk-...")
-llm = Gemini(model="gemini-2.0-flash", api_key="...")  # same interface
-llm = Anthropic(
-    model="claude-3-5-sonnet-20241022", api_key="sk-ant-..."
-)  # same interface
+llm = Gemini(model="gemini-2.5-flash", api_key="...")  # same interface
+llm = Anthropic(model="claude-sonnet-4-5", api_key="sk-ant-...")  # same interface
 
 response = await llm.agenerate([{"role": "user", "content": "Hi"}])
 print(response.content, response.tool_calls)
@@ -26,7 +27,8 @@ async for chunk in llm.astream([{"role": "user", "content": "Write a haiku"}]):
 ```
 
 Responses normalize to a vendor-neutral `CompletionResponse(content: str, tool_calls:
-list[ToolCall], usage: TokenUsage | None, blocks: list[Block])`.
+list[ToolCall], usage: TokenUsage | None, finish_reason: str, blocks: list[Block])`, with the
+model's reasoning, if any, on `.thinking`.
 
 !!! note
     `astream()`/`stream()` yield **text only**. Tool calls are resolved through `generate` /
@@ -96,7 +98,7 @@ Two knobs for what a harness does differently from a chat: it sends the same lon
 turn, and it fans out.
 
 ```python
-llm = Anthropic("claude-3-5-sonnet-20241022", cache_prompt=True, max_concurrency=8)
+llm = Anthropic("claude-sonnet-4-5", cache_prompt=True, max_concurrency=8)
 ```
 
 `cache_prompt=True` (Anthropic) puts a cache breakpoint on the system prompt and the last tool
@@ -149,8 +151,8 @@ llm = Caching(
 ```
 
 Read it outside-in: the cache is asked first, then the limiter, then the retry, and the
-fallback is what actually talks to a vendor. `llm.inner` reaches the provider underneath, and
-`aclose()`/`close()` pass all the way down.
+fallback is what actually talks to a vendor. `inner` is the next layer down (`models` on
+`Fallback`), and `aclose()`/`close()` pass all the way down.
 
 ### `Fallback`
 
