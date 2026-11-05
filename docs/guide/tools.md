@@ -239,7 +239,8 @@ mcp = MCPServer.http(
     "https://tools.internal/mcp", headers={"Authorization": f"Bearer {key}"}
 )
 tools = await mcp.tools()  # list[Callable], ready for Agent(tools=...)
-listed = await mcp.list_tools()  # list[MCPTool] - name, description, input_schema, read_only
+# list[MCPTool]: name, description, input_schema, read_only
+listed = await mcp.list_tools()
 ```
 
 ### What is covered, and how to cover the rest
