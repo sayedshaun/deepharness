@@ -31,7 +31,9 @@ agent isn't limited to one. See the [tools guide](tools.md) for how a function b
 
 Same split as providers: `arun()` is the async path — tool calls requested in the same turn
 run **concurrently**, sync tools included: those go to a thread so one blocking call cannot
-stall the rest. `run()` is a real synchronous path rather than a wrapper, so it raises
+stall the rest. The exception is a turn with a call a `Toolbox(approve=...)` will ask
+about: that turn runs in the model's order, so nothing after the gated call runs before the
+ruling. `run()` is a real synchronous path rather than a wrapper, so it raises
 if a registered tool turns out to be `async def` — there's no event loop here to await it:
 
 ```python
@@ -253,7 +255,7 @@ agent = Agent(model, tools=Toolbox([wire_transfer], approve=approve))
 ```
 
 The gate belongs to the toolbox, so it also holds when a `Graph` node or your own code calls
-`tools.call(...)` directly; catch `ToolDenied` there to decide what a refusal means. Without
+`tools.call(name, arguments)` directly; catch `ToolDenied` there to decide what a refusal means. Without
 `approve=` the run pauses as above.
 
 The gate lives on the tool, not in the prompt, so a model cannot route around it by declining to
