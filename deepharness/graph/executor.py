@@ -76,6 +76,7 @@ class Executor:
             )
         current = copy.deepcopy(state)
         finished: set[str] = set()
+        skipped: set[str] = set()
         ready = [name for name, spec in self._nodes.items() if spec.start]
 
         for _ in range(max_steps):
@@ -94,7 +95,8 @@ class Executor:
             finished.update(ready)
 
             reentered = self._reenter_loops(set(ready), finished, current)
-            ready = self._next_ready(finished, current)
+            skipped &= finished  # a re-entered loop body may run this time
+            ready = self._next_ready(finished, skipped, current)
             # A re-entered loop head has no unfinished predecessors to wait on,
             # so schedule it directly rather than through dependency readiness.
             ready += [name for name in reentered if name not in ready]
@@ -116,20 +118,37 @@ class Executor:
                 heads.append(target)
         return heads
 
-    def _next_ready(self, finished: set[str], state: Any) -> list[str]:
+    def _next_ready(
+        self, finished: set[str], skipped: set[str], state: Any
+    ) -> list[str]:
+        """The nodes to run next, marking the ones no active edge reaches skipped.
+
+        An edge is active only when its source actually ran, so a skip carries
+        on downstream instead of a skipped branch's successors running anyway.
+        Repeated until nothing new is skipped, since a skip can settle a node
+        this pass already looked at.
+        """
         ready: list[str] = []
-        for name in self._nodes:
-            if name in finished:
-                continue
+        changed = True
+        while changed:
+            changed = False
+            for name in self._nodes:
+                if name in finished or name in ready:
+                    continue
 
-            preds = self._predecessors[name]
-            if not preds or not all(source in finished for source, _ in preds):
-                continue
+                preds = self._predecessors[name]
+                if not preds or not all(source in finished for source, _ in preds):
+                    continue
 
-            if any(condition is None or condition(state) for _, condition in preds):
-                ready.append(name)
-            else:
-                finished.add(name)  # all predecessors done, but no active edge: skip
+                if any(
+                    source not in skipped and (condition is None or condition(state))
+                    for source, condition in preds
+                ):
+                    ready.append(name)
+                else:
+                    finished.add(name)
+                    skipped.add(name)
+                    changed = True
 
         return ready
 
