@@ -1,5 +1,6 @@
 """requires_approval: a gated call defers until a human allows it."""
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -318,6 +319,45 @@ def test_calls_the_toolbox_asks_about_keep_the_models_order():
     assert results == ["a", "b"]
 
 
+async def test_arun_waits_for_the_ruling_before_running_later_calls():
+    ran = []
+
+    @tool(requires_approval=True)
+    def write_file() -> str:
+        """Write the file."""
+        ran.append("write_file")
+        return "written"
+
+    @tool
+    def run_tests() -> str:
+        """Run the tests."""
+        ran.append("run_tests")
+        return "passed"
+
+    async def approve(name, arguments):
+        await asyncio.sleep(0.05)  # a human taking their time
+        ran.append(f"asked {name}")
+        return True
+
+    provider = ScriptedProvider(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id="a", name="write_file", arguments={}),
+                    ToolCall(id="b", name="run_tests", arguments={}),
+                ],
+            ),
+            CompletionResponse(content="done"),
+        ]
+    )
+    toolbox = Toolbox([write_file, run_tests], approve=approve)
+
+    await Agent(provider, tools=toolbox).arun("write then test")
+
+    assert ran == ["asked write_file", "write_file", "run_tests"]
+
+
 def test_a_toolbox_that_can_ask_works_on_the_sync_path():
     provider = ScriptedProvider([transfer_turn(), CompletionResponse(content="Sent.")])
     agent = Agent(
@@ -335,13 +375,25 @@ async def test_the_toolbox_asks_when_called_directly():
         [wire_transfer, balance], approve=lambda name, args: args["amount_usd"] < 100
     )
 
-    assert await toolbox.call("wire_transfer", amount_usd=10) == "sent $10"
+    assert await toolbox.call("wire_transfer", {"amount_usd": 10}) == "sent $10"
     with pytest.raises(ToolDenied) as denied:
-        await toolbox.call("wire_transfer", amount_usd=500)
+        await toolbox.call("wire_transfer", {"amount_usd": 500})
     assert denied.value.name == "wire_transfer"
     assert denied.value.arguments == {"amount_usd": 500}
     assert toolbox.call_sync("balance") == "$1,000,000"
     assert SENT == [10]
+
+
+def test_an_argument_named_ask_cannot_switch_the_gate_off():
+    @tool(requires_approval=True)
+    def wipe(ask: bool = False) -> str:
+        """Wipe everything."""
+        return "wiped"
+
+    toolbox = Toolbox([wipe], approve=lambda name, args: False)
+
+    with pytest.raises(ToolDenied):
+        toolbox.call_sync("wipe", {"ask": False})
 
 
 async def test_an_async_approver_is_awaited():
@@ -350,7 +402,7 @@ async def test_an_async_approver_is_awaited():
 
     toolbox = Toolbox([wire_transfer], approve=approve)
 
-    assert await toolbox.call("wire_transfer", amount_usd=1) == "sent $1"
+    assert await toolbox.call("wire_transfer", {"amount_usd": 1}) == "sent $1"
 
 
 def test_an_async_approver_is_refused_on_the_sync_path():
@@ -360,14 +412,15 @@ def test_an_async_approver_is_refused_on_the_sync_path():
     toolbox = Toolbox([wire_transfer], approve=approve)
 
     with pytest.raises(ConfigurationError, match="async"):
-        toolbox.call_sync("wire_transfer", amount_usd=1)
+        toolbox.call_sync("wire_transfer", {"amount_usd": 1})
     assert SENT == []
 
 
 def test_a_toolbox_without_an_approver_does_not_gate():
     """The agent pauses before the call reaches it; the toolbox just runs it."""
     assert (
-        Toolbox([wire_transfer]).call_sync("wire_transfer", amount_usd=1) == "sent $1"
+        Toolbox([wire_transfer]).call_sync("wire_transfer", {"amount_usd": 1})
+        == "sent $1"
     )
 
 
@@ -383,7 +436,7 @@ async def test_a_graph_node_calling_a_gated_tool_is_asked():
     @graph.add(start=True, end=True)
     async def pay(state: Payment) -> Payment:
         try:
-            state.result = await toolbox.call("wire_transfer", amount_usd=50)
+            state.result = await toolbox.call("wire_transfer", {"amount_usd": 50})
         except ToolDenied:
             state.result = "skipped"
         return state

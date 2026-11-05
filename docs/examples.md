@@ -1,7 +1,9 @@
 # Examples
 
-Short, self-contained pieces, in the order they get harder. Each one is the smallest code that
-shows the thing it is about — copy it, swap the model for a real provider, and it runs.
+Short pieces, in the order they get harder, each the smallest code that shows the thing it is
+about. The first two run as they are. The rest reuse the `llm` and `agent` from the first, and
+the ones that `await` belong inside an `async def` run with `asyncio.run(...)` — or paste them
+into `python -m asyncio`.
 
 ## An agent with one tool
 
@@ -19,7 +21,8 @@ def get_weather(city: str) -> str:
     return f"It is 22°C and sunny in {city}."
 
 
-agent = Agent(OpenAI("gpt-4o-mini"), tools=[get_weather])
+llm = OpenAI("gpt-4o-mini")
+agent = Agent(llm, tools=[get_weather])
 
 state = asyncio.run(agent.arun("Weather in Oslo?"))
 print(state.answered, state.output)
@@ -76,7 +79,7 @@ def check_flights(city: str) -> str:
     raise RuntimeError("airline API timed out")
 
 
-agent = Agent(model, tools=[check_flights])
+agent = Agent(llm, tools=[check_flights])
 state = await agent.arun("Any flights to Paris?")
 ```
 
@@ -135,7 +138,7 @@ See [loops](guide/graph.md#loops) for the re-entry rules and `max_steps`.
 Mark the tool and the agent pauses *before* running it, every time:
 
 ```python
-from deepharness import tool
+from deepharness import Agent, tool
 
 
 @tool(requires_approval=True)
@@ -144,6 +147,7 @@ def wire_transfer(amount_usd: int, to: str) -> str:
     return f"sent ${amount_usd:,} to {to}"
 
 
+agent = Agent(llm, tools=[wire_transfer])
 state = await agent.arun("Pay the Acme invoice")
 print(state.stop_reason)  # "paused"
 print(state.paused[0].question)  # Run wire_transfer with {'amount_usd': 50000, ...}?
@@ -173,7 +177,7 @@ A parameter annotated `Ctx` is filled by the runtime and hidden from the model, 
 per-request dependencies without a global:
 
 ```python
-from deepharness import Ctx, tool
+from deepharness import Agent, Ctx, tool
 
 
 @tool
@@ -182,6 +186,8 @@ def lookup_plan(customer: str, ctx: Ctx) -> str:
     return ctx.deps.db.plan_for(customer, tenant=ctx.deps.tenant)
 
 
+agent = Agent(llm, tools=[lookup_plan])
+# Deps and db are yours: whatever the tool needs per request.
 state = await agent.arun("What plan is Acme on?", deps=Deps(db=db, tenant="acme"))
 ```
 

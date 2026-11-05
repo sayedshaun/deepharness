@@ -8,12 +8,12 @@ title: DeepHarness
 
 # DeepHarness
 
-<p class="sa-tagline">A harness for LLM agents: workspace tools, permissions, and typed, concurrent workflows.</p>
+<p class="sa-tagline">A harness for LLM agents: tools, permissions, and typed, concurrent workflows.</p>
 
 <p class="sa-subtitle">
-Build agents that read and change a codebase under an explicit permission policy, and
-compose them as a graph of plain Python functions: parallel branches, typed state, and
-15 LLM providers behind one interface.
+Build agents that call tools under an explicit permission policy and pause for human
+approval, and compose them as a graph of plain Python functions: parallel branches, typed
+state, and 15 LLM providers behind one interface.
 </p>
 
 [Get started :octicons-arrow-right-24:](getting-started.md){ .md-button .md-button--primary }
@@ -42,7 +42,7 @@ compose them as a graph of plain Python functions: parallel branches, typed stat
 - **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
   per-call [permission policy](guide/tools.md#permissions-deciding-per-call), a
   [bounded context window](guide/agents.md#context-management), progress events and
-  progress events and [provider wrappers](guide/providers.md#wrapping-a-provider) — the parts
+  [provider wrappers](guide/providers.md#wrapping-a-provider) — the parts
   a run needs once it is long enough to matter.
 
 ## Install

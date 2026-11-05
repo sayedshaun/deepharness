@@ -379,6 +379,71 @@ async def test_conditional_fan_out_into_join_still_works():
     assert result.trace == ["researcher", "join"]
 
 
+async def test_a_skipped_node_skips_what_only_it_leads_to():
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def review(state: State) -> State:
+        state.trace.append("review")
+        return state
+
+    @graph.add()
+    def publish(state: State) -> State:
+        state.trace.append("publish")
+        return state
+
+    @graph.add()
+    def announce(state: State) -> State:
+        state.trace.append("announce")
+        return state
+
+    @graph.add()
+    def revise(state: State) -> State:
+        state.trace.append("revise")
+        return state
+
+    graph.connect(review, publish, condition=lambda s: s.result_a == "approved")
+    graph.connect(review, revise, condition=lambda s: s.result_a != "approved")
+    graph.connect(publish, announce)
+
+    result = await graph.build().run(State())
+
+    assert result.trace == ["review", "revise"]
+
+
+async def test_a_skip_settles_nodes_registered_before_it():
+    graph = Graph(State)
+
+    @graph.add(end=True)
+    def finish(state: State) -> State:
+        state.trace.append("finish")
+        return state
+
+    @graph.add()
+    def tail(state: State) -> State:
+        state.trace.append("tail")
+        return state
+
+    @graph.add(start=True)
+    def head(state: State) -> State:
+        state.trace.append("head")
+        return state
+
+    @graph.add()
+    def maybe(state: State) -> State:
+        state.trace.append("maybe")
+        return state
+
+    graph.connect(head, maybe, condition=lambda s: False)
+    graph.connect(maybe, tail)
+    graph.connect(tail, finish)
+    graph.connect(head, finish)
+
+    result = await graph.build().run(State())
+
+    assert result.trace == ["head", "finish"]
+
+
 async def test_run_without_a_state_builds_the_declared_type():
     graph = Graph(State)
 

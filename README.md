@@ -1,11 +1,11 @@
 <div align="center">
 <h1><img src="https://raw.githubusercontent.com/sayedshaun/deepharness/main/docs/assets/logo.png" width="220" alt="DeepHarness logo"><br>DeepHarness</h1>
 
-**A harness for LLM agents: workspace tools, permissions, and typed, concurrent workflows.**
+**A harness for LLM agents: tools, permissions, and typed, concurrent workflows.**
 
-Build agents that read and change a codebase under an explicit permission policy, and compose
-them as a graph of plain Python functions: parallel branches, typed state, and 15 LLM providers
-behind one interface.
+Build agents that call tools under an explicit permission policy and pause for human approval,
+and compose them as a graph of plain Python functions: parallel branches, typed state, and 15
+LLM providers behind one interface.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![CI](https://github.com/sayedshaun/deepharness/actions/workflows/test.yml/badge.svg)](https://github.com/sayedshaun/deepharness/actions/workflows/test.yml) [![PyPI](https://img.shields.io/pypi/v/deepharness?logo=pypi&logoColor=white&color=3775A9)](https://pypi.org/project/deepharness/) [![Dependencies: httpx only](https://img.shields.io/badge/dependencies-httpx%20only-6E63F5)](https://github.com/sayedshaun/deepharness/blob/main/pyproject.toml) [![Async native](https://img.shields.io/badge/async-native-0EA5E9)](#quickstart) [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff) [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE) [![Read the docs](https://img.shields.io/badge/docs-read%20the%20docs-3776AB?logo=materialformkdocs&logoColor=white)](https://sayedshaun.github.io/deepharness/)
 
@@ -71,7 +71,8 @@ print(result.output)
 ```
 
 Every entry point comes in both flavours — `run()` / `arun()` and `stream()` / `astream()` —
-so the same agent drops into a script or an event loop unchanged:
+so the same agent drops into a script or an event loop unchanged. The snippets below that
+`await` belong inside an `async def` run with `asyncio.run(...)`:
 
 ```python
 result = await agent.arun("Weather in Oslo?")
@@ -90,14 +91,18 @@ editor = Agent(
     name="editor",
     tools=[researcher.as_tool(description="Look up facts on a topic.")],
 )
+
+state = await editor.arun("What is the capital of Norway?")
 ```
+
+`as_tool()` returns an async tool, so drive the outer agent with `arun()`.
 
 ## Working in a directory
 
 An agent that can read a codebase and change it, with the sharp edges gated:
 
 ```python
-from deepharness import Agent
+from deepharness import Agent, OpenAI
 from deepharness.agent import ContextPolicy
 from deepharness.tools import Permissions, Rule, ToolName, file_tools, shell_tool
 
@@ -145,8 +150,9 @@ then delegate" — so each one is just another `LLM`. They compose at the call s
 order is visible:
 
 ```python
-from deepharness import Anthropic, OpenAI
+from deepharness import Agent, Anthropic, OpenAI
 from deepharness.providers import Caching, Fallback, RateLimited
+from deepharness.tools import file_tools
 
 llm = Caching(
     RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)

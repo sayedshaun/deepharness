@@ -61,7 +61,8 @@ step, branching) is better served composing `Agent`s into a `Graph` directly. Se
 
 `astream_events()` is the actual driver — `arun()` just consumes it and keeps the last event, the
 same relationship `Agent.astream_events()`/`arun()` have. Iterate it directly to show progress as
-it happens, or read the synthesizer's report as it is written:
+it happens, or read the synthesizer's report as it is written. The loop belongs inside an
+`async def` run with `asyncio.run(...)`:
 
 ```python
 from deepharness import TextDelta

@@ -83,7 +83,7 @@ async def test_toolbox_calls_sync_tool():
     toolbox = Toolbox()
     toolbox.register(add)
 
-    result = await toolbox.call("add", a=1, b=2)
+    result = await toolbox.call("add", {"a": 1, "b": 2})
 
     assert result == 3
 
@@ -96,9 +96,19 @@ async def test_toolbox_calls_async_tool():
     toolbox = Toolbox()
     toolbox.register(fetch)
 
-    result = await toolbox.call("fetch", url="example.com")
+    result = await toolbox.call("fetch", {"url": "example.com"})
 
     assert result == "content of example.com"
+
+
+def test_a_tool_argument_can_share_a_name_with_calls_own_parameters():
+    @tool
+    def greet(name: str, ask: str, ctx: str) -> str:
+        return f"{name}|{ask}|{ctx}"
+
+    toolbox = Toolbox([greet])
+
+    assert toolbox.call_sync("greet", {"name": "a", "ask": "b", "ctx": "c"}) == "a|b|c"
 
 
 def test_toolbox_get_unknown_tool_raises():

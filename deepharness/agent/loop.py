@@ -74,7 +74,8 @@ class Agent:
       make before trusting it.
     * run() is a real synchronous path, not arun() wrapped in an event loop, so
       it raises for a tool that turns out to be `async def`. arun() dispatches a
-      turn's tools concurrently, sync ones included - those go to threads.
+      turn's tools concurrently, sync ones included - those go to threads -
+      except in a turn with a call the toolbox asks about, which runs in order.
     * A failing tool does not end the run: the error becomes that call's result
       so the model gets a turn to correct itself.
     * total_usage accumulates across every model call this instance makes, not
@@ -401,15 +402,27 @@ class Agent:
                             yield event
                         else:
                             outcome = event.response
+                elif any(request.ask):
+                    # A call the toolbox asks about runs in the model's order,
+                    # one at a time: gathering would run the calls after it
+                    # while the human is still deciding, even if they refuse.
+                    results: list[Any] = []
+                    for call, ask in zip(request.calls, request.ask, strict=True):
+                        yield ToolStarted(call.name, call.arguments, call.id)
+                        result = await self._call_tool(
+                            call.name, call.arguments, ctx, ask
+                        )
+                        results.append(result)
+                        if (finished := self._finished(call, result)) is not None:
+                            yield finished
+                    outcome = results
                 else:
                     for call in request.calls:
                         yield ToolStarted(call.name, call.arguments, call.id)
                     outcome = await asyncio.gather(
                         *(
-                            self._call_tool(call.name, call.arguments, ctx, ask)
-                            for call, ask in zip(
-                                request.calls, request.ask, strict=True
-                            )
+                            self._call_tool(call.name, call.arguments, ctx, False)
+                            for call in request.calls
                         )
                     )
                     for call, result in zip(request.calls, outcome, strict=True):
@@ -486,22 +499,22 @@ class Agent:
         return ToolFinished(call.name, content, failed, call.id)
 
     async def _call_tool(
-        self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool = False
+        self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool
     ) -> Any:
         # ask is explicit either way: the permission rules have already decided
         # this call, and an allow rule must not be re-asked by the toolbox.
         try:
-            return await self._tools.call(name, ctx=ctx, ask=ask, **arguments)
+            return await self._tools.call(name, arguments, ctx=ctx, ask=ask)
         except ConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001 - see turn.record_results
             return exc
 
     def _call_tool_sync(
-        self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool = False
+        self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool
     ) -> Any:
         try:
-            return self._tools.call_sync(name, ctx=ctx, ask=ask, **arguments)
+            return self._tools.call_sync(name, arguments, ctx=ctx, ask=ask)
         except ConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001 - see turn.record_results

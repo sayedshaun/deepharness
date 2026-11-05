@@ -3,6 +3,9 @@
 A tool is just a Python function. `@tool` derives a JSON schema from its signature and
 docstring, so a model can call it.
 
+Snippets here use an `llm` such as `OpenAI("gpt-4o-mini")`. The ones that `await` belong inside
+an `async def` run with `asyncio.run(...)`, or paste them into `python -m asyncio`.
+
 ```python
 from deepharness import tool
 
@@ -15,7 +18,7 @@ def get_weather(city: str) -> str:
 
 - Parameter types come from the annotations, including the shapes inside them: `list[int]`
   becomes an array of integers, `Literal["c", "f"]` and an `Enum` become an enum, `int | None`
-  keeps its type but stops being required, and `int | str` becomes an `anyOf`.
+  keeps its type (give it a default such as `= None` to make it optional), and `int | str` becomes an `anyOf`.
 - An annotation that can't be described — an arbitrary class, `Any`, or none at all — is left
   unconstrained rather than mislabelled as a string. The model falls back on the parameter name
   and your docstring.
@@ -152,6 +155,8 @@ agent = Agent(llm, tools=[*file_tools("."), shell_tool(".")], permissions=permis
 Three forms, and they mean the same thing:
 
 ```python
+read_file, list_files, search_files, write_file, edit_file = file_tools(".")
+
 Permissions(ask=[write_file])  # the tool itself, when it is in scope
 Permissions(ask=[ToolName.WRITE_FILE])  # the built-in names, as a StrEnum
 Permissions(ask=["write_file"])  # a name, or a pattern like "write_*"
@@ -234,7 +239,8 @@ mcp = MCPServer.http(
     "https://tools.internal/mcp", headers={"Authorization": f"Bearer {key}"}
 )
 tools = await mcp.tools()  # list[Callable], ready for Agent(tools=...)
-listed = await mcp.list_tools()  # list[MCPTool] - name, description, schema, read_only
+# list[MCPTool]: name, description, input_schema, read_only
+listed = await mcp.list_tools()
 ```
 
 ### What is covered, and how to cover the rest

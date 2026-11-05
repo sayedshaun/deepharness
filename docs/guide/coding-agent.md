@@ -9,11 +9,10 @@ import asyncio
 from deepharness import Agent, OpenAI
 from deepharness.tools import file_tools
 
-agent = Agent(
-    OpenAI("gpt-4o-mini"),
-    tools=file_tools("."),
-    system="Work in the repository you are given. Read before you edit.",
-)
+llm = OpenAI("gpt-4o-mini")
+SYSTEM = "Work in the repository you are given. Read before you edit."
+
+agent = Agent(llm, tools=file_tools("."), system=SYSTEM)
 
 state = asyncio.run(agent.arun("What does the executor do?"))
 print(state.output)
@@ -23,6 +22,9 @@ That already works: `file_tools()` gives the model `read_file`, `list_files`, `s
 `write_file` and `edit_file`, every path resolved inside the directory you named. A path that
 climbs out of it raises `OutsideWorkspace`, which reaches the model as that call's result — so
 it corrects itself, and the read never happens.
+
+The later snippets reuse `llm` and `SYSTEM`, and the ones that `await` belong inside an
+`async def` run with `asyncio.run(...)` — the complete script at the end does exactly that.
 
 Two things are wrong with it, and the rest of this page is fixing them: it can edit your files
 with no say from you, and it will eventually send a request larger than the model's context

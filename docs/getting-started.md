@@ -71,18 +71,19 @@ incoming edges, so it waits for **both** before running — a join, expressed by
 
 ## Adding an agent
 
-Drop an [`Agent`](guide/agents.md) inside any node and the graph handles sequencing around it:
+Drop an [`Agent`](guide/agents.md) inside any node and the graph handles sequencing around it.
+Use this `summarize` in place of the one above, and a model writes the summary once both
+lookups are in:
 
 ```python
-from deepharness import Agent, Message
-from deepharness import OpenAI
+from deepharness import Agent, OpenAI
 
 writer = Agent(OpenAI("gpt-4o-mini"), name="writer", system="You are concise.")
 
 
-@graph.add(start=True, end=True)
-async def write(state: State) -> State:
-    out = await writer.arun(f"Summarize: {state.sales}")
+@graph.add(end=True)
+async def summarize(state: State) -> State:
+    out = await writer.arun(f"Summarize: {state.sales} {state.churn}")
     state.summary = out.output
     return state
 ```

@@ -1,4 +1,6 @@
 import asyncio
+import http.server
+import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -100,7 +102,6 @@ def test_clients_get_a_timeout_long_enough_for_a_completion():
     http = HTTPClient("https://example.com")
 
     assert http._sync_client.timeout == DEFAULT_TIMEOUT
-    assert http._async_client.timeout == DEFAULT_TIMEOUT
     assert DEFAULT_TIMEOUT.read is not None and DEFAULT_TIMEOUT.read > 60
 
 
@@ -229,3 +230,30 @@ def test_a_capped_client_survives_a_second_event_loop():
     asyncio.run(four())  # a provider outliving one asyncio.run() is normal
 
     assert state["peak"] == 2
+
+
+def test_a_client_survives_a_second_asyncio_run():
+    """A keep-alive connection from the first loop must not be reused in the next."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        client = HTTPClient(f"http://127.0.0.1:{server.server_port}")
+        for _ in range(2):
+            response = asyncio.run(client.post("/", json={}))
+            assert response.text == "ok"
+    finally:
+        server.shutdown()

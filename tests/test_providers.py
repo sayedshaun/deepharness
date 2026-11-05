@@ -935,13 +935,13 @@ def test_openai_sends_no_auth_header_without_a_key(monkeypatch):
 
     provider = OpenAI(model="local", api_key="")
 
-    assert "authorization" not in provider._http._async_client.headers
+    assert "authorization" not in provider._http._sync_client.headers
 
 
 def test_openai_still_sends_a_key_when_given_one():
     provider = OpenAI(model="gpt-test", api_key="secret")
 
-    assert provider._http._async_client.headers["authorization"] == "Bearer secret"
+    assert provider._http._sync_client.headers["authorization"] == "Bearer secret"
 
 
 async def test_anthropic_puts_a_cache_breakpoint_on_the_prompt_and_tools():

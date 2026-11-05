@@ -4,8 +4,7 @@ An `Agent` runs a think/act loop against a model: ask for a response, dispatch a
 it requests, repeat until the model answers with no tool calls or the step budget is spent.
 
 ```python
-from deepharness import Agent, Budget, Message, tool
-from deepharness import OpenAI
+from deepharness import Agent, Budget, Message, OpenAI, tool
 
 
 @tool
@@ -14,15 +13,15 @@ def get_weather(city: str) -> str:
     return f"It is 22°C and sunny in {city}."
 
 
-agent = Agent(
-    OpenAI(model="gpt-4o-mini", api_key="sk-..."),
-    system="You are a concise assistant.",
-    tools=[get_weather],
-)
+llm = OpenAI(model="gpt-4o-mini", api_key="sk-...")
+agent = Agent(llm, system="You are a concise assistant.", tools=[get_weather])
 
-result = await agent.arun("Weather in Oslo?")
+result = agent.run("Weather in Oslo?")
 print(result.output)
 ```
+
+The rest of this page reuses `llm` and `agent`. Snippets that `await` belong inside an
+`async def` run with `asyncio.run(...)`, or paste them into `python -m asyncio`.
 
 `tools=` accepts any number of functions — decorated with [`@tool`](tools.md) or plain — an
 agent isn't limited to one. See the [tools guide](tools.md) for how a function becomes a tool.
@@ -31,7 +30,9 @@ agent isn't limited to one. See the [tools guide](tools.md) for how a function b
 
 Same split as providers: `arun()` is the async path — tool calls requested in the same turn
 run **concurrently**, sync tools included: those go to a thread so one blocking call cannot
-stall the rest. `run()` is a real synchronous path rather than a wrapper, so it raises
+stall the rest. The exception is a turn with a call a `Toolbox(approve=...)` will ask
+about: that turn runs in the model's order, so nothing after the gated call runs before the
+ruling. `run()` is a real synchronous path rather than a wrapper, so it raises
 if a registered tool turns out to be `async def` — there's no event loop here to await it:
 
 ```python
@@ -47,7 +48,7 @@ result = await agent.arun("Weather in Oslo?")  # async, concurrent tool calls
 | --- | --- |
 | `messages` | The transcript, as wire-form dicts. |
 | `output` | The answer: text, or an `output=` instance when one is set. |
-| `usage` | `TokenUsage` for this run. |
+| `usage` | The agent's cumulative `TokenUsage` — every run it has made so far, not just this one. |
 | `stop_reason` | Why the loop ended: `"answer"`, `"step_budget"`, `"paused"`, `"token_budget"`, `"truncated"`. |
 | `paused` | Any `PendingHumanInput` waiting on a human; empty otherwise. |
 | `answered` | `True` only when `stop_reason == "answer"` — check this before trusting `output`. |
@@ -147,10 +148,11 @@ from both ends.
 ```python
 from deepharness import Agent
 from deepharness.agent import ContextPolicy
+from deepharness.tools import file_tools
 
 agent = Agent(
     llm,
-    tools=[read_file],
+    tools=file_tools("."),
     context=ContextPolicy(max_tokens=100_000, tool_result_chars=8_000),
 )
 ```
@@ -223,6 +225,7 @@ def wire_transfer(amount_usd: int, to: str) -> str:
     return f"sent ${amount_usd:,} to {to}"
 
 
+agent = Agent(llm, tools=[wire_transfer])
 state = await agent.arun("Pay the Acme invoice")
 print(state.stop_reason)  # "paused"
 print(state.paused[0].question)  # Run wire_transfer with {'amount_usd': 50000, ...}?
@@ -253,7 +256,7 @@ agent = Agent(model, tools=Toolbox([wire_transfer], approve=approve))
 ```
 
 The gate belongs to the toolbox, so it also holds when a `Graph` node or your own code calls
-`tools.call(...)` directly; catch `ToolDenied` there to decide what a refusal means. Without
+`tools.call(name, arguments)` directly; catch `ToolDenied` there to decide what a refusal means. Without
 `approve=` the run pauses as above.
 
 The gate lives on the tool, not in the prompt, so a model cannot route around it by declining to
@@ -278,6 +281,7 @@ def confirm(question: str) -> str:
     raise HumanInputRequired(question)
 
 
+agent = Agent(llm, tools=[confirm])
 state = await agent.arun("...")
 pending = state.paused[0]
 state.messages.append(
@@ -316,18 +320,18 @@ dataclass; reconstructing the type would mean trusting an import path out of sto
 
 ## Messages
 
-`Message` is a `dict` subclass with role-named constructors, so it's a drop-in replacement for
-`{"role": ..., "content": ...}` everywhere a message is expected:
+`Message` is a small dataclass with role-named constructors. Pass one anywhere a message is
+expected — a plain `{"role": ..., "content": ...}` dict works too — and `to_dict()` gives the
+wire form:
 
 ```python
 from deepharness import Message
 
-Message.system("You are a concise assistant.")  # {"role": "system", "content": "..."}
-Message.human("What's the weather in Oslo?")  # {"role": "user", "content": "..."}
-Message.ai("It's 22°C and sunny.")  # {"role": "assistant", "content": "..."}
-Message.tool(
-    "22°C, sunny", name="get_weather"
-)  # {"role": "tool", "name": "...", "content": "..."}
+Message.system("Be concise.").to_dict()  # {"role": "system", "content": "..."}
+Message.human("Weather in Oslo?").to_dict()  # {"role": "user", "content": "..."}
+Message.ai("It's 22°C and sunny.").to_dict()  # {"role": "assistant", "content": "..."}
+Message.tool("22°C, sunny", name="get_weather").to_dict()
+# {"role": "tool", "content": "...", "name": "get_weather"}
 ```
 
 You only need the `tool_calls=`/`call_id=` forms yourself if you're building messages by hand
