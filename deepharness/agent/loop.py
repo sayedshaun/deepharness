@@ -486,22 +486,22 @@ class Agent:
         return ToolFinished(call.name, content, failed, call.id)
 
     async def _call_tool(
-        self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool = False
+        self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool
     ) -> Any:
         # ask is explicit either way: the permission rules have already decided
         # this call, and an allow rule must not be re-asked by the toolbox.
         try:
-            return await self._tools.call(name, ctx=ctx, ask=ask, **arguments)
+            return await self._tools.call(name, arguments, ctx=ctx, ask=ask)
         except ConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001 - see turn.record_results
             return exc
 
     def _call_tool_sync(
-        self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool = False
+        self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool
     ) -> Any:
         try:
-            return self._tools.call_sync(name, ctx=ctx, ask=ask, **arguments)
+            return self._tools.call_sync(name, arguments, ctx=ctx, ask=ask)
         except ConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001 - see turn.record_results

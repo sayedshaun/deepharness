@@ -274,18 +274,24 @@ class Toolbox:
     async def call(
         self,
         name: str,
+        arguments: dict[str, Any] | None = None,
         *,
         ctx: Ctx | None = None,
         ask: bool | None = None,
-        **kwargs: Any,
     ) -> Any:
         """Invoke a tool, running a sync one off the event loop.
+
+        The tool's arguments come as one dict, not as keywords, so that none of
+        them can land on this method's own parameters: a tool with a `name`
+        parameter stays callable, and a model-supplied `ask` cannot switch the
+        approval gate off.
 
         The concurrency arun() promises comes from gathering a turn's tool calls,
         and a blocking call inside one of those coroutines defeats it - so a
         plain def tool goes to a thread rather than stalling every other tool
         waiting alongside it.
         """
+        kwargs = dict(arguments or {})
         spec = self.get(name)
         verdict = self._verdict(spec, ask, kwargs)
         if inspect.isawaitable(verdict):
@@ -303,11 +309,13 @@ class Toolbox:
     def call_sync(
         self,
         name: str,
+        arguments: dict[str, Any] | None = None,
         *,
         ctx: Ctx | None = None,
         ask: bool | None = None,
-        **kwargs: Any,
     ) -> Any:
+        """Synchronous counterpart to call(). Raises if the tool is async."""
+        kwargs = dict(arguments or {})
         spec = self.get(name)
         verdict = self._verdict(spec, ask, kwargs)
         if inspect.isawaitable(verdict):
