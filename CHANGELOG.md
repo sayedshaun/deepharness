@@ -12,6 +12,10 @@ breaking change raises the minor version.
   `AgentState.from_dict(data)`. The equivalent of the old pair is
   `Path(p).write_text(json.dumps(state.to_dict()))` and
   `AgentState.from_dict(json.loads(Path(p).read_text()))`.
+- `Toolbox.call` and `Toolbox.call_sync` take the tool's arguments as one dict:
+  `toolbox.call("add", {"a": 1, "b": 2})` instead of `toolbox.call("add", a=1, b=2)`. As
+  keywords they could collide with the method's own parameters, so a tool with a `name`
+  argument could not be called, and an `ask` argument could switch off the approval gate.
 
 ### Added
 
