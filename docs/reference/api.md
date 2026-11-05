@@ -120,11 +120,9 @@ paid for. `tokens` caps cumulative usage and raises `TokenBudgetExceeded` when c
 `Budget(steps=1)` makes an agent single-shot: one model call, and no turn to react to a tool
 result. Non-positive values raise `ConfigurationError`.
 
-`state` is a dict with a `messages` key (a list of [`Message`](#message)/dict). The returned
-dict adds `output` (the model's final text) and `usage` (a `TokenUsage`).
-
-Without a `model`, `run`/`arun` are a no-op passthrough — useful as a placeholder while
-wiring a graph.
+An `Agent`'s `state` argument is anything `AgentState.of()` accepts — a prompt, a list of
+messages, or a state to resume — and the result is an `AgentState`. Without a `model`,
+`run`/`arun` are a no-op passthrough — useful as a placeholder while wiring a graph.
 
 ### `ContextPolicy`
 
@@ -159,7 +157,7 @@ a tokenizer — a real count would mean a per-vendor dependency.
 ### `AgentEvent`
 
 ```python
-AgentEvent = TextDelta | StepStarted | ToolStarted | ToolFinished | Finished
+AgentEvent = TextDelta | ThinkingDelta | StepStarted | ToolStarted | ToolFinished | Finished
 ```
 
 What `astream_events()`/`stream_events()` emit.
@@ -176,8 +174,10 @@ What `astream_events()`/`stream_events()` emit.
 ### `TokenBudgetExceeded`
 
 ```python
-TokenBudgetExceeded(agent_name: str, usage: TokenUsage, budget: int)
+TokenBudgetExceeded(agent_name: str, usage: TokenUsage, budget: int, state: dict | None = None)
 ```
+
+`state` carries the run as it stood when the budget was crossed.
 
 Raised by `Agent` the moment cumulative `total_usage` crosses `Budget.tokens`, checked right
 after a model response — before any further tool dispatch or model call.
@@ -186,15 +186,15 @@ after a model response — before any further tool dispatch or model call.
 
 ### `Message`
 
-A `dict` subclass — every constructor below returns a plain `{"role": ..., "content": ...}`
-style dict, so it's interchangeable with hand-built message dicts anywhere one is expected.
+A dataclass with `role`, `content`, `name`, `tool_calls` and `tool_call_id`; `to_dict()` gives
+the wire dict. Anywhere a message is accepted, a plain dict works too.
 
-| Constructor | Produces |
+| Constructor | `to_dict()` gives |
 | --- | --- |
 | `Message.system(content: str)` | `{"role": "system", "content": ...}` |
-| `Message.human(content: str)` | `{"role": "user", "content": ...}` |
-| `Message.ai(content: str, *, tool_calls: list[dict] \| None = None)` | `{"role": "assistant", "content": ...}` |
-| `Message.tool(content: str, *, name: str, call_id: str \| None = None)` | `{"role": "tool", "name": ..., "content": ...}` |
+| `Message.human(content: Content \| Block)` | `{"role": "user", "content": ...}` |
+| `Message.ai(content: Content \| Block, *, tool_calls: list[dict] \| None = None)` | `{"role": "assistant", "content": ...}` |
+| `Message.tool(content: str, *, name: str, call_id: str \| None = None)` | `{"role": "tool", "content": ..., "name": ..., "tool_call_id": ...}` |
 
 ## Tools
 
@@ -227,16 +227,19 @@ whatever the run was given; `state` is the run's `AgentState`.
 ### `Toolbox`
 
 ```python
-Toolbox(tools: Iterable[Callable] = ())
+Toolbox(tools: Iterable[Callable] = (), *, approve: Approver | None = None)
 ```
+
+`approve(name, arguments)` is called before each `requires_approval` call runs, wherever the
+toolbox is called from; `True` runs it and `False` raises `ToolDenied`. It may be async.
 
 | Method | Signature | Description |
 | --- | --- | --- |
 | `register` | `def register(func: Callable) -> Callable` | Registers a function as a tool. |
 | `get` | `def get(name: str) -> ToolSpec` | Looks up a registered tool by name. |
 | `schemas` | `def schemas() -> list[dict]` | Returns tool schemas, ready to pass to a provider. |
-| `call` | `async def call(name: str, arguments: dict \| None = None) -> Any` | Invokes a tool by name, awaiting it if async. |
-| `call_sync` | `def call_sync(name: str, arguments: dict \| None = None) -> Any` | Invokes a tool synchronously; raises if it's async. |
+| `call` | `async def call(name: str, arguments: dict \| None = None, *, ctx: Ctx \| None = None, ask: bool \| None = None) -> Any` | Invokes a tool by name, awaiting it if async. |
+| `call_sync` | `def call_sync(name: str, arguments: dict \| None = None, *, ctx: Ctx \| None = None, ask: bool \| None = None) -> Any` | Invokes a tool synchronously; raises if it's async. |
 
 ### `Workspace`
 
@@ -413,8 +416,8 @@ Every provider below implements the same interface:
 | --- | --- |
 | `await agenerate(messages: list[dict], *, tools: list[dict] \| None = None)` | `CompletionResponse` |
 | `generate(messages: list[dict], *, tools: list[dict] \| None = None)` | `CompletionResponse` |
-| `async for event in astream_events(messages, *, tools=None)` | `TextDelta`, then `Completed(response)` |
-| `for event in stream_events(messages, *, tools=None)` | `TextDelta`, then `Completed(response)` |
+| `async for event in astream_events(messages, *, tools=None)` | `TextDelta`/`ThinkingDelta`, then `Completed(response)` |
+| `for event in stream_events(messages, *, tools=None)` | `TextDelta`/`ThinkingDelta`, then `Completed(response)` |
 | `async for chunk in astream(messages, *, tools=None)` | text deltas (filters the above) |
 | `for chunk in stream(messages, *, tools=None)` | text deltas |
 
@@ -473,20 +476,29 @@ than sent.
 
 ```python
 ToolCall(name: str, arguments: dict, id: str | None = None)
-TokenUsage(prompt_tokens: int, completion_tokens: int, total_tokens: int)
-CompletionResponse(content: str, tool_calls: list[ToolCall] = [], usage: TokenUsage | None = None)
+CompletionResponse(
+    content: str = "",
+    tool_calls: list[ToolCall] = [],
+    usage: TokenUsage | None = None,
+    finish_reason: str = "stop",
+    blocks: list[Block] = [],
+)
 ```
+
+`CompletionResponse.thinking` is the model's reasoning, if it returned any.
 
 ### Direct providers
 
 | Class | Signature |
 | --- | --- |
-| `Anthropic` | `Anthropic(model: str, api_key: str \| None = None, max_tokens: int = 4096, *, reasoning_effort=None, cache_prompt: bool = False, max_concurrency: int \| None = None)` |
-| `OpenAI` | `OpenAI(model: str, api_key: str \| None = None, *, base_url: str \| None = None, temperature: float \| None = None, reasoning_effort=None, stream_usage: bool = True, max_concurrency: int \| None = None)` |
-| `Gemini` | `Gemini(model: str, api_key: str \| None = None, *, reasoning_effort=None, max_concurrency: int \| None = None)` |
+| `Anthropic` | `Anthropic(model: str, api_key: str \| None = None, max_tokens: int = 4096, *, reasoning_effort=None, cache_prompt: bool = False, client=None, sync_client=None, max_concurrency: int \| None = None)` |
+| `OpenAI` | `OpenAI(model: str, api_key: str \| None = None, *, base_url: str \| None = None, temperature: float \| None = None, reasoning_effort=None, stream_usage: bool = True, client=None, sync_client=None, max_concurrency: int \| None = None)` |
+| `Gemini` | `Gemini(model: str, api_key: str \| None = None, *, reasoning_effort=None, client=None, sync_client=None, max_concurrency: int \| None = None)` |
 
 `api_key` falls back to the vendor's standard environment variable when omitted:
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY` (or `GOOGLE_API_KEY`).
+
+`client=`/`sync_client=` inject your own `httpx` clients — a mock transport in tests.
 
 `max_concurrency` caps that provider's in-flight requests, held across retries and for a
 stream's whole body — a fan-out of agents otherwise opens one connection per branch.
@@ -500,14 +512,14 @@ Each provider holds an HTTP connection pool. Call `await model.aclose()` — or
 
 ```python
 Fallback(primary: LLM, *others: LLM, on: tuple[type[BaseException], ...] = (ProviderError,))
-Caching(llm: LLM, *, maxsize: int = 256, ttl: float | None = None)
-RateLimited(llm: LLM, *, rps: float, burst: int | None = None)
-Retrying(llm: LLM, *, attempts: int = 2, backoff: float = 0.5)
+Caching(inner: LLM, *, maxsize: int = 256, ttl: float | None = None)
+RateLimited(inner: LLM, *, rps: float, burst: int | None = None)
+Retrying(inner: LLM, *, attempts: int = 2, backoff: float = 0.5)
 ```
 
 Each is itself an `LLM`, so one wrapper covers `generate`, `agenerate` and both streaming
-paths, and they compose: `Caching(RateLimited(Fallback(a, b), rps=2))`. `inner` reaches the
-provider underneath (`models` on `Fallback`), and `aclose()`/`close()` pass down.
+paths, and they compose: `Caching(RateLimited(Fallback(a, b), rps=2))`. `inner` is the
+next layer down (`models` on `Fallback`), and `aclose()`/`close()` pass down.
 
 | Wrapper | Behaviour |
 | --- | --- |
