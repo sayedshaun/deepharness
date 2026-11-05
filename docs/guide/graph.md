@@ -22,7 +22,10 @@ class State:
 graph = Graph(State)
 ```
 
-`executor.run()` deep-copies the state you hand it, so your original object is never mutated.
+`executor = graph.build()` checks the wiring and returns the `Executor` that runs it.
+`await executor.run(state)` deep-copies the state you hand it, so your original object is never
+mutated. Snippets on this page that `await` belong inside an `async def` run with
+`asyncio.run(...)`, or paste them into `python -m asyncio`.
 
 ## Nodes
 
@@ -49,16 +52,17 @@ call or an `input()` prompt won't block the event loop.
 object or its name.
 
 Add a `condition` to branch — the edge is only followed if it returns truthy against the
-current state:
+current state. Here `State` has an `approved: bool` field:
 
 ```python
 graph.connect(review, publish, condition=lambda s: s.approved)
 graph.connect(review, revise, condition=lambda s: not s.approved)
 ```
 
-After `review` finishes, exactly one of `publish` / `revise` runs. If **every** incoming edge
-of a node evaluates falsy once its predecessors are done, that node is skipped rather than
-left hanging.
+After `review` finishes, exactly one of `publish` / `revise` runs. A node is skipped when no
+incoming edge is active once its predecessors are done, and an edge from a skipped node is never
+active — so a skip carries on to everything only that branch leads to. A node that another,
+active edge also reaches still runs, so branches can rejoin.
 
 ## Parallel execution and state merging
 
@@ -190,7 +194,7 @@ produces a wide drawing — there is no wrapping or truncation to fit a terminal
 ## Human in the loop
 
 A pause for human input is just a node. Because sync nodes run in a worker thread, a blocking
-prompt is fine:
+prompt is fine. Here `State` has `draft: str` and `approved: bool` fields:
 
 ```python
 @graph.add(name="review")
@@ -229,8 +233,20 @@ the graph carries your dataclass, so a node is the adapter between them. One age
 the natural way to build a multi-agent system:
 
 ```python
-from deepharness import Agent, Message
+from dataclasses import dataclass
 
+from deepharness import Agent, Graph, OpenAI
+
+
+@dataclass
+class State:
+    topic: str = ""
+    research: str = ""
+    draft: str = ""
+
+
+graph = Graph(State)
+llm = OpenAI("gpt-4o-mini")
 researcher = Agent(llm, name="researcher", system="You research topics.")
 writer = Agent(llm, name="writer", system="You write short reports.")
 
