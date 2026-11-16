@@ -1,7 +1,6 @@
 from .mcp import MCPServer, MCPTool, Transport
 from .permissions import Decision, Permissions, Rule, RuleLike, ToolName
 from .sandbox import Bubblewrap, Docker, NoSandbox, Sandbox
-from .shell import shell_tool
 from .tavily import SearchResult, TavilySearch, format_results
 from .toolbox import (
     Approver,
@@ -35,6 +34,5 @@ __all__ = [
     "Workspace",
     "format_results",
     "json_type",
-    "shell_tool",
     "tool",
 ]

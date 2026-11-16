@@ -1,14 +1,15 @@
 """Where a shell command actually runs, separate from which directory it runs in.
 
 A Workspace confines the paths a tool resolves, but a command can reach
-anything the process can, so `run_command` needs a second boundary: the
-process it runs in. That boundary is a Sandbox, injected into `shell_tool`.
+anything the process can, so a tool that runs commands needs a second
+boundary: the process it runs in. That boundary is a Sandbox, which the tool
+calls instead of `subprocess`.
 
 A sandbox is a resource with a lifetime - a `with` block. Whatever a command
 leaves behind outside the workspace (installed packages, caches) lasts until
 the block ends and is thrown away with it. The workspace is bind-mounted at its
-own absolute path, so the file tools keep working on the host and see exactly
-what commands wrote.
+own absolute path, so tools that read files on the host see exactly what
+commands wrote.
 """
 
 from __future__ import annotations
@@ -86,8 +87,8 @@ class Sandbox(ABC):
 class NoSandbox(Sandbox):
     """The command runs as this process, with its environment and its reach.
 
-    What `shell_tool` uses when given a plain path, because it needs nothing
-    installed; choosing it explicitly says the machine is disposable or trusted.
+    Needs nothing installed and no `with` block; choosing it says the machine
+    is disposable or trusted.
     """
 
     def run(self, command: str, timeout: int) -> subprocess.CompletedProcess[str]:

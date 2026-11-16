@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from deepharness.errors import ConfigurationError
-from deepharness.tools import Bubblewrap, Docker, NoSandbox, Sandbox, shell_tool
+from deepharness.tools import Bubblewrap, Docker, NoSandbox
 
 _IMAGE = os.environ.get("DEEPHARNESS_TEST_IMAGE", "python:3.12-slim")
 
@@ -50,28 +50,17 @@ BACKENDS = [
 ]
 
 
-class Recording(Sandbox):
-    def __init__(self, workspace):
-        super().__init__(workspace)
-        self.calls = []
-
-    def run(self, command, timeout):
-        self.calls.append((command, timeout))
-        return subprocess.CompletedProcess(command, 0, "ran", "")
+def test_no_sandbox_runs_in_the_workspace(tmp_path):
+    assert NoSandbox(tmp_path).run("pwd", 5).stdout.strip() == str(tmp_path.resolve())
 
 
-def test_shell_tool_runs_commands_through_the_given_sandbox(tmp_path):
-    box = Recording(tmp_path)
-    run = shell_tool(box, timeout=7, requires_approval=False)
-
-    assert run(command="make") == "ran"
-    assert box.calls == [("make", 7)]
+def test_a_failing_command_is_a_result_not_an_exception(tmp_path):
+    assert NoSandbox(tmp_path).run("exit 3", 5).returncode == 3
 
 
-def test_a_plain_path_runs_unsandboxed(tmp_path):
-    run = shell_tool(tmp_path, requires_approval=False)
-
-    assert run(command="pwd") == str(tmp_path.resolve())
+def test_no_sandbox_kills_a_hanging_command(tmp_path):
+    with pytest.raises(subprocess.TimeoutExpired):
+        NoSandbox(tmp_path).run("sleep 30", 1)
 
 
 def test_no_sandbox_needs_no_with_block(tmp_path):
@@ -97,46 +86,51 @@ def box(request, workspace):
         yield sandbox
 
 
-@pytest.fixture
-def run(box):
-    return shell_tool(box, requires_approval=False)
+def run(box, command):
+    """Everything the command printed, and its exit code."""
+    result = box.run(command, 30)
+    return result.stdout + result.stderr, result.returncode
 
 
-def test_writes_in_the_workspace_reach_the_host(workspace, run):
-    run(command="echo hi > made.txt")
+def test_writes_in_the_workspace_reach_the_host(workspace, box):
+    run(box, "echo hi > made.txt")
 
     assert (workspace / "made.txt").read_text() == "hi\n"
 
 
-def test_host_files_outside_the_workspace_are_not_visible(run):
+def test_host_files_outside_the_workspace_are_not_visible(box):
     # The workspace sits inside the repo, so this file is just outside it.
-    assert "[exit " in run(command=f"cat {Path.cwd() / 'pyproject.toml'}")
+    _, code = run(box, f"cat {Path.cwd() / 'pyproject.toml'}")
+
+    assert code != 0
 
 
-def test_the_environment_does_not_leak(run, monkeypatch):
+def test_the_environment_does_not_leak(box, monkeypatch):
     monkeypatch.setenv("DEEPHARNESS_SECRET", "hunter2")
 
-    assert "hunter2" not in run(command="env")
+    output, _ = run(box, "env")
+
+    assert "hunter2" not in output
 
 
-def test_the_network_is_off_by_default(run):
-    output = run(
-        command="python3 -c \"import socket; socket.create_connection(('1.1.1.1', 53), 2)\""
+def test_the_network_is_off_by_default(box):
+    _, code = run(
+        box,
+        "python3 -c \"import socket; socket.create_connection(('1.1.1.1', 53), 2)\"",
     )
 
-    assert "[exit " in output
+    assert code != 0
 
 
-def test_state_outside_the_workspace_lasts_between_commands(run):
-    run(command="echo kept > ~/note")
+def test_state_outside_the_workspace_lasts_between_commands(box):
+    run(box, "echo kept > ~/note")
 
-    assert run(command="cat ~/note") == "kept"
+    assert run(box, "cat ~/note") == ("kept\n", 0)
 
 
 def test_a_hanging_command_is_killed(box):
-    run = shell_tool(box, timeout=1, requires_approval=False)
-
-    assert "timed out after 1s" in run(command="sleep 30")
+    with pytest.raises(subprocess.TimeoutExpired):
+        box.run("sleep 30", 1)
 
 
 @pytest.mark.parametrize("make", BACKENDS)
