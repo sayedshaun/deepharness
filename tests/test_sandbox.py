@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from deepharness.errors import ConfigurationError
-from deepharness.tools import Bubblewrap, Docker, NoSandbox
+from deepharness.tools import Bubblewrap, Docker
 
 _IMAGE = os.environ.get("DEEPHARNESS_TEST_IMAGE", "python:3.12-slim")
 
@@ -48,23 +48,6 @@ BACKENDS = [
         lambda root, **kw: Docker(_IMAGE, root, **kw), id="docker", marks=needs_docker
     ),
 ]
-
-
-def test_no_sandbox_runs_in_the_workspace(tmp_path):
-    assert NoSandbox(tmp_path).run("pwd", 5).stdout.strip() == str(tmp_path.resolve())
-
-
-def test_a_failing_command_is_a_result_not_an_exception(tmp_path):
-    assert NoSandbox(tmp_path).run("exit 3", 5).returncode == 3
-
-
-def test_no_sandbox_kills_a_hanging_command(tmp_path):
-    with pytest.raises(subprocess.TimeoutExpired):
-        NoSandbox(tmp_path).run("sleep 30", 1)
-
-
-def test_no_sandbox_needs_no_with_block(tmp_path):
-    assert NoSandbox(tmp_path).run("echo hi", 5).stdout == "hi\n"
 
 
 def test_docker_needs_an_image(tmp_path):

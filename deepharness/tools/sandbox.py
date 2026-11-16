@@ -84,17 +84,6 @@ class Sandbox(ABC):
     def run(self, command: str, timeout: int) -> subprocess.CompletedProcess[str]: ...
 
 
-class NoSandbox(Sandbox):
-    """The command runs as this process, with its environment and its reach.
-
-    Needs nothing installed and no `with` block; choosing it says the machine
-    is disposable or trusted.
-    """
-
-    def run(self, command: str, timeout: int) -> subprocess.CompletedProcess[str]:
-        return _run(["sh", "-c", command], self.workspace.root, timeout)
-
-
 class Bubblewrap(Sandbox):
     """A Linux namespace sandbox via `bwrap`: no container image, no daemon.
 
