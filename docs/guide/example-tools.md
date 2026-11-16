@@ -132,7 +132,7 @@ To contain commands, call a sandbox instead of `subprocess`. Use this in place o
 `run_command` above:
 
 ```python
-from deepharness.tools import Bubblewrap
+from deepharness.sandbox import Bubblewrap
 
 box = Bubblewrap(workspace)
 
@@ -175,7 +175,7 @@ the line that creates `box` changes:
 ```python
 import os
 
-from deepharness.tools import Docker, Sandbox
+from deepharness.sandbox import Docker, Sandbox
 
 
 class Unconfined(Sandbox):
