@@ -3,6 +3,21 @@
 Notable changes, newest first. This project is pre-1.0: while the major version is `0`, a
 breaking change raises the minor version.
 
+## Unreleased
+
+### Breaking
+
+- `shell_tool`'s first parameter is renamed from `workspace` to `sandbox`, since it now takes a
+  `Sandbox` as well as a path. Positional calls such as `shell_tool(".")` are unchanged.
+
+### Added
+
+- Sandboxes for `run_command`: `Bubblewrap` (Linux namespaces) and `Docker` (one container per
+  sandbox), used as `with` or `async with` and passed to `shell_tool(box)`. Both mount only the
+  workspace (read-only with `writable=False`), keep the network off unless `network=True`, and
+  discard everything outside the workspace when the block ends. Subclass `Sandbox` for another
+  backend.
+
 ## 0.3.0 — 2026-11-05
 
 The release that makes an agent usable for long runs: tools that work in a directory, rules
