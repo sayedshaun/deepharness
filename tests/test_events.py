@@ -141,3 +141,40 @@ def test_a_modelless_agent_emits_only_its_final_state():
 
 def test_streaming_text_alone_skips_the_progress_events():
     assert list(Agent(a_tool_run(), tools=[add]).stream("2+3?")) == ["5"]
+
+
+async def test_each_tool_is_reported_as_soon_as_it_finishes():
+    import asyncio
+
+    @tool
+    async def slow() -> str:
+        """Take a while."""
+        await asyncio.sleep(0.05)
+        return "slow done"
+
+    @tool
+    async def fast() -> str:
+        """Return at once."""
+        return "fast done"
+
+    model = Scripted(
+        [
+            CompletionResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(name="slow", arguments={}, id="1"),
+                    ToolCall(name="fast", arguments={}, id="2"),
+                ],
+            ),
+            CompletionResponse("ok"),
+        ]
+    )
+
+    events = [e async for e in Agent(model, tools=[slow, fast]).astream_events("go")]
+
+    finished = [e.name for e in events if isinstance(e, ToolFinished)]
+    assert finished == ["fast", "slow"]
+    # The transcript still records results in the order the model called them.
+    state = events[-1].state
+    results = [m["content"] for m in state.messages if m.get("role") == "tool"]
+    assert results == ["slow done", "fast done"]

@@ -10,7 +10,6 @@ belongs to, so a name's import path says which part of the library owns it:
                            cache, retry, rate limit or fall back
     deepharness.tools      writing a tool, the workspace tools, permissions,
                            MCP servers, web search
-    deepharness.prebuilt   ready-made workflows such as DeepResearch
     deepharness.errors     every exception but the base class
 
 Keeping the root small is deliberate: everything exported here is a promise

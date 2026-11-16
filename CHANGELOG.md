@@ -3,6 +3,35 @@
 Notable changes, newest first. This project is pre-1.0: while the major version is `0`, a
 breaking change raises the minor version.
 
+## Unreleased
+
+### Breaking
+
+- `deepharness.prebuilt` is removed, and with it `DeepResearch`, `ResearchResult`, `Finding`
+  and the research events. Its prompts and limits were decisions about an application, and the
+  shape is three agents in a three-node graph: [Deep research](docs/guide/research.md) now has
+  it as an example to copy.
+- The ready-made tools are removed: `file_tools`, `shell_tool`, `TavilySearch` (with
+  `SearchResult` and `format_results`) and the `ToolName` enum. A tool's name, docstring and
+  output are part of an agent, not of the library, so deepharness now ships only what tools are
+  built from: `@tool`, `Workspace`, `Sandbox` and `Permissions`. The
+  [example tools](docs/guide/example-tools.md) page has file, shell and web search tools to
+  copy. A rule that used `ToolName.RUN_COMMAND` now names the tool itself or `"run_command"`.
+
+### Added
+
+- `deepharness.sandbox`, for running commands: `Bubblewrap` (Linux namespaces) and `Docker`
+  (one container per sandbox), used as `with` or `async with`, with `box.run(command, timeout)`
+  called by the tools you write and by graph nodes directly. Both mount only the workspace
+  (read-only with `writable=False`), keep the network off unless `network=True`, and discard
+  everything outside the workspace when the block ends. Subclass `Sandbox` for another backend.
+
+### Fixed
+
+- `astream_events()` reports each `ToolFinished` as soon as that tool ends, instead of holding
+  every result in a turn until the slowest tool finished. The transcript still records results in
+  call order.
+
 ## 0.3.0 — 2026-11-05
 
 The release that makes an agent usable for long runs: tools that work in a directory, rules

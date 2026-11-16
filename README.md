@@ -28,8 +28,8 @@ LLM providers behind one interface.
 - **One provider interface, a dozen vendors.** `OpenAI`, `Anthropic`, `Gemini`, and OpenAI-compatible
   gateways (`Groq`, `Together`, `Fireworks`, `DeepSeek`, `Mistral`, `Cerebras`, `OpenRouter`, `XAI`,
   `Ollama`, `LMStudio`, `VLLM`, `LlamaCpp`) all share the same `LLM` interface.
-- **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
-  per-call permission policy, a bounded context window, and progress events — the parts a run
+- **A harness, not just a loop.** Path confinement and sandboxes for the tools you write, MCP
+  servers, a per-call permission policy, a bounded context window, and progress events — the parts a run
   needs once it is long enough to matter.
 
 ## Install
@@ -99,31 +99,55 @@ state = await editor.arun("What is the capital of Norway?")
 
 ## Working in a directory
 
-An agent that can read a codebase and change it, with the sharp edges gated:
+deepharness ships no file or shell tools: what they are called and what they return is part of
+your agent. It ships the boundaries they need instead: `Workspace` confines paths, and a
+`Sandbox` contains commands:
 
 ```python
-from deepharness import Agent, OpenAI
-from deepharness.agent import ContextPolicy
-from deepharness.tools import Permissions, Rule, ToolName, file_tools, shell_tool
+import subprocess
+
+from deepharness import Agent, OpenAI, tool
+from deepharness.sandbox import Bubblewrap
+from deepharness.tools import Permissions, Rule, Workspace
+
+workspace = Workspace(".")
+
+
+@tool
+def read_file(path: str) -> str:
+    """Read a UTF-8 text file. Paths are relative to the repository root."""
+    return workspace.resolve(path).read_text(encoding="utf-8")
+
+
+box = Bubblewrap(workspace)  # configuration only; nothing runs yet
+
+
+@tool
+def run_command(command: str) -> str:
+    """Run a shell command in the repository and return its output."""
+    try:
+        result = box.run(command, timeout=60)
+    except subprocess.TimeoutExpired:
+        return "Timed out."
+    return result.stdout + result.stderr + f"\n[exit {result.returncode}]"
+
 
 agent = Agent(
     OpenAI(model="gpt-4o-mini"),
-    tools=[*file_tools("."), shell_tool(".")],
-    context=ContextPolicy(max_tokens=120_000),
-    permissions=Permissions(
-        allow=[ToolName.READ_FILE, ToolName.LIST_FILES, ToolName.SEARCH_FILES],
-        ask=[ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.RUN_COMMAND],
-        deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
-    ),
+    tools=[read_file, run_command],
+    permissions=Permissions(deny=[Rule("run_command", {"command": "*git push*"})]),
 )
 
-state = await agent.arun("What does the executor do? Add a docstring if it lacks one.")
+async with box:  # the sandbox exists for exactly this run
+    state = await agent.arun("Why does the test suite fail?")
 ```
 
-A full walkthrough — approvals, context, sessions, and a sixty-line script that runs — is in
-[Building a coding agent](https://sayedshaun.github.io/deepharness/guide/coding-agent/).
+A complete set of [example tools](https://sayedshaun.github.io/deepharness/guide/example-tools/)
+to copy, and a walkthrough covering approvals, context, sessions, and a sixty-line script that
+runs, are in [Building a coding agent](https://sayedshaun.github.io/deepharness/guide/coding-agent/).
 
-Every path is resolved inside the workspace root, `deny` beats `allow` beats `ask`, and a run
+Every path is resolved inside the workspace root, commands in a sandbox reach only the
+workspace with no network and none of your environment variables, `deny` beats `allow` beats `ask`, and a run
 that needs a human stops with `stop_reason == "paused"` — resumable later, in another process,
 because `state.to_dict()`/`AgentState.from_dict()` round-trip the whole state, pending approval
 included.
@@ -152,13 +176,12 @@ order is visible:
 ```python
 from deepharness import Agent, Anthropic, OpenAI
 from deepharness.providers import Caching, Fallback, RateLimited
-from deepharness.tools import file_tools
 
 llm = Caching(
     RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)
 )
 
-agent = Agent(llm, tools=file_tools("."))
+agent = Agent(llm, tools=[read_file])
 ```
 
 | Wrapper | What it does |

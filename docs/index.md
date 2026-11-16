@@ -39,8 +39,8 @@ state, and 15 LLM providers behind one interface.
   are offloaded to threads so a blocking call never stalls the event loop.
 - **Agents are optional.** The graph engine has no idea what an LLM is. Use it for plain
   function orchestration, or drop an [`Agent`](guide/agents.md) inside a node.
-- **A harness, not just a loop.** Workspace-confined file and shell tools, MCP servers, a
-  per-call [permission policy](guide/tools.md#permissions-deciding-per-call), a
+- **A harness, not just a loop.** Path confinement and sandboxes for the tools you write, MCP
+  servers, a per-call [permission policy](guide/tools.md#permissions-deciding-per-call), a
   [bounded context window](guide/agents.md#context-management), progress events and
   [provider wrappers](guide/providers.md#wrapping-a-provider) — the parts
   a run needs once it is long enough to matter.
@@ -93,7 +93,7 @@ Requires Python 3.11+.
 
     ---
 
-    Workspace-confined file and shell tools, MCP servers, and per-call rules.
+    Path confinement, sandboxes, MCP servers, and per-call rules for the tools you write.
 
     [:octicons-arrow-right-24: Tools guide](guide/tools.md)
 

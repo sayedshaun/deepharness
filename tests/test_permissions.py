@@ -199,18 +199,6 @@ def test_a_renamed_tool_is_matched_by_the_name_the_model_sees():
     assert Permissions(deny=[get_it]).decide("fetch", {"url": "x"}) == "deny"
 
 
-def test_the_built_in_names_are_available_as_an_enum():
-    from deepharness.tools import ToolName
-
-    permissions = Permissions(
-        allow=[ToolName.READ_FILE], deny=[Rule(ToolName.RUN_COMMAND)]
-    )
-
-    assert isinstance(ToolName.READ_FILE, str)
-    assert permissions.decide("read_file", {"path": "a"}) == "allow"
-    assert permissions.decide("run_command", {"command": "ls"}) == "deny"
-
-
 def test_something_that_is_not_a_rule_is_refused():
     with pytest.raises(ConfigurationError, match="must be a tool"):
         Permissions(allow=[42])

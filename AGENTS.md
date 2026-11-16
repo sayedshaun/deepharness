@@ -23,9 +23,9 @@ Keep modules focused and responsibilities separate.
 agent/      → agent think/act loop, Toolbox, @tool
 graph/      → graph/node/edge definitions, executor (waves + merging)
 http.py     → retrying httpx wrapper, shared by providers/ and tools/
-prebuilt/   → ready-made workflows composed from agent/ and graph/
 providers/  → LLM interface, wire types, per-vendor clients
-tools/      → built-in tool implementations
+sandbox/    → execution environments for commands, one module per backend
+tools/      → tool primitives: @tool, Toolbox, Workspace, Sandbox, Permissions, MCP
 ```
 
 Avoid large files, circular dependencies, and tightly coupled components.
@@ -35,7 +35,7 @@ Avoid large files, circular dependencies, and tightly coupled components.
 `deepharness/__init__.py` holds only what a first program needs: `Agent`, `Graph`, `tool`, the
 providers, and the handful of types that go with them. Everything else is exported from the
 package that owns it — `deepharness.agent`, `deepharness.graph`, `deepharness.providers`,
-`deepharness.tools`, `deepharness.prebuilt`, `deepharness.errors`.
+`deepharness.tools`, `deepharness.sandbox`, `deepharness.errors`.
 
 A new name goes in its own package's `__all__`, not at the root. The root is a stability
 promise and a flat namespace of everything stops being discoverable, so adding to it needs a
@@ -164,6 +164,7 @@ Do not scatter raw HTTP calls throughout the application. Reuse clients where ap
 
 ## Commit Rules
 
+- Create a new branch from `main` for each new feature, named `<type>/<short-description>` (e.g., `feat/sandbox`), and commit there — never directly on `main`.
 - Write concise, one-line commit messages, prefixed with a Conventional Commits type: `feat:`, `fix:`, `refactor:`, `style:`, `docs:`, `test:`, `chore:`.
 - After the prefix, use the imperative mood (e.g., "add", "fix", "update", "refactor").
 - Keep each commit focused on a single logical change.

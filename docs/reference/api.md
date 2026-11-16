@@ -10,8 +10,8 @@ from deepharness import Agent, Graph, Message, OpenAI, tool  # ~27 high-level na
 from deepharness.agent import ContextPolicy, StepStarted
 from deepharness.graph import concat, merge_dicts
 from deepharness.providers import Caching, Fallback, Image, Text
-from deepharness.tools import Permissions, ToolName, file_tools, shell_tool
-from deepharness.prebuilt import DeepResearch
+from deepharness.sandbox import Bubblewrap
+from deepharness.tools import Permissions, Workspace
 from deepharness.errors import ProviderError
 ```
 
@@ -21,8 +21,8 @@ from deepharness.errors import ProviderError
 | `deepharness.agent` | the loop's own types — `ContextPolicy`, `estimate_tokens`, the progress events, `StopReason`, `PendingHumanInput`, `ToolSpec`, `FINAL_TOOL` |
 | `deepharness.graph` | `NodeSpec`, `concat`, `merge_dicts` |
 | `deepharness.providers` | `LLM` and the wire types, content blocks (`Text`, `Image`, `Document`, `Thinking`), `ReasoningLevel`, and the wrappers `Caching`/`Fallback`/`RateLimited`/`Retrying`/`Wrapping` |
-| `deepharness.tools` | `Permissions`, `Rule`, `ToolName`, `Workspace`, `file_tools`, `shell_tool`, `MCPServer`, `Transport`, `TavilySearch` |
-| `deepharness.prebuilt` | `DeepResearch`, `Finding`, `ResearchResult` and its events |
+| `deepharness.tools` | `Permissions`, `Rule`, `Workspace`, `MCPServer`, `Transport` |
+| `deepharness.sandbox` | `Sandbox`, `Bubblewrap`, `Docker` |
 | `deepharness.errors` | every exception; only `DeepHarnessError` is re-exported at the root |
 
 The root is kept small on purpose: each name there is a promise about stability, and a flat
@@ -254,38 +254,24 @@ or raises `OutsideWorkspace`; resolution is symlink-aware, so a link inside the 
 out of it is refused. `relative(path)` renders a resolved path as the model should see it. A
 root that is not an existing directory raises `ConfigurationError`.
 
-### `file_tools`
+### `Sandbox`
 
 ```python
-file_tools(
-    workspace: Workspace | str | Path = ".",
-    *,
-    max_bytes: int = 200_000,
-    max_matches: int = 200,
-    writable: bool = True,
-) -> list[Callable]
+Bubblewrap(workspace=".", *, writable=True, network=False, read_only=())
+Docker(image, workspace=".", *, writable=True, network=False, options=())
 ```
 
-Filesystem tools confined to one workspace: `read_file`, `list_files`, `search_files`, and —
-unless `writable=False` — `write_file` and `edit_file`, both gated with
-`requires_approval=True`. `read_file` numbers lines and stops at `max_bytes`, naming the offset
-to continue from. `edit_file` refuses an `old` string that occurs more than once.
+From `deepharness.sandbox`. Where a command runs: the boundary a tool you write calls instead
+of `subprocess`. Use as
+`with` or `async with`; leaving the block discards everything
+outside the workspace, and `run` outside it raises `ConfigurationError`. Subclass `Sandbox` for
+a new backend.
 
-### `shell_tool`
-
-```python
-shell_tool(
-    workspace: Workspace | str | Path = ".",
-    *,
-    timeout: int = 60,
-    max_chars: int = 30_000,
-    requires_approval: bool = True,
-) -> Callable
-```
-
-A `run_command` tool that runs a shell command with the workspace as its working directory,
-reporting stdout, then stderr, then a non-zero exit code. Gated by default, and not a sandbox:
-the workspace bounds where a command starts, not what it can reach.
+| Member | Signature | Description |
+| --- | --- | --- |
+| `workspace` | `Workspace` | The directory mounted into the sandbox at its own path. |
+| `run` | `def run(command, timeout) -> CompletedProcess[str]` | Run one command; raises `subprocess.TimeoutExpired` once it is killed. Abstract. |
+| `start` / `stop` | `def start() -> None` | Acquire and release what the sandbox holds; called by `with`. No-ops by default. |
 
 ### `MCPServer` / `MCPTool`
 
@@ -334,8 +320,8 @@ Decides per call what may run. `decide(name, arguments) -> "allow" | "ask" | "de
 where `None` means no rule applied and the tool's own `requires_approval` stands. `deny` beats
 `allow` beats `ask`.
 
-A rule may be written three ways: the decorated tool itself (read for the name it is
-registered under), a `ToolName` member, or a string name or `fnmatch` pattern.
+A rule may be written two ways: the decorated tool itself (read for the name it is
+registered under), or a string name or `fnmatch` pattern.
 `Rule` narrows by argument patterns, also `fnmatch`; an argument a rule mentions but the call
 omits does not match. `Rule.is_pattern` says whether a rule names a tool or a shape.
 
@@ -343,17 +329,6 @@ omits does not match. `Rule.is_pattern` says whether a rule names a tool or a sh
 whose silence would be unsafe. `Agent` refuses at construction when a gate names a tool it has
 not registered, since a misspelled deny rule matches nothing and allows what it was written to
 stop. Allow rules and pattern rules are not checked.
-
-### `ToolName`
-
-```python
-ToolName.READ_FILE  # "read_file"; also LIST_FILES, SEARCH_FILES, WRITE_FILE,
-ToolName.RUN_COMMAND  # "run_command"                             EDIT_FILE
-```
-
-The names the built-in tools register under, as one `StrEnum` — a member is a `str`, so it
-works anywhere a name or a `Rule`'s tool is expected. One enum rather than one per module, so
-nothing sits a letter of case away from the factory that builds the tools.
 
 ## Graphs & execution
 
@@ -545,85 +520,3 @@ Local servers — no API key required: `Ollama`, `VLLM`, `LMStudio`, `LlamaCpp`.
 
 For any other OpenAI-compatible endpoint, construct `OpenAI` directly with an explicit
 `base_url` and `api_key`.
-
-## Prebuilt workflows
-
-### `DeepResearch`
-
-```python
-DeepResearch(
-    model: LLM,
-    *,
-    tools: Iterable[Callable] | Toolbox = (),
-    max_sub_questions: int = 5,
-    n_parallel: int | None = None,
-    sequential: bool = False,
-    planner_system: str = PLANNER_SYSTEM,
-    researcher_system: str = RESEARCHER_SYSTEM,
-    synthesizer_system: str = SYNTHESIZER_SYSTEM,
-    budget: Budget | None = None,
-)
-```
-
-Plans sub-questions, researches each with its own `Agent` (`tools` reach every researcher, not
-the planner or synthesizer), then synthesizes one report. See
-[Deep research](../guide/research.md) for the full picture, including `n_parallel` vs
-`sequential`.
-
-| Member | Signature | Description |
-| --- | --- | --- |
-| `arun` | `async def arun(query: str) -> ResearchResult` | Drains `astream_events` and returns its `ResearchFinished` result. |
-| `astream_events` | `async def astream_events(query: str) -> AsyncIterator[ResearchEvent]` | The actual driver. Yields `Planning`, `Planned`, `Researching`, `Researched`, `Synthesizing`, `TextDelta` (the report as it is written), then a final `ResearchFinished(result)`. |
-| `tools` | `Toolbox` | Always a `Toolbox`. Read-only. |
-| `max_sub_questions` | `int` | The planner's cap. Read-only. |
-| `sequential` | `bool` | Whether researchers run one at a time, seeing earlier answers. Read-only. |
-| `n_parallel` | `int \| None` | The concurrency cap; `None` leaves it to the planner. Read-only. |
-
-Raises `ConfigurationError` at construction for `max_sub_questions < 1`, `n_parallel < 1`, or
-passing both `sequential=True` and `n_parallel=`.
-
-### `ResearchResult`
-
-```python
-ResearchResult(
-    query: str,
-    sub_questions: list[str],
-    findings: list[Finding],
-    report: str,
-    usage: TokenUsage,
-)
-```
-
-`findings` is in the order the answers arrived: completion order when parallel, planned order
-when `sequential=True`. `usage` covers every agent the run made — planner, every researcher, and
-the synthesizer.
-
-### `Finding`
-
-```python
-Finding(question: str, answer: str)
-```
-
-One sub-question and the answer a researcher reached for it.
-
-### Events
-
-Importable from `deepharness.prebuilt.research` (not re-exported from `deepharness` itself):
-
-```python
-Planning(query: str)
-Planned(sub_questions: list[str])
-Researching(count: int)
-Researched(index: int, question: str)
-Synthesizing(findings: int)
-ResearchFinished(result: ResearchResult)
-```
-
-`ResearchFinished` is named apart from `Agent`'s `Finished` on purpose, even though it fills the
-same role: the two wrap different things (`result` vs `state`), and the two streams are commonly
-read side by side — `from deepharness import Finished` would silently match nothing against a
-`DeepResearch` stream, since it names the wrong class.
-
-`ResearchEvent` is the union of these plus `TextDelta`. Typed rather than formatted prose, so a
-caller can count, route, or record events instead of matching substrings against a sentence
-meant for a human.

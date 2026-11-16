@@ -52,7 +52,7 @@ you need.
 
     ---
 
-    Plan sub-questions, research them in parallel, synthesize one report.
+    An example to copy: plan sub-questions, research them in parallel, synthesize one report.
 
     [:octicons-arrow-right-24: Read](research.md)
 
