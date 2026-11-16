@@ -21,7 +21,7 @@ from deepharness.errors import ProviderError
 | `deepharness.agent` | the loop's own types — `ContextPolicy`, `estimate_tokens`, the progress events, `StopReason`, `PendingHumanInput`, `ToolSpec`, `FINAL_TOOL` |
 | `deepharness.graph` | `NodeSpec`, `concat`, `merge_dicts` |
 | `deepharness.providers` | `LLM` and the wire types, content blocks (`Text`, `Image`, `Document`, `Thinking`), `ReasoningLevel`, and the wrappers `Caching`/`Fallback`/`RateLimited`/`Retrying`/`Wrapping` |
-| `deepharness.tools` | `Permissions`, `Rule`, `ToolName`, `Workspace`, `file_tools`, `shell_tool`, `MCPServer`, `Transport`, `TavilySearch` |
+| `deepharness.tools` | `Permissions`, `Rule`, `ToolName`, `Workspace`, `file_tools`, `shell_tool`, `Sandbox`, `Bubblewrap`, `Docker`, `NoSandbox`, `MCPServer`, `Transport`, `TavilySearch` |
 | `deepharness.prebuilt` | `DeepResearch`, `Finding`, `ResearchResult` and its events |
 | `deepharness.errors` | every exception; only `DeepHarnessError` is re-exported at the root |
 
@@ -275,7 +275,7 @@ to continue from. `edit_file` refuses an `old` string that occurs more than once
 
 ```python
 shell_tool(
-    workspace: Workspace | str | Path = ".",
+    sandbox: Sandbox | Workspace | str | Path = ".",
     *,
     timeout: int = 60,
     max_chars: int = 30_000,
@@ -284,8 +284,27 @@ shell_tool(
 ```
 
 A `run_command` tool that runs a shell command with the workspace as its working directory,
-reporting stdout, then stderr, then a non-zero exit code. Gated by default, and not a sandbox:
-the workspace bounds where a command starts, not what it can reach.
+reporting stdout, then stderr, then a non-zero exit code. Gated by default. Given a path it runs
+unsandboxed (`NoSandbox`): the workspace bounds where a command starts, not what it can reach.
+Given a started `Sandbox`, it runs there.
+
+### `Sandbox`
+
+```python
+Bubblewrap(workspace=".", *, writable=True, network=False, read_only=())
+Docker(image, workspace=".", *, writable=True, network=False, options=())
+NoSandbox(workspace=".")
+```
+
+Where `run_command` runs. Use as `with` or `async with`; leaving the block discards everything
+outside the workspace, and `run` outside it raises `ConfigurationError` (except `NoSandbox`,
+which holds nothing). Subclass `Sandbox` for a new backend.
+
+| Member | Signature | Description |
+| --- | --- | --- |
+| `workspace` | `Workspace` | The directory mounted into the sandbox at its own path. |
+| `run` | `def run(command, timeout) -> CompletedProcess[str]` | Run one command; raises `subprocess.TimeoutExpired` once it is killed. Abstract. |
+| `start` / `stop` | `def start() -> None` | Acquire and release what the sandbox holds; called by `with`. No-ops by default. |
 
 ### `MCPServer` / `MCPTool`
 
