@@ -47,6 +47,7 @@ Agent(
     context: ContextPolicy | None = None,
     permissions: Permissions | None = None,
     output: type | None = None,
+    on_event: EventHook | None = None,
 )
 ```
 
@@ -66,6 +67,7 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 | `permissions` | `Permissions \| None` | Per-call policy; `None` leaves each call to the tool's own `requires_approval`. Read-only. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
 | `output` | `type \| None` | A dataclass; when set, `state.output` is a validated instance of it. |
+| `on_event` | `Callable[[AgentEvent], Awaitable[None] \| None] \| None` | Called with every event of every run, before the caller sees it, so `arun()`/`run()` can be observed. May be async under `arun()`; a sync `run()` raises `ConfigurationError` for an async one. Its exceptions propagate. |
 
 ### `AgentState`
 
@@ -349,7 +351,7 @@ Graph(state_type: type)
 | --- | --- | --- |
 | `add` | `def add(*, name: str \| None = None, start: bool = False, end: bool = False)` | Decorator that registers a function as a node. |
 | `connect` | `def connect(source: Callable \| str, target: Callable \| str, *, condition: Callable[[Any], bool] \| None = None, loop: bool = False)` | Declares an edge, optionally conditional. `loop=True` marks a back-edge, re-running the loop head and everything downstream of it. |
-| `build` | `def build() -> Executor` | Validates the graph (has a start node, fully reachable, no cycle whose back-edge is unmarked) and returns an `Executor`. |
+| `build` | `def build(*, on_event: GraphEventHook \| None = None) -> Executor` | `on_event` is called with every `GraphEvent` of every run, so `run()` can be observed; it may be async. Validates the graph (has a start node, fully reachable, no cycle whose back-edge is unmarked) and returns an `Executor`. |
 
 ### `Executor`
 
