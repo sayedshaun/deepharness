@@ -1,15 +1,16 @@
-"""A harness for LLM agents: workspace tools, permissions, and typed workflows.
+"""A harness for LLM agents: tool primitives, sandboxes, permissions, and graphs.
 
 What a first program needs is here; everything else lives in the layer it
 belongs to, so a name's import path says which part of the library owns it:
 
     deepharness.agent      the think/act loop's own types - context policy,
                            progress events, sessions
-    deepharness.graph      node specs and the reducers for merging branches
+    deepharness.graph      node specs, run events, and the reducers for
+                           merging branches
     deepharness.providers  wire types, content blocks, and the wrappers that
                            cache, retry, rate limit or fall back
-    deepharness.tools      writing a tool, the workspace tools, permissions,
-                           MCP servers, web search
+    deepharness.tools      writing a tool, workspaces, permissions, MCP servers
+    deepharness.sandbox    where commands run: Bubblewrap, Docker
     deepharness.errors     every exception but the base class
 
 Keeping the root small is deliberate: everything exported here is a promise
