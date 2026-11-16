@@ -182,11 +182,10 @@ from both ends.
 ```python
 from deepharness import Agent
 from deepharness.agent import ContextPolicy
-from deepharness.tools import file_tools
 
 agent = Agent(
     llm,
-    tools=file_tools("."),
+    tools=[read_file, list_files],  # file tools you write; see Example tools
     context=ContextPolicy(max_tokens=100_000, tool_result_chars=8_000),
 )
 ```
