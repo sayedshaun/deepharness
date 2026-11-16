@@ -17,6 +17,8 @@ about stability, and a flat namespace of everything stops being discoverable
 somewhere well before it is complete.
 """
 
+import logging
+
 from deepharness.agent import (
     Agent,
     AgentState,
@@ -77,3 +79,7 @@ __all__ = [
     "Toolbox",
     "tool",
 ]
+
+# Silent unless the application configures logging: a library deciding where
+# its messages go would be deciding something that is the application's to say.
+logging.getLogger(__name__).addHandler(logging.NullHandler())

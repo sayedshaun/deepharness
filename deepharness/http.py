@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import weakref
 from collections.abc import AsyncGenerator, Generator
@@ -10,6 +11,8 @@ from typing import Any
 import httpx
 
 from .errors import ConfigurationError, ProviderError
+
+logger = logging.getLogger(__name__)
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _MAX_RETRIES = 3
@@ -44,6 +47,22 @@ def _retry_delay(attempt: int, response: httpx.Response | None = None) -> float:
             except ValueError:
                 pass
     return min(_BASE_DELAY_SECONDS * (2**attempt), _MAX_DELAY_SECONDS)
+
+
+def _log_retry(url: str, attempt: int, delay: float, reason: str) -> None:
+    """Say a request is being retried, which is otherwise invisible: a run slowed
+    by backoff looks exactly like a slow model.
+
+    The query string is dropped so a credential passed there never reaches a log.
+    """
+    logger.warning(
+        "retrying %s in %.1fs (attempt %d of %d): %s",
+        url.split("?", 1)[0],
+        delay,
+        attempt + 2,
+        _MAX_ATTEMPTS,
+        reason,
+    )
 
 
 def _transport_failure(url: str, exc: httpx.TransportError) -> ProviderError:
@@ -169,7 +188,9 @@ class HTTPClient:
             except httpx.TransportError as exc:
                 if attempt == _MAX_RETRIES:
                     raise _transport_failure(url, exc) from exc
-                await asyncio.sleep(_retry_delay(attempt))
+                delay = _retry_delay(attempt)
+                _log_retry(url, attempt, delay, type(exc).__name__)
+                await asyncio.sleep(delay)
                 continue
             if (
                 response.status_code not in _RETRYABLE_STATUS_CODES
@@ -177,7 +198,9 @@ class HTTPClient:
             ):
                 _raise_for_status(response)
                 return response
-            await asyncio.sleep(_retry_delay(attempt, response))
+            delay = _retry_delay(attempt, response)
+            _log_retry(url, attempt, delay, f"HTTP {response.status_code}")
+            await asyncio.sleep(delay)
         raise AssertionError("unreachable: last attempt always returns or raises")
 
     def post_sync(self, url: str, **kwargs: Any) -> httpx.Response:
@@ -187,7 +210,9 @@ class HTTPClient:
             except httpx.TransportError as exc:
                 if attempt == _MAX_RETRIES:
                     raise _transport_failure(url, exc) from exc
-                time.sleep(_retry_delay(attempt))
+                delay = _retry_delay(attempt)
+                _log_retry(url, attempt, delay, type(exc).__name__)
+                time.sleep(delay)
                 continue
             if (
                 response.status_code not in _RETRYABLE_STATUS_CODES
@@ -195,7 +220,9 @@ class HTTPClient:
             ):
                 _raise_for_status(response)
                 return response
-            time.sleep(_retry_delay(attempt, response))
+            delay = _retry_delay(attempt, response)
+            _log_retry(url, attempt, delay, f"HTTP {response.status_code}")
+            time.sleep(delay)
         raise AssertionError("unreachable: last attempt always returns or raises")
 
     @asynccontextmanager
@@ -221,6 +248,7 @@ class HTTPClient:
                         and attempt < _MAX_RETRIES
                     ):
                         delay = _retry_delay(attempt, response)
+                        reason = f"HTTP {response.status_code}"
                     else:
                         _raise_for_status(response)
                         started = True
@@ -232,7 +260,9 @@ class HTTPClient:
                 if started or attempt == _MAX_RETRIES:
                     raise _transport_failure(url, exc) from exc
                 delay = _retry_delay(attempt)
+                reason = type(exc).__name__
 
+            _log_retry(url, attempt, delay, reason)
             await asyncio.sleep(delay)
 
     @contextmanager
@@ -249,6 +279,7 @@ class HTTPClient:
                         and attempt < _MAX_RETRIES
                     ):
                         delay = _retry_delay(attempt, response)
+                        reason = f"HTTP {response.status_code}"
                     else:
                         _raise_for_status(response)
                         started = True
@@ -258,5 +289,7 @@ class HTTPClient:
                 if started or attempt == _MAX_RETRIES:
                     raise _transport_failure(url, exc) from exc
                 delay = _retry_delay(attempt)
+                reason = type(exc).__name__
 
+            _log_retry(url, attempt, delay, reason)
             time.sleep(delay)

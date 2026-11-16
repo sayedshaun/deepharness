@@ -257,3 +257,27 @@ def test_a_client_survives_a_second_asyncio_run():
             assert response.text == "ok"
     finally:
         server.shutdown()
+
+
+async def test_a_retry_is_logged_without_the_query_string(caplog):
+    client = AsyncMock()
+    client.post = AsyncMock(side_effect=[make_response(429), make_response(200)])
+    http = HTTPClient("https://example.com", client=client)
+
+    with caplog.at_level("WARNING", logger="deepharness"):
+        await http.post("/thing?key=secret")
+
+    [record] = caplog.records
+    assert record.name == "deepharness.http"
+    assert "HTTP 429" in record.getMessage()
+    assert "/thing" in record.getMessage()
+    assert "secret" not in record.getMessage()
+
+
+async def test_the_library_installs_no_handler_that_prints():
+    import logging
+
+    import deepharness  # noqa: F401 - importing installs the NullHandler
+
+    handlers = logging.getLogger("deepharness").handlers
+    assert handlers and all(isinstance(h, logging.NullHandler) for h in handlers)
