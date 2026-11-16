@@ -83,31 +83,69 @@ A few of the choices here are worth keeping however you change the rest:
 
 ## A shell
 
+These go in the same module as the file tools, so `workspace` is the one defined there.
+
 ```python
 import subprocess
 
 from deepharness import tool
+
+TIMEOUT = 60
+MAX_CHARS = 20_000
+
+
+def report(result: subprocess.CompletedProcess[str]) -> str:
+    """A finished command as the model should read it."""
+    streams = (result.stdout.rstrip(), result.stderr.rstrip())
+    output = "\n".join(stream for stream in streams if stream)[-MAX_CHARS:]
+    if result.returncode:
+        output += f"\n[exit {result.returncode}]"
+    return output or "(no output)"
+
+
+@tool(requires_approval=True)
+def run_command(command: str) -> str:
+    """Run a shell command in the project and return its output."""
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=workspace.root,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return f"Timed out after {TIMEOUT}s: {command}"
+    return report(result)
+```
+
+This runs commands as your own process, with your environment and full reach: the workspace is
+only where a command starts. Keep the approval gate on.
+
+Keep the tail of long output, not the head, because errors are printed last. Report the exit
+code and the case of no output explicitly, or the model can't tell success from silence.
+
+### In a sandbox
+
+To contain commands, call a sandbox instead of `subprocess`. The tool becomes a factory, because
+it holds the sandbox, which you pass in like any other dependency:
+
+```python
 from deepharness.tools import Sandbox
 
 
-def run_command_tool(box: Sandbox, timeout: int = 60, max_chars: int = 20_000):
+def run_command_tool(box: Sandbox):
     @tool(requires_approval=True)
     def run_command(command: str) -> str:
         """Run a shell command in the project and return its output."""
         try:
-            result = box.run(command, timeout)
+            return report(box.run(command, TIMEOUT))
         except subprocess.TimeoutExpired:
-            return f"Timed out after {timeout}s: {command}"
-        streams = (result.stdout.rstrip(), result.stderr.rstrip())
-        output = "\n".join(stream for stream in streams if stream)[-max_chars:]
-        if result.returncode:
-            output += f"\n[exit {result.returncode}]"
-        return output or "(no output)"
+            return f"Timed out after {TIMEOUT}s: {command}"
 
     return run_command
 ```
-
-The tool is a factory because it holds a sandbox, which you pass in like any other dependency:
 
 ```python
 from deepharness import Agent
@@ -118,13 +156,34 @@ async with Bubblewrap("./project") as box:
     state = await agent.arun("Why does the test suite fail?")
 ```
 
-`NoSandbox("./project")` runs commands as your own process, with your environment and full
-reach, and needs no `with` block. Keep the approval gate on with it. Inside `Bubblewrap` or
-`Docker` a command can reach only the workspace, so removing the gate is a reasonable choice
-there.
+Inside `Bubblewrap` or `Docker` a command can reach only the workspace, so removing the gate is
+a reasonable choice there.
 
-Keep the tail of long output, not the head, because errors are printed last. Report the exit
-code and the case of no output explicitly, or the model can't tell success from silence.
+### Switching between the two
+
+If the same agent should run sandboxed in one place and unconfined in another, say Docker in CI
+and your own machine during development, write the unconfined case as a `Sandbox` too. Then only
+the line that picks the sandbox changes:
+
+```python
+class Unconfined(Sandbox):
+    """Runs commands as this process: no isolation, and nothing to start or stop."""
+
+    def run(self, command: str, timeout: int) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            command,
+            shell=True,
+            cwd=self.workspace.root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+
+box = Docker("python:3.12-slim", ".") if os.environ.get("CI") else Unconfined(".")
+with box:
+    agent = Agent(llm, tools=[read_file, list_files, run_command_tool(box)])
+```
 
 ## Web search
 
