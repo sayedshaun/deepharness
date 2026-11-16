@@ -118,22 +118,26 @@ def read_file(path: str) -> str:
     return workspace.resolve(path).read_text(encoding="utf-8")
 
 
-async with Bubblewrap(workspace) as box:
+box = Bubblewrap(workspace)  # configuration only; nothing runs yet
 
-    @tool
-    def run_command(command: str) -> str:
-        """Run a shell command in the repository and return its output."""
-        try:
-            result = box.run(command, timeout=60)
-        except subprocess.TimeoutExpired:
-            return "Timed out."
-        return result.stdout + result.stderr + f"\n[exit {result.returncode}]"
 
-    agent = Agent(
-        OpenAI(model="gpt-4o-mini"),
-        tools=[read_file, run_command],
-        permissions=Permissions(deny=[Rule("run_command", {"command": "*git push*"})]),
-    )
+@tool
+def run_command(command: str) -> str:
+    """Run a shell command in the repository and return its output."""
+    try:
+        result = box.run(command, timeout=60)
+    except subprocess.TimeoutExpired:
+        return "Timed out."
+    return result.stdout + result.stderr + f"\n[exit {result.returncode}]"
+
+
+agent = Agent(
+    OpenAI(model="gpt-4o-mini"),
+    tools=[read_file, run_command],
+    permissions=Permissions(deny=[Rule("run_command", {"command": "*git push*"})]),
+)
+
+async with box:  # the sandbox exists for exactly this run
     state = await agent.arun("Why does the test suite fail?")
 ```
 
