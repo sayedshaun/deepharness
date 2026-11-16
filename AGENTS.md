@@ -163,6 +163,7 @@ Do not scatter raw HTTP calls throughout the application. Reuse clients where ap
 
 ## Commit Rules
 
+- Create a new branch from `main` for each new feature, named `<type>/<short-description>` (e.g., `feat/sandbox`), and commit there — never directly on `main`.
 - Write concise, one-line commit messages, prefixed with a Conventional Commits type: `feat:`, `fix:`, `refactor:`, `style:`, `docs:`, `test:`, `chore:`.
 - After the prefix, use the imperative mood (e.g., "add", "fix", "update", "refactor").
 - Keep each commit focused on a single logical change.
