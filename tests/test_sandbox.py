@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from deepharness.errors import ConfigurationError
-from deepharness.tools import Bubblewrap, Docker
+from deepharness.sandbox import Bubblewrap, Docker
 
 _IMAGE = os.environ.get("DEEPHARNESS_TEST_IMAGE", "python:3.12-slim")
 
