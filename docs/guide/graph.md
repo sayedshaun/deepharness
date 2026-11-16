@@ -203,8 +203,9 @@ async for event in executor.astream_events():
 
 Every node in a wave starts before any finishes, and each `NodeFinished` arrives when that
 node ends, so a slow branch is visible as the one still running. If a node raises, the others
-in its wave are cancelled and the stream raises what `run()` would. See
-[observability](observability.md) for turning these into traces.
+in its wave are cancelled and the stream raises what `run()` would. To observe a plain
+`run()` instead, pass a callable to `graph.build(on_event=...)`; it receives the same events.
+See [observability](observability.md) for turning these into traces.
 
 ## Validation
 
