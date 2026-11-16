@@ -9,10 +9,9 @@ import asyncio
 
 from deepharness import OpenAI
 from deepharness.prebuilt import DeepResearch
-from deepharness.tools import TavilySearch
 
-search = TavilySearch()  # reads TAVILY_API_KEY, or pass api_key=
-research = DeepResearch(OpenAI("gpt-4o-mini"), tools=[search.as_tool()])
+# web_search is a @tool you write; see Example tools for one
+research = DeepResearch(OpenAI("gpt-4o-mini"), tools=[web_search])
 
 result = asyncio.run(research.arun("How do UK master's student visas work?"))
 print(result.report)
