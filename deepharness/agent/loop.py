@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
-from collections.abc import AsyncIterator, Callable, Generator, Iterable, Iterator
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+)
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,6 +57,10 @@ Prose arrives as TextDelta, reasoning as ThinkingDelta, and the rest is what the
 loop is doing between those - a step beginning, a tool starting and finishing -
 ending with the one Finished that carries the AgentState. A caller interested in
 text alone wants astream() and never sees these."""
+
+EventHook = Callable[[AgentEvent], Awaitable[None] | None]
+"""Called with every event a run emits, so a run driven by arun() or run() can
+be observed without iterating a stream. May be async under arun()."""
 
 
 @dataclass(slots=True)
@@ -112,6 +124,7 @@ class Agent:
         "_final_schema",
         "_model",
         "_name",
+        "_on_event",
         "_output",
         "_permissions",
         "_system",
@@ -130,6 +143,7 @@ class Agent:
         context: ContextPolicy | None = None,
         permissions: Permissions | None = None,
         output: type | None = None,
+        on_event: EventHook | None = None,
     ):
         self._model = model
         self._tools = tools if isinstance(tools, Toolbox) else Toolbox(tools)
@@ -142,6 +156,7 @@ class Agent:
         self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
         self._total_usage = TokenUsage(0, 0, 0)
+        self._on_event = on_event
 
     # Read-only views: an agent's configuration is settled at construction, and
     # total_usage is live state no caller should be able to reset or inflate.
@@ -384,8 +399,33 @@ class Agent:
         The only async driver: arun() consumes this and keeps the last event, so
         the loop's mechanics - budget, approvals, tool dispatch - exist once
         rather than once per public method. Providers that cannot really stream
-        still work here; their turn simply arrives as a single delta.
+        still work here; their turn simply arrives as a single delta. Each event
+        goes to on_event, when one was given, before the caller sees it.
         """
+        async for event in self._events(state, deps):
+            if self._on_event is not None:
+                notified = self._on_event(event)
+                if inspect.isawaitable(notified):
+                    await notified
+            yield event
+
+    def stream_events(
+        self, state: Any = None, *, deps: Any = None
+    ) -> Iterator[AgentEvent]:
+        """Synchronous counterpart to astream_events()."""
+        for event in self._events_sync(state, deps):
+            if self._on_event is not None:
+                notified = self._on_event(event)
+                if inspect.isawaitable(notified):
+                    if inspect.iscoroutine(notified):
+                        notified.close()  # never awaited; silence the warning
+                    raise ConfigurationError(
+                        "the on_event callback is async; run() and stream() need a "
+                        "plain one"
+                    )
+            yield event
+
+    async def _events(self, state: Any, deps: Any) -> AsyncIterator[AgentEvent]:
         state = AgentState.of(state)
         if self._model is None:
             yield Finished(self._passthrough(state))
@@ -442,10 +482,7 @@ class Agent:
         except StopIteration as done:
             yield Finished(done.value)
 
-    def stream_events(
-        self, state: Any = None, *, deps: Any = None
-    ) -> Iterator[AgentEvent]:
-        """Synchronous counterpart to astream_events()."""
+    def _events_sync(self, state: Any, deps: Any) -> Iterator[AgentEvent]:
         state = AgentState.of(state)
         if self._model is None:
             yield Finished(self._passthrough(state))

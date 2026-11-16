@@ -225,3 +225,63 @@ async def test_a_tool_reports_how_long_it_took():
     finished = next(e for e in events if isinstance(e, ToolFinished))
 
     assert finished.duration >= 0.05
+
+
+async def test_on_event_sees_every_event_of_a_plain_arun():
+    seen = []
+    agent = Agent(a_tool_run(), tools=[add], on_event=seen.append)
+
+    state = await agent.arun("2+3?")
+
+    assert [type(e) for e in seen] == [
+        StepStarted,
+        StepFinished,
+        ToolStarted,
+        ToolFinished,
+        StepStarted,
+        TextDelta,
+        StepFinished,
+        Finished,
+    ]
+    assert seen[-1].state is state
+
+
+async def test_on_event_may_be_async_under_arun():
+    seen = []
+
+    async def record(event):
+        seen.append(type(event))
+
+    await Agent(a_tool_run(), tools=[add], on_event=record).arun("2+3?")
+
+    assert seen[-1] is Finished
+
+
+def test_on_event_sees_a_sync_run_too():
+    seen = []
+
+    Agent(a_tool_run(), tools=[add], on_event=seen.append).run("2+3?")
+
+    assert ToolFinished in [type(e) for e in seen]
+
+
+def test_an_async_on_event_is_refused_by_a_sync_run():
+    from deepharness.errors import ConfigurationError
+
+    async def record(event):
+        pass
+
+    agent = Agent(a_tool_run(), tools=[add], on_event=record)
+
+    with pytest.raises(ConfigurationError, match="on_event callback is async"):
+        agent.run("2+3?")
+
+
+async def test_an_error_in_on_event_is_not_swallowed():
+    def broken(event):
+        raise RuntimeError("observer failed")
+
+    agent = Agent(a_tool_run(), tools=[add], on_event=broken)
+
+    with pytest.raises(RuntimeError, match="observer failed"):
+        await agent.arun("2+3?")
