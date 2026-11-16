@@ -107,7 +107,8 @@ your agent. It ships the boundaries they need instead: `Workspace` confines path
 import subprocess
 
 from deepharness import Agent, OpenAI, tool
-from deepharness.tools import Bubblewrap, Permissions, Rule, Workspace
+from deepharness.sandbox import Bubblewrap
+from deepharness.tools import Permissions, Rule, Workspace
 
 workspace = Workspace(".")
 
