@@ -187,8 +187,6 @@ agent = Agent(
 Two forms, and they mean the same thing:
 
 ```python
-read_file, list_files, search_files, write_file, edit_file = file_tools(".")
-
 Permissions(ask=[write_file])  # the tool itself, when it is in scope
 Permissions(ask=["write_file"])  # a name, or a pattern like "write_*"
 ```
