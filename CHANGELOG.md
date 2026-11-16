@@ -7,6 +7,10 @@ breaking change raises the minor version.
 
 ### Breaking
 
+- `deepharness.prebuilt` is removed, and with it `DeepResearch`, `ResearchResult`, `Finding`
+  and the research events. Its prompts and limits were decisions about an application, and the
+  shape is three agents in a three-node graph: [Deep research](docs/guide/research.md) now has
+  it as an example to copy.
 - The ready-made tools are removed: `file_tools`, `shell_tool`, `TavilySearch` (with
   `SearchResult` and `format_results`) and the `ToolName` enum. A tool's name, docstring and
   output are part of an agent, not of the library, so deepharness now ships only what tools are
