@@ -52,9 +52,10 @@ agent = Agent(llm, tools=[*file_tools("."), shell_tool(".")], system=SYSTEM)
 ```
 
 `run_command` runs through a shell — pipes and redirection are the point — with the workspace
-as its working directory. It is **not a sandbox**: the workspace bounds where a command starts,
-not what it can reach. So it arrives gated, as do `write_file` and `edit_file`: the run stops
-before the call and waits.
+as its working directory. Given a plain path it is **not sandboxed**: the workspace bounds
+where a command starts, not what it can reach (to bound that, pass a
+[sandbox](tools.md#sandboxes-bounding-what-a-command-can-reach)). So it arrives gated, as do
+`write_file` and `edit_file`: the run stops before the call and waits.
 
 ```python
 state = await agent.arun("Add a docstring to Executor.run")
