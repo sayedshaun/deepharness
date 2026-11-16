@@ -167,8 +167,7 @@ decides per call, from the arguments the model actually sent.
 ```python
 from deepharness.tools import Permissions, Rule
 
-run_command = run_command_tool(box)  # from the example tools
-
+# read_file, list_files, write_file, edit_file and run_command: the example tools
 permissions = Permissions(
     allow=[read_file, list_files, Rule("run_command", {"command": "git log*"})],
     ask=[write_file, edit_file, run_command],
