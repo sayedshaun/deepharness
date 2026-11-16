@@ -23,7 +23,6 @@ Keep modules focused and responsibilities separate.
 agent/      → agent think/act loop, Toolbox, @tool
 graph/      → graph/node/edge definitions, executor (waves + merging)
 http.py     → retrying httpx wrapper, shared by providers/ and tools/
-prebuilt/   → ready-made workflows composed from agent/ and graph/
 providers/  → LLM interface, wire types, per-vendor clients
 tools/      → tool primitives: @tool, Toolbox, Workspace, Sandbox, Permissions, MCP
 ```
@@ -35,7 +34,7 @@ Avoid large files, circular dependencies, and tightly coupled components.
 `deepharness/__init__.py` holds only what a first program needs: `Agent`, `Graph`, `tool`, the
 providers, and the handful of types that go with them. Everything else is exported from the
 package that owns it — `deepharness.agent`, `deepharness.graph`, `deepharness.providers`,
-`deepharness.tools`, `deepharness.prebuilt`, `deepharness.errors`.
+`deepharness.tools`, `deepharness.errors`.
 
 A new name goes in its own package's `__all__`, not at the root. The root is a stability
 promise and a flat namespace of everything stops being discoverable, so adding to it needs a
