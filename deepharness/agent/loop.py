@@ -419,13 +419,13 @@ class Agent:
                 else:
                     for call in request.calls:
                         yield ToolStarted(call.name, call.arguments, call.id)
-                    outcome = await asyncio.gather(
-                        *(
-                            self._call_tool(call.name, call.arguments, ctx, False)
-                            for call in request.calls
-                        )
-                    )
-                    for call, result in zip(request.calls, outcome, strict=True):
+                    # Results are recorded in call order, as providers require,
+                    # but reported in completion order, so a fast tool is not
+                    # shown as running until the slowest one in its turn ends.
+                    outcome = [None] * len(request.calls)
+                    async for index, result in self._dispatch(request.calls, ctx):
+                        outcome[index] = result
+                        call = request.calls[index]
                         if (finished := self._finished(call, result)) is not None:
                             yield finished
         except StopIteration as done:
@@ -485,6 +485,29 @@ class Agent:
         for event in self.stream_events(state, deps=deps):
             if isinstance(event, TextDelta):
                 yield event.text
+
+    async def _dispatch(
+        self, calls: list[Any], ctx: Ctx
+    ) -> AsyncIterator[tuple[int, Any]]:
+        """Run unasked calls concurrently, yielding (position, result) as each ends."""
+        tasks = [
+            asyncio.create_task(self._call_tool(call.name, call.arguments, ctx, False))
+            for call in calls
+        ]
+        position = {task: index for index, task in enumerate(tasks)}
+        try:
+            pending = set(tasks)
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in sorted(done, key=position.__getitem__):
+                    yield position[task], task.result()
+        finally:
+            # A ConfigurationError, or a caller that stops listening, leaves
+            # siblings running; nothing will read their results.
+            for task in tasks:
+                task.cancel()
 
     def _finished(self, call: Any, result: Any) -> ToolFinished | None:
         """How one dispatched call ended, or None if it is not over.
