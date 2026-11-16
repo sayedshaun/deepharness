@@ -151,8 +151,7 @@ A sandbox is also what makes it reasonable to drop `requires_approval` from a co
 gate exists because an unsandboxed command can reach anything, and inside a sandbox it cannot.
 
 Calling `run` outside the block raises `ConfigurationError` rather than quietly running
-unsandboxed. `NoSandbox(workspace)` runs commands as this process, with no isolation, and needs
-no block. A new backend, such as a cloud VM, subclasses `Sandbox` and implements
+unsandboxed. A new backend, such as a cloud VM, subclasses `Sandbox` and implements
 `run(command, timeout)`, plus `start()` and `stop()` if it holds anything.
 
 !!! note
