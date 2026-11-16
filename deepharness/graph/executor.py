@@ -5,7 +5,7 @@ import copy
 import dataclasses
 import inspect
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from ..errors import (
@@ -21,6 +21,10 @@ from .events import GraphEvent, GraphFinished, NodeFinished, NodeStarted
 Loop = tuple[str, str, Condition | None, frozenset[str]]
 """(source, target, condition, body) - see Graph.connect(loop=True)."""
 
+GraphEventHook = Callable[[GraphEvent], Awaitable[None] | None]
+"""Called with every event a run emits, so run() can be observed without
+iterating astream_events(). May be async."""
+
 
 class Executor:
     """Runs a built Graph to completion, merging concurrent branches' state.
@@ -35,7 +39,7 @@ class Executor:
     so the graph can iterate. max_steps bounds that.
     """
 
-    __slots__ = ("_loops", "_nodes", "_predecessors", "_state_type")
+    __slots__ = ("_loops", "_nodes", "_on_event", "_predecessors", "_state_type")
 
     def __init__(
         self,
@@ -43,11 +47,13 @@ class Executor:
         predecessors: dict[str, list[tuple[str, Condition | None]]],
         loops: list[Loop] | None = None,
         state_type: type | None = None,
+        on_event: GraphEventHook | None = None,
     ):
         self._nodes = nodes
         self._predecessors = predecessors
         self._loops = loops or []
         self._state_type = state_type
+        self._on_event = on_event
 
     def diagram(self) -> str:
         """A box-drawing picture of the graph, laid out top to bottom by wave.
@@ -78,8 +84,17 @@ class Executor:
 
         The only driver: run() consumes this and keeps the final state, so the
         scheduling exists once. Ends with one GraphFinished carrying the state,
-        or raises what run() would.
+        or raises what run() would. Each event goes to on_event, when one was
+        given, before the caller sees it.
         """
+        async for event in self._events(state, max_steps):
+            if self._on_event is not None:
+                notified = self._on_event(event)
+                if inspect.isawaitable(notified):
+                    await notified
+            yield event
+
+    async def _events(self, state: Any, max_steps: int) -> AsyncIterator[GraphEvent]:
         if state is None:
             if self._state_type is None:
                 raise ConfigurationError(

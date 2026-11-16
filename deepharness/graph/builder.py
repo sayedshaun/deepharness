@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from ..errors import ConfigurationError
 
 if TYPE_CHECKING:
-    from .executor import Executor
+    from .executor import Executor, GraphEventHook
 
 StateT = TypeVar("StateT")
 Condition = Callable[[Any], bool]
@@ -90,7 +90,12 @@ class Graph:
                 return name
         raise ConfigurationError(f"Function is not registered as a node: {ref!r}")
 
-    def build(self) -> Executor:
+    def build(self, *, on_event: GraphEventHook | None = None) -> Executor:
+        """Validate the wiring and return the Executor that runs it.
+
+        on_event, when given, is called with every event a run emits, so a
+        plain run() can be observed; see Executor.astream_events().
+        """
         from .executor import Executor
 
         if not dataclasses.is_dataclass(self.state_type):
@@ -131,7 +136,9 @@ class Graph:
             if loop
         ]
 
-        return Executor(self.nodes, predecessors, loops, self.state_type)
+        return Executor(
+            self.nodes, predecessors, loops, self.state_type, on_event=on_event
+        )
 
     def _has_incoming(self, name: str) -> bool:
         return any(

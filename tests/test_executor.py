@@ -553,3 +553,25 @@ async def test_a_failing_node_cancels_its_siblings():
     await asyncio.sleep(0.3)
 
     assert finished_sibling == []
+
+
+async def test_build_on_event_observes_a_plain_run():
+    from deepharness.graph import GraphFinished, NodeFinished, NodeStarted
+
+    graph = Graph(State)
+
+    @graph.add(start=True, end=True)
+    def only(state: State) -> State:
+        state.combined = "done"
+        return state
+
+    seen = []
+
+    async def record(event):
+        seen.append(event)
+
+    result = await graph.build(on_event=record).run()
+
+    assert seen[:2] == [NodeStarted("only"), NodeFinished("only")]
+    assert isinstance(seen[-1], GraphFinished)
+    assert seen[-1].state is result
