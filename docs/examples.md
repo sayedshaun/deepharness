@@ -236,9 +236,9 @@ can't write anything, which is a stronger guarantee than any rule.
 
 ```python
 from deepharness import Agent
-from deepharness.tools import NoSandbox, Permissions, Rule
+from deepharness.tools import Permissions, Rule
 
-run_command = run_command_tool(NoSandbox("."))  # from the example tools
+# run_command from the example tools
 
 agent = Agent(
     llm,
