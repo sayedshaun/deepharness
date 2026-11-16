@@ -270,3 +270,58 @@ graph.connect(research, write)
 
 Each agent keeps its own prompt, tools, and model; the graph handles sequencing, branching,
 and fan-out between them.
+
+## Running nodes in a sandbox
+
+The graph knows nothing about sandboxes: open one around the run, and every node that holds it —
+through an agent's `shell_tool(box)` or by calling `box.run()` itself — shares it. Whatever one
+node installs, the next can use, and all of it is discarded when the block ends.
+
+```python
+from deepharness.tools import Docker, file_tools, shell_tool
+
+
+@dataclass
+class State:
+    task: str = ""
+    test_output: str = ""
+    passed: bool = False
+
+
+async with Docker("python:3.12-slim", "./project") as box:
+    # Contained, so the loop may run commands without pausing for approval.
+    coder = Agent(
+        llm,
+        tools=[*file_tools(box.workspace), shell_tool(box, requires_approval=False)],
+    )
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def install(state: State) -> State:
+        box.run("pip install -r requirements.txt", timeout=300)
+        return state
+
+    @graph.add()
+    async def fix(state: State) -> State:
+        await coder.arun(f"{state.task}\n\nLast test run:\n{state.test_output}")
+        return state
+
+    @graph.add(end=True)
+    def test(state: State) -> State:
+        result = box.run("pytest -q", timeout=120)
+        state.test_output = result.stdout + result.stderr
+        state.passed = result.returncode == 0
+        return state
+
+    graph.connect(install, fix)
+    graph.connect(fix, test)
+    graph.connect(test, fix, loop=True, condition=lambda s: not s.passed)
+
+    result = await graph.build().run(State(task="Fix the failing tests"), max_steps=10)
+```
+
+`install` and `test` call the sandbox directly — deterministic, no model call — and are as
+contained as the agent's commands. Sync nodes run in a thread, so a blocking `box.run()` does
+not stall parallel branches. Nodes that should be trusted differently can hold different
+sandboxes, such as a `Bubblewrap(root, writable=False)` for a reviewer; parallel branches that
+share one sandbox also share its workspace.
