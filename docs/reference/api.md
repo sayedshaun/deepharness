@@ -10,7 +10,7 @@ from deepharness import Agent, Graph, Message, OpenAI, tool  # ~27 high-level na
 from deepharness.agent import ContextPolicy, StepStarted
 from deepharness.graph import concat, merge_dicts
 from deepharness.providers import Caching, Fallback, Image, Text
-from deepharness.tools import Permissions, ToolName, file_tools, shell_tool
+from deepharness.tools import Bubblewrap, Permissions, Workspace
 from deepharness.prebuilt import DeepResearch
 from deepharness.errors import ProviderError
 ```
@@ -21,7 +21,7 @@ from deepharness.errors import ProviderError
 | `deepharness.agent` | the loop's own types — `ContextPolicy`, `estimate_tokens`, the progress events, `StopReason`, `PendingHumanInput`, `ToolSpec`, `FINAL_TOOL` |
 | `deepharness.graph` | `NodeSpec`, `concat`, `merge_dicts` |
 | `deepharness.providers` | `LLM` and the wire types, content blocks (`Text`, `Image`, `Document`, `Thinking`), `ReasoningLevel`, and the wrappers `Caching`/`Fallback`/`RateLimited`/`Retrying`/`Wrapping` |
-| `deepharness.tools` | `Permissions`, `Rule`, `ToolName`, `Workspace`, `file_tools`, `shell_tool`, `Sandbox`, `Bubblewrap`, `Docker`, `NoSandbox`, `MCPServer`, `Transport`, `TavilySearch` |
+| `deepharness.tools` | `Permissions`, `Rule`, `Workspace`, `Sandbox`, `Bubblewrap`, `Docker`, `NoSandbox`, `MCPServer`, `Transport` |
 | `deepharness.prebuilt` | `DeepResearch`, `Finding`, `ResearchResult` and its events |
 | `deepharness.errors` | every exception; only `DeepHarnessError` is re-exported at the root |
 
@@ -254,40 +254,6 @@ or raises `OutsideWorkspace`; resolution is symlink-aware, so a link inside the 
 out of it is refused. `relative(path)` renders a resolved path as the model should see it. A
 root that is not an existing directory raises `ConfigurationError`.
 
-### `file_tools`
-
-```python
-file_tools(
-    workspace: Workspace | str | Path = ".",
-    *,
-    max_bytes: int = 200_000,
-    max_matches: int = 200,
-    writable: bool = True,
-) -> list[Callable]
-```
-
-Filesystem tools confined to one workspace: `read_file`, `list_files`, `search_files`, and —
-unless `writable=False` — `write_file` and `edit_file`, both gated with
-`requires_approval=True`. `read_file` numbers lines and stops at `max_bytes`, naming the offset
-to continue from. `edit_file` refuses an `old` string that occurs more than once.
-
-### `shell_tool`
-
-```python
-shell_tool(
-    sandbox: Sandbox | Workspace | str | Path = ".",
-    *,
-    timeout: int = 60,
-    max_chars: int = 30_000,
-    requires_approval: bool = True,
-) -> Callable
-```
-
-A `run_command` tool that runs a shell command with the workspace as its working directory,
-reporting stdout, then stderr, then a non-zero exit code. Gated by default. Given a path it runs
-unsandboxed (`NoSandbox`): the workspace bounds where a command starts, not what it can reach.
-Given a started `Sandbox`, it runs there.
-
 ### `Sandbox`
 
 ```python
@@ -296,7 +262,8 @@ Docker(image, workspace=".", *, writable=True, network=False, options=())
 NoSandbox(workspace=".")
 ```
 
-Where `run_command` runs. Use as `with` or `async with`; leaving the block discards everything
+Where a command runs: the boundary a tool you write calls instead of `subprocess`. Use as
+`with` or `async with`; leaving the block discards everything
 outside the workspace, and `run` outside it raises `ConfigurationError` (except `NoSandbox`,
 which holds nothing). Subclass `Sandbox` for a new backend.
 
@@ -353,8 +320,8 @@ Decides per call what may run. `decide(name, arguments) -> "allow" | "ask" | "de
 where `None` means no rule applied and the tool's own `requires_approval` stands. `deny` beats
 `allow` beats `ask`.
 
-A rule may be written three ways: the decorated tool itself (read for the name it is
-registered under), a `ToolName` member, or a string name or `fnmatch` pattern.
+A rule may be written two ways: the decorated tool itself (read for the name it is
+registered under), or a string name or `fnmatch` pattern.
 `Rule` narrows by argument patterns, also `fnmatch`; an argument a rule mentions but the call
 omits does not match. `Rule.is_pattern` says whether a rule names a tool or a shape.
 
@@ -362,17 +329,6 @@ omits does not match. `Rule.is_pattern` says whether a rule names a tool or a sh
 whose silence would be unsafe. `Agent` refuses at construction when a gate names a tool it has
 not registered, since a misspelled deny rule matches nothing and allows what it was written to
 stop. Allow rules and pattern rules are not checked.
-
-### `ToolName`
-
-```python
-ToolName.READ_FILE  # "read_file"; also LIST_FILES, SEARCH_FILES, WRITE_FILE,
-ToolName.RUN_COMMAND  # "run_command"                             EDIT_FILE
-```
-
-The names the built-in tools register under, as one `StrEnum` — a member is a `str`, so it
-works anywhere a name or a `Rule`'s tool is expected. One enum rather than one per module, so
-nothing sits a letter of case away from the factory that builds the tools.
 
 ## Graphs & execution
 
