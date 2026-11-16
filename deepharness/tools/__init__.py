@@ -1,5 +1,5 @@
 from .mcp import MCPServer, MCPTool, Transport
-from .permissions import Decision, Permissions, Rule, RuleLike, ToolName
+from .permissions import Decision, Permissions, Rule, RuleLike
 from .sandbox import Bubblewrap, Docker, NoSandbox, Sandbox
 from .toolbox import (
     Approver,
@@ -24,7 +24,6 @@ __all__ = [
     "Rule",
     "RuleLike",
     "Sandbox",
-    "ToolName",
     "ToolSpec",
     "Toolbox",
     "Transport",
