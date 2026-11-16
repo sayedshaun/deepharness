@@ -196,32 +196,38 @@ state = await agent.arun("What plan is Acme on?", deps=Deps(db=db, tenant="acme"
 For the whole thing assembled — permissions, approvals, context and sessions — see
 [building a coding agent](guide/coding-agent.md). The short version:
 
-`file_tools()` and `shell_tool()` are the difference between an agent that talks about a
-codebase and one that reads it. Both close over a `Workspace`, so every path the model sends is
-resolved inside that root:
+File tools are what turn an agent that talks about a codebase into one that reads it. You write
+them, and resolve every path the model sends through a `Workspace`; the
+[example tools](guide/example-tools.md) are a complete set to copy:
 
 ```python
 import asyncio
 
-from deepharness import Agent, OpenAI
-from deepharness.tools import file_tools, shell_tool
+from deepharness import Agent, OpenAI, tool
+from deepharness.tools import Workspace
+
+workspace = Workspace(".")
+
+
+@tool
+def read_file(path: str) -> str:
+    """Read a UTF-8 text file. Paths are relative to the repository root."""
+    return workspace.resolve(path).read_text(encoding="utf-8")
+
 
 agent = Agent(
     OpenAI("gpt-4o-mini"),
-    tools=[*file_tools("."), shell_tool(".")],
-    system="Work in the repository you are given. Read before you edit.",
+    tools=[read_file],
+    system="Work in the repository you are given. Read before you answer.",
 )
 
-state = asyncio.run(
-    agent.arun("Which module defines the executor, and what does it do?")
-)
+state = asyncio.run(agent.arun("What does deepharness/graph/executor.py do?"))
 print(state.output)
 ```
 
 A path that escapes the root raises `OutsideWorkspace`, which reaches the model as that call's
-result — so it can correct itself while the read never happens. `write_file` and `edit_file`
-are gated out of the box; `file_tools(".", writable=False)` hands over the read-only three
-instead, which is a stronger guarantee than a rule because there is nothing left to rule on.
+result, so it can correct itself while the read never happens. An agent with only read tools
+can't write anything, which is a stronger guarantee than any rule.
 
 ## Allowing `git log` but not `git push`
 
@@ -230,15 +236,17 @@ instead, which is a stronger guarantee than a rule because there is nothing left
 
 ```python
 from deepharness import Agent
-from deepharness.tools import Permissions, Rule, ToolName, shell_tool
+from deepharness.tools import NoSandbox, Permissions, Rule
+
+run_command = run_command_tool(NoSandbox("."))  # from the example tools
 
 agent = Agent(
     llm,
-    tools=[shell_tool(".")],
+    tools=[run_command],
     permissions=Permissions(
-        allow=[Rule(ToolName.RUN_COMMAND, {"command": "git log*"})],
-        ask=[ToolName.RUN_COMMAND],
-        deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
+        allow=[Rule("run_command", {"command": "git log*"})],
+        ask=[run_command],
+        deny=[Rule("run_command", {"command": "*git push*"})],
     ),
 )
 ```
@@ -256,11 +264,10 @@ both ends of that:
 ```python
 from deepharness import Agent
 from deepharness.agent import ContextPolicy
-from deepharness.tools import file_tools
 
 agent = Agent(
     llm,
-    tools=file_tools("."),
+    tools=[read_file, list_files],
     context=ContextPolicy(max_tokens=100_000, tool_result_chars=8_000),
 )
 ```
@@ -395,10 +402,9 @@ import asyncio
 
 from deepharness import OpenAI
 from deepharness.prebuilt import DeepResearch
-from deepharness.tools import TavilySearch
 
-search = TavilySearch()
-research = DeepResearch(OpenAI("gpt-4o-mini"), tools=[search.as_tool()])
+# web_search is a @tool you write; see Example tools for one
+research = DeepResearch(OpenAI("gpt-4o-mini"), tools=[web_search])
 
 result = asyncio.run(research.arun("How do UK master's student visas work?"))
 print(result.report)
