@@ -3,25 +3,28 @@
 An agent that reads a codebase and changes it, assembled one decision at a time. Each stage
 runs; each one fixes a problem the stage before it has.
 
+deepharness ships no file or shell tools, because what they're called and what they return is
+part of your agent. This page uses the [example tools](example-tools.md), copied into a
+`tools.py` next to your script, with `Workspace(".")` as the root.
+
 ```python
 import asyncio
 
 from deepharness import Agent, OpenAI
-from deepharness.tools import file_tools
+from tools import edit_file, list_files, read_file, write_file
 
 llm = OpenAI("gpt-4o-mini")
 SYSTEM = "Work in the repository you are given. Read before you edit."
 
-agent = Agent(llm, tools=file_tools("."), system=SYSTEM)
+agent = Agent(llm, tools=[read_file, list_files, write_file, edit_file], system=SYSTEM)
 
 state = asyncio.run(agent.arun("What does the executor do?"))
 print(state.output)
 ```
 
-That already works: `file_tools()` gives the model `read_file`, `list_files`, `search_files`,
-`write_file` and `edit_file`, every path resolved inside the directory you named. A path that
-climbs out of it raises `OutsideWorkspace`, which reaches the model as that call's result — so
-it corrects itself, and the read never happens.
+That already works. Every path the tools receive goes through `Workspace.resolve()`, so a path
+that climbs out of the root raises `OutsideWorkspace`. That reaches the model as the call's
+result, so it corrects itself, and the read never happens.
 
 The later snippets reuse `llm` and `SYSTEM`, and the ones that `await` belong inside an
 `async def` run with `asyncio.run(...)` — the complete script at the end does exactly that.
@@ -33,29 +36,30 @@ window.
 ## Read-only first
 
 The strongest guarantee is not a rule, it is an absent tool. If the job is understanding rather
-than changing, hand over the three read-only tools and there is nothing left to rule on:
+than changing, hand over only the read tools and there is nothing left to rule on:
 
 ```python
-agent = Agent(llm, tools=file_tools(".", writable=False))
+agent = Agent(llm, tools=[read_file, list_files])
 ```
 
-`read_file` numbers lines and stops at `max_bytes`, telling the model which offset to continue
-from — without that, one read of a large file fills the window and every later turn pays for it
-again.
+The example `read_file` stops at a character limit and says how much it left out. Without that,
+one read of a large file fills the window and every later turn pays for it again.
 
 ## A shell, and why it stops
 
 ```python
-from deepharness.tools import file_tools, shell_tool
+from deepharness.tools import NoSandbox
+from tools import run_command_tool
 
-agent = Agent(llm, tools=[*file_tools("."), shell_tool(".")], system=SYSTEM)
+FILES = [read_file, list_files, write_file, edit_file]
+agent = Agent(llm, tools=[*FILES, run_command_tool(NoSandbox("."))], system=SYSTEM)
 ```
 
 `run_command` runs through a shell — pipes and redirection are the point — with the workspace
-as its working directory. Given a plain path it is **not sandboxed**: the workspace bounds
-where a command starts, not what it can reach (to bound that, pass a
-[sandbox](tools.md#sandboxes-bounding-what-a-command-can-reach)). So it arrives gated, as do
-`write_file` and `edit_file`: the run stops before the call and waits.
+as its working directory. With `NoSandbox` it is **not contained**: the workspace bounds where
+a command starts, not what it can reach (to bound that, use a
+[sandbox](tools.md#sandboxes-bounding-what-a-command-can-reach)). So the example gates it, as
+it does `write_file` and `edit_file`: the run stops before the call and waits.
 
 ```python
 state = await agent.arun("Add a docstring to Executor.run")
@@ -101,24 +105,25 @@ from `git push` — they are the same tool. `Permissions` decides per call, from
 the model actually sent:
 
 ```python
-from deepharness.tools import Permissions, Rule, ToolName, file_tools, shell_tool
+from deepharness.tools import Permissions, Rule
+
+run_command = run_command_tool(NoSandbox("."))
 
 permissions = Permissions(
     allow=[
-        ToolName.READ_FILE,
-        ToolName.LIST_FILES,
-        ToolName.SEARCH_FILES,
-        Rule(ToolName.RUN_COMMAND, {"command": "git log*"}),
-        Rule(ToolName.RUN_COMMAND, {"command": "pytest*"}),
+        read_file,
+        list_files,
+        Rule("run_command", {"command": "git log*"}),
+        Rule("run_command", {"command": "pytest*"}),
     ],
-    ask=[ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.RUN_COMMAND],
+    ask=[write_file, edit_file, run_command],
     deny=[
-        Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"}),
-        Rule(ToolName.RUN_COMMAND, {"command": "*git push*"}),
+        Rule("run_command", {"command": "*rm -rf*"}),
+        Rule("run_command", {"command": "*git push*"}),
     ],
 )
 
-agent = Agent(llm, tools=[*file_tools("."), shell_tool(".")], permissions=permissions)
+agent = Agent(llm, tools=[*FILES, run_command], permissions=permissions)
 ```
 
 `deny` beats `allow` beats `ask`, so widening a policy can never quietly override a refusal
@@ -130,6 +135,29 @@ A deny or ask rule naming a tool the agent does not have is refused at construct
 misspelled deny matches nothing, and a deny that matches nothing allows exactly what it was
 written to stop.
 
+## Letting it run unattended
+
+Rules narrow what runs unasked, but a rule can't predict every harmful command. When the agent
+should run without anyone watching, contain the commands instead of judging them: inside a
+sandbox a command reaches only the workspace, so the gate can come off.
+
+```python
+from deepharness.tools import Bubblewrap
+
+async with Bubblewrap(".") as box:
+    run_command = run_command_tool(box)
+    agent = Agent(
+        llm,
+        tools=[*FILES, run_command],
+        system=SYSTEM,
+        permissions=Permissions(allow=[run_command, write_file, edit_file]),
+    )
+    state = await agent.arun("Make the test suite pass")
+```
+
+An `allow` rule wins over a tool's own `requires_approval`, so nothing pauses. Commands and edits
+still land in the real workspace on your disk, so commit or branch first.
+
 ## Keeping it inside the window
 
 A coding agent reads files, and every result it reads is re-sent with every later turn.
@@ -140,7 +168,7 @@ from deepharness.agent import ContextPolicy
 
 agent = Agent(
     llm,
-    tools=[*file_tools("."), shell_tool(".")],
+    tools=[*FILES, run_command],
     permissions=permissions,
     context=ContextPolicy(max_tokens=100_000, tool_result_chars=8_000),
 )
@@ -205,11 +233,12 @@ from pathlib import Path
 
 from deepharness import Agent, AgentState, OpenAI
 from deepharness.agent import ContextPolicy
-from deepharness.tools import Permissions, Rule, ToolName, file_tools, shell_tool
+from deepharness.tools import NoSandbox, Permissions, Rule
+from tools import edit_file, list_files, read_file, run_command_tool, write_file
 
 SYSTEM = """You are a coding agent working inside one repository.
 
-Read before you change anything: list_files and search_files to find your way,
+Read before you change anything: list_files to find your way,
 read_file before an edit, edit_file for part of a file and write_file for a new
 one, run_command for anything else. Keep prose short - the tool calls show your
 work."""
@@ -217,22 +246,22 @@ work."""
 SESSION = Path("run.json")
 
 
-def build(root: str = ".") -> Agent:
+def build() -> Agent:
+    run_command = run_command_tool(NoSandbox("."))
     return Agent(
         OpenAI("gpt-4o-mini"),
-        tools=[*file_tools(root), shell_tool(root)],
+        tools=[read_file, list_files, write_file, edit_file, run_command],
         system=SYSTEM,
         context=ContextPolicy(max_tokens=100_000, tool_result_chars=8_000),
         permissions=Permissions(
             allow=[
-                ToolName.READ_FILE,
-                ToolName.LIST_FILES,
-                ToolName.SEARCH_FILES,
-                Rule(ToolName.RUN_COMMAND, {"command": "git log*"}),
-                Rule(ToolName.RUN_COMMAND, {"command": "pytest*"}),
+                read_file,
+                list_files,
+                Rule("run_command", {"command": "git log*"}),
+                Rule("run_command", {"command": "pytest*"}),
             ],
-            ask=[ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.RUN_COMMAND],
-            deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
+            ask=[write_file, edit_file, run_command],
+            deny=[Rule("run_command", {"command": "*rm -rf*"})],
         ),
     )
 
@@ -252,7 +281,7 @@ async def drive(agent: Agent, state: AgentState) -> AgentState:
 
 
 async def main() -> None:
-    agent = build(".")
+    agent = build()
     state = (
         AgentState.from_dict(json.loads(SESSION.read_text()))
         if SESSION.exists()
@@ -268,5 +297,5 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Sixty lines, and every decision in it is visible: which tools exist, what runs unasked, what
+Sixty lines plus the tools you copied, and every decision in it is visible: which tools exist, what runs unasked, what
 stops, how big a request may get, and where the conversation lives between runs.
