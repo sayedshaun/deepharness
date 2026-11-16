@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Callable, Generator, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -22,7 +23,7 @@ from ..tools.permissions import Permissions
 from ..tools.toolbox import Ctx, Toolbox, ToolSpec
 from . import turn
 from .context import ContextPolicy
-from .events import StepStarted, ToolFinished, ToolStarted
+from .events import StepFinished, StepStarted, ToolFinished, ToolStarted
 from .output import FINAL_TOOL, coerce, final_tool_schema, find_final
 from .state import (
     AgentState,
@@ -34,7 +35,13 @@ from .state import (
 )
 
 AgentEvent = (
-    TextDelta | ThinkingDelta | StepStarted | ToolStarted | ToolFinished | Finished
+    TextDelta
+    | ThinkingDelta
+    | StepStarted
+    | StepFinished
+    | ToolStarted
+    | ToolFinished
+    | Finished
 )
 """What streaming a run emits: the run's progress, then the final state.
 
@@ -395,6 +402,7 @@ class Agent:
                 if isinstance(request, _Ask):
                     step += 1
                     yield StepStarted(step)
+                    started = time.monotonic()
                     async for event in self._model.astream_events(
                         self._context.prune(request.messages), tools=schemas
                     ):
@@ -402,6 +410,7 @@ class Agent:
                             yield event
                         else:
                             outcome = event.response
+                    yield StepFinished(step, outcome.usage, time.monotonic() - started)
                 elif any(request.ask):
                     # A call the toolbox asks about runs in the model's order,
                     # one at a time: gathering would run the calls after it
@@ -409,11 +418,12 @@ class Agent:
                     results: list[Any] = []
                     for call, ask in zip(request.calls, request.ask, strict=True):
                         yield ToolStarted(call.name, call.arguments, call.id)
-                        result = await self._call_tool(
-                            call.name, call.arguments, ctx, ask
+                        result, took = await _timed(
+                            self._call_tool(call.name, call.arguments, ctx, ask)
                         )
                         results.append(result)
-                        if (finished := self._finished(call, result)) is not None:
+                        finished = self._finished(call, result, took)
+                        if finished is not None:
                             yield finished
                     outcome = results
                 else:
@@ -423,10 +433,11 @@ class Agent:
                     # but reported in completion order, so a fast tool is not
                     # shown as running until the slowest one in its turn ends.
                     outcome = [None] * len(request.calls)
-                    async for index, result in self._dispatch(request.calls, ctx):
+                    dispatched = self._dispatch(request.calls, ctx)
+                    async for index, result, took in dispatched:
                         outcome[index] = result
-                        call = request.calls[index]
-                        if (finished := self._finished(call, result)) is not None:
+                        finished = self._finished(request.calls[index], result, took)
+                        if finished is not None:
                             yield finished
         except StopIteration as done:
             yield Finished(done.value)
@@ -451,6 +462,7 @@ class Agent:
                 if isinstance(request, _Ask):
                     step += 1
                     yield StepStarted(step)
+                    started = time.monotonic()
                     for event in self._model.stream_events(
                         self._context.prune(request.messages), tools=schemas
                     ):
@@ -458,15 +470,19 @@ class Agent:
                             yield event
                         else:
                             outcome = event.response
+                    yield StepFinished(step, outcome.usage, time.monotonic() - started)
                 else:
                     results: list[Any] = []
                     for call, ask in zip(request.calls, request.ask, strict=True):
                         yield ToolStarted(call.name, call.arguments, call.id)
+                        started = time.monotonic()
                         result = self._call_tool_sync(
                             call.name, call.arguments, ctx, ask
                         )
+                        took = time.monotonic() - started
                         results.append(result)
-                        if (finished := self._finished(call, result)) is not None:
+                        finished = self._finished(call, result, took)
+                        if finished is not None:
                             yield finished
                     outcome = results
         except StopIteration as done:
@@ -488,10 +504,12 @@ class Agent:
 
     async def _dispatch(
         self, calls: list[Any], ctx: Ctx
-    ) -> AsyncIterator[tuple[int, Any]]:
-        """Run unasked calls concurrently, yielding (position, result) as each ends."""
+    ) -> AsyncIterator[tuple[int, Any, float]]:
+        """Run unasked calls concurrently, yielding (position, result, seconds) as each ends."""
         tasks = [
-            asyncio.create_task(self._call_tool(call.name, call.arguments, ctx, False))
+            asyncio.create_task(
+                _timed(self._call_tool(call.name, call.arguments, ctx, False))
+            )
             for call in calls
         ]
         position = {task: index for index, task in enumerate(tasks)}
@@ -502,14 +520,15 @@ class Agent:
                     pending, return_when=asyncio.FIRST_COMPLETED
                 )
                 for task in sorted(done, key=position.__getitem__):
-                    yield position[task], task.result()
+                    result, took = task.result()
+                    yield position[task], result, took
         finally:
             # A ConfigurationError, or a caller that stops listening, leaves
             # siblings running; nothing will read their results.
             for task in tasks:
                 task.cancel()
 
-    def _finished(self, call: Any, result: Any) -> ToolFinished | None:
+    def _finished(self, call: Any, result: Any, duration: float) -> ToolFinished | None:
         """How one dispatched call ended, or None if it is not over.
 
         A tool that asked a human has produced no result yet - the run is about
@@ -519,7 +538,7 @@ class Agent:
         if isinstance(result, HumanInputRequired):
             return None
         content, failed = turn.render(result, limit=self._context.tool_result_chars)
-        return ToolFinished(call.name, content, failed, call.id)
+        return ToolFinished(call.name, content, failed, call.id, duration)
 
     async def _call_tool(
         self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool
@@ -542,6 +561,13 @@ class Agent:
             raise
         except Exception as exc:  # noqa: BLE001 - see turn.record_results
             return exc
+
+
+async def _timed(awaitable: Any) -> tuple[Any, float]:
+    """An awaitable's result, and how many seconds it took."""
+    started = time.monotonic()
+    result = await awaitable
+    return result, time.monotonic() - started
 
 
 def _check_rules(tools: Toolbox, permissions: Permissions | None) -> None:

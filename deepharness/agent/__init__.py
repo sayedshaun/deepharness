@@ -1,6 +1,6 @@
 from ..tools.toolbox import Ctx, Toolbox, ToolSpec, tool
 from .context import ContextPolicy, estimate_tokens
-from .events import StepStarted, ToolFinished, ToolStarted
+from .events import StepFinished, StepStarted, ToolFinished, ToolStarted
 from .loop import Agent, AgentEvent, TokenBudgetExceeded
 from .output import FINAL_TOOL
 from .state import (
@@ -24,6 +24,7 @@ __all__ = [
     "Finished",
     "Message",
     "PendingHumanInput",
+    "StepFinished",
     "StepStarted",
     "StopReason",
     "TokenBudgetExceeded",

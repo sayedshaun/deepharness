@@ -6,12 +6,19 @@ from deepharness.agent import (
     Agent,
     ContextPolicy,
     Finished,
+    StepFinished,
     StepStarted,
     ToolFinished,
     ToolStarted,
 )
 from deepharness.errors import HumanInputRequired
-from deepharness.providers.base import LLM, CompletionResponse, TextDelta, ToolCall
+from deepharness.providers.base import (
+    LLM,
+    CompletionResponse,
+    TextDelta,
+    TokenUsage,
+    ToolCall,
+)
 from deepharness.tools.toolbox import tool
 
 
@@ -63,20 +70,22 @@ def test_stream_events_reports_steps_and_the_tool_it_ran():
 
     assert [type(event) for event in events] == [
         StepStarted,
+        StepFinished,
         ToolStarted,
         ToolFinished,
         StepStarted,
         TextDelta,
+        StepFinished,
         Finished,
     ]
     assert [e.step for e in events if isinstance(e, StepStarted)] == [1, 2]
-    started = events[1]
+    started = events[2]
     assert (started.name, started.arguments, started.call_id) == (
         "add",
         {"a": 2, "b": 3},
         "1",
     )
-    assert events[2] == ToolFinished("add", "5", False, "1")
+    assert events[3] == ToolFinished("add", "5", False, "1")
 
 
 @pytest.mark.asyncio
@@ -87,10 +96,12 @@ async def test_astream_events_reports_the_same_sequence():
 
     assert [type(event) for event in events] == [
         StepStarted,
+        StepFinished,
         ToolStarted,
         ToolFinished,
         StepStarted,
         TextDelta,
+        StepFinished,
         Finished,
     ]
 
@@ -129,7 +140,7 @@ def test_a_tool_asking_a_human_reports_no_outcome():
     events = list(Agent(model, tools=[confirm]).stream_events("go"))
 
     assert not any(isinstance(event, ToolFinished) for event in events)
-    assert isinstance(events[1], ToolStarted)
+    assert isinstance(events[2], ToolStarted)
     assert events[-1].state.stop_reason == "paused"
 
 
@@ -178,3 +189,39 @@ async def test_each_tool_is_reported_as_soon_as_it_finishes():
     state = events[-1].state
     results = [m["content"] for m in state.messages if m.get("role") == "tool"]
     assert results == ["slow done", "fast done"]
+
+
+def test_each_step_reports_the_model_calls_usage_and_duration():
+    usage = TokenUsage(10, 5, 15)
+    model = Scripted(
+        [
+            CompletionResponse("", [ToolCall("add", {"a": 1, "b": 2}, "1")], usage),
+            CompletionResponse("3", usage=TokenUsage(20, 1, 21)),
+        ]
+    )
+
+    events = list(Agent(model, tools=[add]).stream_events("1+2?"))
+    steps = [e for e in events if isinstance(e, StepFinished)]
+
+    assert [(s.step, s.usage) for s in steps] == [
+        (1, usage),
+        (2, TokenUsage(20, 1, 21)),
+    ]
+    assert all(s.duration >= 0 for s in steps)
+
+
+async def test_a_tool_reports_how_long_it_took():
+    import asyncio
+
+    @tool
+    async def pause() -> str:
+        """Wait a little."""
+        await asyncio.sleep(0.05)
+        return "done"
+
+    model = Scripted([tool_turn("pause", {}), CompletionResponse("ok")])
+
+    events = [e async for e in Agent(model, tools=[pause]).astream_events("go")]
+    finished = next(e for e in events if isinstance(e, ToolFinished))
+
+    assert finished.duration >= 0.05
