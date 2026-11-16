@@ -128,44 +128,56 @@ code and the case of no output explicitly, or the model can't tell success from 
 
 ### In a sandbox
 
-To contain commands, call a sandbox instead of `subprocess`. The tool becomes a factory, because
-it holds the sandbox, which you pass in like any other dependency:
+To contain commands, call a sandbox instead of `subprocess`. Use this in place of the unconfined
+`run_command` above:
 
 ```python
-from deepharness.tools import Sandbox
+from deepharness.tools import Bubblewrap
+
+box = Bubblewrap(workspace)
 
 
-def run_command_tool(box: Sandbox):
-    @tool(requires_approval=True)
-    def run_command(command: str) -> str:
-        """Run a shell command in the project and return its output."""
-        try:
-            return report(box.run(command, TIMEOUT))
-        except subprocess.TimeoutExpired:
-            return f"Timed out after {TIMEOUT}s: {command}"
-
-    return run_command
+@tool
+def run_command(command: str) -> str:
+    """Run a shell command in the project and return its output."""
+    try:
+        return report(box.run(command, TIMEOUT))
+    except subprocess.TimeoutExpired:
+        return f"Timed out after {TIMEOUT}s: {command}"
 ```
+
+Creating `box` starts nothing; it's only the sandbox's configuration. The sandbox exists while
+a `with` block is open, so the agent is defined once, like any other, and each run goes inside
+a block:
 
 ```python
 from deepharness import Agent
-from deepharness.tools import Bubblewrap
 
-async with Bubblewrap("./project") as box:
-    agent = Agent(llm, tools=[read_file, list_files, run_command_tool(box)])
+agent = Agent(llm, tools=[read_file, list_files, run_command])
+
+async with box:
     state = await agent.arun("Why does the test suite fail?")
 ```
 
-Inside `Bubblewrap` or `Docker` a command can reach only the workspace, so removing the gate is
-a reasonable choice there.
+Each block starts clean, and leaving it discards whatever commands left outside the workspace.
+A call made outside any block raises `ConfigurationError`, which reaches the model as an error
+result, so a command never quietly runs unsandboxed.
+
+This version drops `requires_approval`: inside `Bubblewrap` or `Docker` a command can reach only
+the workspace, so the gate is no longer guarding against much.
 
 ### Switching between the two
 
 If the same agent should run sandboxed in one place and unconfined in another, say Docker in CI
 and your own machine during development, write the unconfined case as a `Sandbox` too. Then only
-the line that picks the sandbox changes:
+the line that creates `box` changes:
 
 ```python
+import os
+
+from deepharness.tools import Docker, Sandbox
+
+
 class Unconfined(Sandbox):
     """Runs commands as this process: no isolation, and nothing to start or stop."""
 
@@ -180,9 +192,7 @@ class Unconfined(Sandbox):
         )
 
 
-box = Docker("python:3.12-slim", ".") if os.environ.get("CI") else Unconfined(".")
-with box:
-    agent = Agent(llm, tools=[read_file, list_files, run_command_tool(box)])
+box = Docker("python:3.12-slim", workspace) if os.environ.get("CI") else Unconfined(workspace)
 ```
 
 ## Web search
