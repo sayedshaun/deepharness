@@ -192,7 +192,11 @@ class Unconfined(Sandbox):
         )
 
 
-box = Docker("python:3.12-slim", workspace) if os.environ.get("CI") else Unconfined(workspace)
+box = (
+    Docker("python:3.12-slim", workspace)
+    if os.environ.get("CI")
+    else Unconfined(workspace)
+)
 ```
 
 ## Web search
