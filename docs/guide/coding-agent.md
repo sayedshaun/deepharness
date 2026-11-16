@@ -48,15 +48,14 @@ one read of a large file fills the window and every later turn pays for it again
 ## A shell, and why it stops
 
 ```python
-from deepharness.tools import NoSandbox
-from tools import run_command_tool
+from tools import run_command
 
 FILES = [read_file, list_files, write_file, edit_file]
-agent = Agent(llm, tools=[*FILES, run_command_tool(NoSandbox("."))], system=SYSTEM)
+agent = Agent(llm, tools=[*FILES, run_command], system=SYSTEM)
 ```
 
 `run_command` runs through a shell — pipes and redirection are the point — with the workspace
-as its working directory. With `NoSandbox` it is **not contained**: the workspace bounds where
+as its working directory. It runs as your own process, so it is **not contained**: the workspace bounds where
 a command starts, not what it can reach (to bound that, use a
 [sandbox](tools.md#sandboxes-bounding-what-a-command-can-reach)). So the example gates it, as
 it does `write_file` and `edit_file`: the run stops before the call and waits.
@@ -107,8 +106,6 @@ the model actually sent:
 ```python
 from deepharness.tools import Permissions, Rule
 
-run_command = run_command_tool(NoSandbox("."))
-
 permissions = Permissions(
     allow=[
         read_file,
@@ -143,14 +140,15 @@ sandbox a command reaches only the workspace, so the gate can come off.
 
 ```python
 from deepharness.tools import Bubblewrap
+from tools import run_command_tool
 
 async with Bubblewrap(".") as box:
-    run_command = run_command_tool(box)
+    contained = run_command_tool(box)
     agent = Agent(
         llm,
-        tools=[*FILES, run_command],
+        tools=[*FILES, contained],
         system=SYSTEM,
-        permissions=Permissions(allow=[run_command, write_file, edit_file]),
+        permissions=Permissions(allow=[contained, write_file, edit_file]),
     )
     state = await agent.arun("Make the test suite pass")
 ```
@@ -233,8 +231,8 @@ from pathlib import Path
 
 from deepharness import Agent, AgentState, OpenAI
 from deepharness.agent import ContextPolicy
-from deepharness.tools import NoSandbox, Permissions, Rule
-from tools import edit_file, list_files, read_file, run_command_tool, write_file
+from deepharness.tools import Permissions, Rule
+from tools import edit_file, list_files, read_file, run_command, write_file
 
 SYSTEM = """You are a coding agent working inside one repository.
 
@@ -247,7 +245,6 @@ SESSION = Path("run.json")
 
 
 def build() -> Agent:
-    run_command = run_command_tool(NoSandbox("."))
     return Agent(
         OpenAI("gpt-4o-mini"),
         tools=[read_file, list_files, write_file, edit_file, run_command],
