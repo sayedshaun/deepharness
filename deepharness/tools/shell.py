@@ -1,9 +1,9 @@
 """Running a command in the workspace, which is the sharpest tool here.
 
-A factory like file_tools(): the command runs in an injected Workspace, and the
-tool is gated by default. Gating is the default rather than a suggestion because
-this is the one tool whose blast radius is not bounded by the workspace root -
-a command can reach anything the process can.
+A factory like file_tools(): the command runs through an injected Sandbox, and
+the tool is gated by default. Gating is the default rather than a suggestion
+because, without a real sandbox, this is the one tool whose blast radius is not
+bounded by the workspace root - a command can reach anything the process can.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .sandbox import NoSandbox, Sandbox
 from .toolbox import tool
 from .workspace import Workspace
 
@@ -21,7 +22,7 @@ _DEFAULT_MAX_CHARS = 30_000
 
 
 def shell_tool(
-    workspace: Workspace | str | Path = ".",
+    sandbox: Sandbox | Workspace | str | Path = ".",
     *,
     timeout: int = _DEFAULT_TIMEOUT_SECONDS,
     max_chars: int = _DEFAULT_MAX_CHARS,
@@ -35,9 +36,11 @@ def shell_tool(
     off is a decision about your own environment - say so deliberately.
 
     The command runs through the shell, because a shell is what the model is
-    being offered: pipes and redirection are the point. It is not a sandbox.
+    being offered: pipes and redirection are the point. A plain path runs it
+    unconfined, as this process (`NoSandbox`); pass a started Sandbox such as
+    `Bubblewrap` or `Docker` to bound what it can reach.
     """
-    space = workspace if isinstance(workspace, Workspace) else Workspace(workspace)
+    box = sandbox if isinstance(sandbox, Sandbox) else NoSandbox(sandbox)
 
     @tool(requires_approval=requires_approval)
     def run_command(command: str) -> str:
@@ -47,15 +50,7 @@ def shell_tool(
         runs longer than the timeout is killed and reported as such.
         """
         try:
-            completed = subprocess.run(
-                command,
-                shell=True,
-                cwd=space.root,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,  # a failing command is a result, not an exception
-            )
+            completed = box.run(command, timeout)
         except subprocess.TimeoutExpired:
             return f"Command timed out after {timeout}s: {command}"
 
