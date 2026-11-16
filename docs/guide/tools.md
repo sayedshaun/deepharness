@@ -86,64 +86,53 @@ agent = Agent(llm, name="assistant", tools=[get_weather])
 - a plain list of functions — a `Toolbox` is built for you automatically
 - an existing `Toolbox` (or subclass) — used as-is
 
-## Built-in: working in a directory
+## Workspace: confining paths
 
-!!! tip
-    This section is the reference for each tool. For putting them together into a working
-    coding agent, see [building a coding agent](coding-agent.md).
-
-`file_tools()` and `shell_tool()` are what turns an agent into a harness: an agent that can
-look at a codebase and change it. Both are factories, because each tool closes over the
-`Workspace` it may touch — the confinement is injected, not read from global state.
+A tool that takes a path takes it from a model, and a model will happily ask for
+`../../.ssh/id_rsa`. `Workspace` is the one place that check lives:
 
 ```python
-from deepharness import Agent
-from deepharness.tools import Permissions, Rule, file_tools, shell_tool
+from deepharness.tools import Workspace
 
-agent = Agent(
-    llm,
-    tools=[*file_tools("."), shell_tool(".")],
-    system="Work in the repository you are given. Read before you edit.",
-)
+workspace = Workspace("./project")
+
+
+@tool
+def read_file(path: str) -> str:
+    """Read a UTF-8 text file. Paths are relative to the project root."""
+    return workspace.resolve(path).read_text(encoding="utf-8")
 ```
 
-`file_tools(root)` gives the model five tools — `read_file`, `list_files`, `search_files`,
-`write_file`, `edit_file`. Pass `writable=False` for the read-only three: a narrower toolbox is
-a stronger guarantee than a rule, because there is nothing left to rule on.
+`resolve()` returns an absolute path inside the root or raises `OutsideWorkspace`. That
+exception reaches the model as the call's result, so it can correct itself, and the read never
+happens. Resolution follows symlinks, so a link inside the root that points out of it is refused
+too. `relative(path)` turns a resolved path back into what the model should see.
 
-Every path the model sends is resolved through `Workspace`, and a path that lands outside the
-root raises `OutsideWorkspace` — which reaches the model as that call's result, so it can
-correct itself, while the read never happens. Resolution is symlink-aware, so a link inside the
-root pointing out of it is refused too, and a symlinked directory does not widen a listing.
-
-`read_file` numbers lines and stops at `max_bytes`, telling the model which offset to continue
-from; without that cap, one `read_file` of a large file fills the context window and every later
-turn pays for it again. `edit_file` refuses an `old` string that appears more than once rather
-than editing the wrong place. `write_file` and `edit_file` are gated (`requires_approval=True`)
-out of the box.
-
-`shell_tool(root)` adds `run_command`, which runs through a shell — pipes and redirection are
-the point. It is gated by default, and given a plain path it is **not sandboxed**: the
-workspace bounds where the command starts, not what it can reach. Leave the gate on, narrow it
-with `Permissions` below, or run it in a sandbox.
+deepharness ships no file or shell tools of its own: their names, docstrings and output are
+decisions about your agent. [Example tools](example-tools.md) has a complete set to copy.
 
 ## Sandboxes: bounding what a command can reach
 
-A `Sandbox` decides what `run_command` can reach. It is a resource with a lifetime: open it with
-`with` (or `async with`), hand it to `shell_tool`, and everything a command leaves outside the
-workspace — installed packages, caches — is thrown away when the block ends.
+`Workspace` bounds where a command starts, not what it can reach: `cd / && rm -rf ~` reaches
+anything your process can. A `Sandbox` bounds the process itself. It is a resource with a
+lifetime: open it with `with` (or `async with`), and everything a command leaves outside the
+workspace, such as installed packages and caches, is thrown away when the block ends.
 
 ```python
-from deepharness import Agent
-from deepharness.tools import Bubblewrap, file_tools, shell_tool
+from deepharness.tools import Bubblewrap
 
 async with Bubblewrap("./project") as box:
-    agent = Agent(llm, tools=[*file_tools(box.workspace), shell_tool(box)])
-    state = await agent.arun("Fix the failing tests")
+    result = box.run("pip install -r requirements.txt && pytest -q", timeout=300)
+    print(result.returncode, result.stdout)
 ```
 
-The workspace is mounted at its own path inside the sandbox, so `file_tools(box.workspace)`
-works on the host and sees exactly what commands wrote.
+`run(command, timeout)` returns a `subprocess.CompletedProcess` whatever the exit code, and
+raises `subprocess.TimeoutExpired` once a command is killed. A tool that runs commands calls it
+instead of `subprocess`; [the shell example](example-tools.md#a-shell) wraps it in a
+`run_command` tool. Nodes in a [graph](graph.md#running-nodes-in-a-sandbox) can call it directly.
+
+The workspace is mounted at its own path inside the sandbox, so tools on the host using
+`box.workspace` see exactly what commands wrote.
 
 | | `Bubblewrap(workspace)` | `Docker(image, workspace)` |
 | --- | --- | --- |
@@ -158,13 +147,13 @@ mounts extra host paths read-only; `Docker(options=[...])` passes flags such as 
 `docker run`. A Docker image needs `sh`, `tail` and `timeout`, which coreutils and busybox both
 provide. Docker runs commands as your uid and gid, so files it writes are owned by you.
 
-A sandbox is also what makes it reasonable to pass `requires_approval=False`: the gate exists
-because an unsandboxed command can reach anything, and inside a sandbox it cannot.
+A sandbox is also what makes it reasonable to drop `requires_approval` from a command tool: the
+gate exists because an unsandboxed command can reach anything, and inside a sandbox it cannot.
 
 Calling `run` outside the block raises `ConfigurationError` rather than quietly running
-unsandboxed. A plain path given to `shell_tool` is `NoSandbox`, which needs no block. A new
-backend — a cloud VM, say — subclasses `Sandbox` and implements `run(command, timeout)`, plus
-`start()` and `stop()` if it holds anything.
+unsandboxed. `NoSandbox(workspace)` runs commands as this process, with no isolation, and needs
+no block. A new backend, such as a cloud VM, subclasses `Sandbox` and implements
+`run(command, timeout)`, plus `start()` and `stop()` if it holds anything.
 
 !!! note
     A snap-installed Docker cannot see the host's `/tmp`; a workspace there is mounted as an
@@ -177,38 +166,38 @@ once the tool is `run_command`: `git log` and `rm -rf /` are the same tool. `Per
 decides per call, from the arguments the model actually sent.
 
 ```python
-from deepharness.tools import Permissions, Rule, ToolName
+from deepharness.tools import Permissions, Rule
+
+run_command = run_command_tool(box)  # from the example tools
 
 permissions = Permissions(
-    allow=[
-        ToolName.READ_FILE,
-        ToolName.LIST_FILES,
-        ToolName.SEARCH_FILES,
-        Rule(ToolName.RUN_COMMAND, {"command": "git log*"}),
-    ],
-    ask=[ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.RUN_COMMAND],
-    deny=[Rule(ToolName.RUN_COMMAND, {"command": "*rm -rf*"})],
+    allow=[read_file, list_files, Rule("run_command", {"command": "git log*"})],
+    ask=[write_file, edit_file, run_command],
+    deny=[Rule("run_command", {"command": "*rm -rf*"})],
 )
 
-agent = Agent(llm, tools=[*file_tools("."), shell_tool(".")], permissions=permissions)
+agent = Agent(
+    llm,
+    tools=[read_file, list_files, write_file, edit_file, run_command],
+    permissions=permissions,
+)
 ```
 
 ### Naming a tool in a rule
 
-Three forms, and they mean the same thing:
+Two forms, and they mean the same thing:
 
 ```python
 read_file, list_files, search_files, write_file, edit_file = file_tools(".")
 
 Permissions(ask=[write_file])  # the tool itself, when it is in scope
-Permissions(ask=[ToolName.WRITE_FILE])  # the built-in names, as a StrEnum
 Permissions(ask=["write_file"])  # a name, or a pattern like "write_*"
 ```
 
-Prefer a tool or an enum member where you can: your editor renames them with the code, and a
-typo is a `NameError` instead of a rule that silently matches nothing. `ToolName` is a `StrEnum`, so a member *is* a string — usable as a `Rule`'s tool and matched
-by `fnmatch` with no conversion. Passing the tool itself reads the name it was registered
-under, so a tool renamed with `@tool(name=...)` still matches what the model sees.
+Prefer the tool itself where you can: your editor renames it with the code, and a typo is a
+`NameError` instead of a rule that silently matches nothing. Passing the tool reads the name it
+was registered under, so a tool renamed with `@tool(name=...)` still matches what the model
+sees.
 
 A string stays necessary for patterns (`"read_*"`) and for tools defined elsewhere, so it is
 never wrong — just unchecked.
@@ -216,7 +205,7 @@ never wrong — just unchecked.
 **A deny or ask rule naming a tool the agent does not have is refused at construction:**
 
 ```python
-Agent(llm, tools=[shell_tool(".")], permissions=Permissions(deny=[Rule("run_comand")]))
+Agent(llm, tools=[run_command], permissions=Permissions(deny=[Rule("run_comand")]))
 # ConfigurationError: permission rules deny or ask about unregistered tools: run_comand.
 # Registered tools: run_command. ...
 ```
@@ -319,39 +308,3 @@ That is also the answer for the deprecated transport: it is the most intricate p
 protocol — a long-lived stream, a background reader, replies correlated by id — and it is being
 retired, so it is left to the caller who actually needs it rather than carried here for
 everyone.
-
-## Built-in: web search
-
-`TavilySearch` wraps [Tavily's](https://tavily.com) search API as a tool, so an agent can
-answer from the live web instead of its training data.
-
-```python
-from deepharness import Agent
-from deepharness.tools import TavilySearch
-
-search = TavilySearch()  # reads TAVILY_API_KEY, or pass api_key=
-
-agent = Agent(
-    llm,
-    tools=[search.as_tool()],
-    system="Answer from search results only, and cite the URLs you used.",
-)
-state = await agent.arun("Who won the Chuadanga-1 seat in 2026?")
-```
-
-The settings live on the object, not in the schema — the model chooses only `query`, which is
-one less thing for it to get wrong:
-
-```python
-search = TavilySearch(max_results=10, search_depth="advanced")
-```
-
-- `as_tool()` is async, for an agent driven with `arun()`; `as_sync_tool()` blocks, for one
-  driven with `run()`. Both take `name=` and `description=` overrides.
-- `await search.search(query)` (or `search.search_sync`) returns `list[SearchResult]` —
-  `title`, `url`, `content`, `score` — for when you want the URLs as data rather than prose.
-  Only the tool flattens them into text.
-- Requests go through the same retrying `HTTPClient` the providers use, so a rate-limited
-  search backs off and retries instead of failing the call and costing the agent a turn.
-  A failure that survives the retries raises `ProviderError`.
-- Close it when you are done: `await search.aclose()`, or `search.close()` for the sync pool.
