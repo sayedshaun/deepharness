@@ -31,6 +31,9 @@ breaking change raises the minor version.
   `NodeStarted`, `NodeFinished(name, duration)` and a final `GraphFinished(state)`; `run()` is
   that stream drained. HTTP retries are logged as warnings on the `deepharness` logger, which is
   silent until the application configures logging. See the new observability guide.
+- `Agent(on_event=fn)` and `Graph.build(on_event=fn)` call `fn` with every event of a run, so
+  `arun()` and `run()` can be observed without iterating a stream. `fn` may be async, except
+  under the agent's sync `run()`.
 
 ### Fixed
 
