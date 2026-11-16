@@ -1,4 +1,3 @@
-from .files import file_tools
 from .mcp import MCPServer, MCPTool, Transport
 from .permissions import Decision, Permissions, Rule, RuleLike, ToolName
 from .sandbox import Bubblewrap, Docker, NoSandbox, Sandbox
@@ -34,7 +33,6 @@ __all__ = [
     "Toolbox",
     "Transport",
     "Workspace",
-    "file_tools",
     "format_results",
     "json_type",
     "shell_tool",
