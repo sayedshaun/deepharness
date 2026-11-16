@@ -200,18 +200,18 @@ class DeepResearch:
             ╰─ up to max_sub_questions, or the question itself as a fallback
     ```
 
-    Give it a model and the tools its researchers should search with -
-    `TavilySearch` reads TAVILY_API_KEY, the provider reads its own key:
+    Give it a model and the tools its researchers should search with - a
+    `@tool` you write around whichever search API you use:
 
     ```python
     import asyncio
 
-    from deepharness import DeepResearch, OpenAI, TavilySearch
+    from deepharness import OpenAI
+    from deepharness.prebuilt import DeepResearch
 
-    search = TavilySearch()
     research = DeepResearch(
         OpenAI(model="gpt-4o-mini"),
-        tools=[search.as_tool()],
+        tools=[web_search],
         max_sub_questions=4,
         n_parallel=2,
     )
