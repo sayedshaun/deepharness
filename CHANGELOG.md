@@ -7,13 +7,18 @@ breaking change raises the minor version.
 
 ### Breaking
 
-- `shell_tool`'s first parameter is renamed from `workspace` to `sandbox`, since it now takes a
-  `Sandbox` as well as a path. Positional calls such as `shell_tool(".")` are unchanged.
+- The ready-made tools are removed: `file_tools`, `shell_tool`, `TavilySearch` (with
+  `SearchResult` and `format_results`) and the `ToolName` enum. A tool's name, docstring and
+  output are part of an agent, not of the library, so deepharness now ships only what tools are
+  built from: `@tool`, `Workspace`, `Sandbox` and `Permissions`. The
+  [example tools](docs/guide/example-tools.md) page has file, shell and web search tools to
+  copy. A rule that used `ToolName.RUN_COMMAND` now names the tool itself or `"run_command"`.
 
 ### Added
 
-- Sandboxes for `run_command`: `Bubblewrap` (Linux namespaces) and `Docker` (one container per
-  sandbox), used as `with` or `async with` and passed to `shell_tool(box)`. Both mount only the
+- Sandboxes for running commands: `Bubblewrap` (Linux namespaces) and `Docker` (one container
+  per sandbox), used as `with` or `async with`, with `box.run(command, timeout)` called by the
+  tools you write and by graph nodes directly. `NoSandbox` runs commands unconfined. Both mount only the
   workspace (read-only with `writable=False`), keep the network off unless `network=True`, and
   discard everything outside the workspace when the block ends. Subclass `Sandbox` for another
   backend.
