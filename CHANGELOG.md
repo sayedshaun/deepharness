@@ -20,11 +20,11 @@ breaking change raises the minor version.
 
 ### Added
 
-- Sandboxes for running commands: `Bubblewrap` (Linux namespaces) and `Docker` (one container
-  per sandbox), used as `with` or `async with`, with `box.run(command, timeout)` called by the
-  tools you write and by graph nodes directly. Both mount only the workspace (read-only with
-  `writable=False`), keep the network off unless `network=True`, and discard everything outside
-  the workspace when the block ends. Subclass `Sandbox` for another backend.
+- `deepharness.sandbox`, for running commands: `Bubblewrap` (Linux namespaces) and `Docker`
+  (one container per sandbox), used as `with` or `async with`, with `box.run(command, timeout)`
+  called by the tools you write and by graph nodes directly. Both mount only the workspace
+  (read-only with `writable=False`), keep the network off unless `network=True`, and discard
+  everything outside the workspace when the block ends. Subclass `Sandbox` for another backend.
 
 ### Fixed
 
