@@ -138,18 +138,21 @@ Rules narrow what runs unasked, but a rule can't predict every harmful command. 
 should run without anyone watching, contain the commands instead of judging them: inside a
 sandbox a command reaches only the workspace, so the gate can come off.
 
-```python
-from deepharness.tools import Bubblewrap
-from tools import run_command_tool
+Switch `tools.py` to the [sandboxed `run_command`](example-tools.md#in-a-sandbox), which runs
+commands through a `box` defined beside it. The agent stays the same; the run goes inside the
+sandbox's block:
 
-async with Bubblewrap(".") as box:
-    contained = run_command_tool(box)
-    agent = Agent(
-        llm,
-        tools=[*FILES, contained],
-        system=SYSTEM,
-        permissions=Permissions(allow=[contained, write_file, edit_file]),
-    )
+```python
+from tools import box, run_command
+
+agent = Agent(
+    llm,
+    tools=[*FILES, run_command],
+    system=SYSTEM,
+    permissions=Permissions(allow=[run_command, write_file, edit_file]),
+)
+
+async with box:
     state = await agent.arun("Make the test suite pass")
 ```
 
