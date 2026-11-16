@@ -394,21 +394,6 @@ graph.connect(act, think, loop=True)
 
 ## Researching a question end to end
 
-`DeepResearch` plans sub-questions, researches each with its own `Agent`, and synthesizes one
-report:
-
-```python
-import asyncio
-
-from deepharness import OpenAI
-from deepharness.prebuilt import DeepResearch
-
-# web_search is a @tool you write; see Example tools for one
-research = DeepResearch(OpenAI("gpt-4o-mini"), tools=[web_search])
-
-result = asyncio.run(research.arun("How do UK master's student visas work?"))
-print(result.report)
-```
-
-Watch it work instead of waiting on a blank screen by iterating `astream_events()` — see
-[Deep research](guide/research.md#watching-a-run-live).
+Plan sub-questions, research each with its own agent in parallel, and synthesize one report.
+It is three agents in a three-node graph; [Deep research](guide/research.md) has the whole
+thing to copy, and the variations worth knowing.
