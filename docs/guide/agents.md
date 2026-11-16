@@ -109,9 +109,43 @@ raised sets `failed`, and the run still continues, since the error goes back to 
 that call's result. A tool that asked a human reports no `ToolFinished`: it has no result yet,
 and the run is about to pause on it.
 
-`stream()`/`stream_events()` are the synchronous counterparts, and there tools run one at a
-time, so each tool's pair of events surrounds its own call rather than the whole turn's.
-`astream()`/`stream()` yield text alone and never see the rest.
+When the model calls several tools in one turn, `astream_events()` runs them concurrently: every
+`ToolStarted` comes first, then each `ToolFinished` as soon as that tool ends, so a quick read
+is not shown as running until a slow command beside it finishes. The transcript still records
+the results in the order the model called them. `stream()`/`stream_events()` are the
+synchronous counterparts, and there tools run one at a time, so each tool's pair of events
+surrounds its own call. `astream()`/`stream()` yield text alone and never see the rest.
+
+Only text streams. A tool's arguments arrive whole with `ToolStarted`, and its output arrives
+whole with `ToolFinished`; neither is streamed as it is produced.
+
+### A coding assistant's view
+
+A terminal UI in the style of a coding assistant streams the text and shows each tool as a
+single line, with nothing of its arguments or output beyond a summary:
+
+```python
+from deepharness import TextDelta
+from deepharness.agent import ToolFinished, ToolStarted
+
+
+def summary(arguments: dict) -> str:
+    text = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
+async for event in agent.astream_events(prompt):
+    match event:
+        case TextDelta(text):
+            print(text, end="", flush=True)
+        case ToolStarted(name, arguments, _):
+            print(f"\n⏺ {name}({summary(arguments)})")
+        case ToolFinished(_, _, failed, _):
+            print("  ⎿ failed" if failed else "  ⎿ done")
+```
+
+With tools running concurrently, the `⎿` lines arrive in the order the tools finish; match them
+to their `⏺` line by `call_id` if your UI updates rows in place.
 
 ## Token usage and budgets
 
