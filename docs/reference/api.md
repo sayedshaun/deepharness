@@ -10,7 +10,8 @@ from deepharness import Agent, Graph, Message, OpenAI, tool  # ~27 high-level na
 from deepharness.agent import ContextPolicy, StepStarted
 from deepharness.graph import concat, merge_dicts
 from deepharness.providers import Caching, Fallback, Image, Text
-from deepharness.tools import Bubblewrap, Permissions, Workspace
+from deepharness.sandbox import Bubblewrap
+from deepharness.tools import Permissions, Workspace
 from deepharness.errors import ProviderError
 ```
 
@@ -20,7 +21,8 @@ from deepharness.errors import ProviderError
 | `deepharness.agent` | the loop's own types — `ContextPolicy`, `estimate_tokens`, the progress events, `StopReason`, `PendingHumanInput`, `ToolSpec`, `FINAL_TOOL` |
 | `deepharness.graph` | `NodeSpec`, `concat`, `merge_dicts` |
 | `deepharness.providers` | `LLM` and the wire types, content blocks (`Text`, `Image`, `Document`, `Thinking`), `ReasoningLevel`, and the wrappers `Caching`/`Fallback`/`RateLimited`/`Retrying`/`Wrapping` |
-| `deepharness.tools` | `Permissions`, `Rule`, `Workspace`, `Sandbox`, `Bubblewrap`, `Docker`, `MCPServer`, `Transport` |
+| `deepharness.tools` | `Permissions`, `Rule`, `Workspace`, `MCPServer`, `Transport` |
+| `deepharness.sandbox` | `Sandbox`, `Bubblewrap`, `Docker` |
 | `deepharness.errors` | every exception; only `DeepHarnessError` is re-exported at the root |
 
 The root is kept small on purpose: each name there is a promise about stability, and a flat
@@ -259,7 +261,8 @@ Bubblewrap(workspace=".", *, writable=True, network=False, read_only=())
 Docker(image, workspace=".", *, writable=True, network=False, options=())
 ```
 
-Where a command runs: the boundary a tool you write calls instead of `subprocess`. Use as
+From `deepharness.sandbox`. Where a command runs: the boundary a tool you write calls instead
+of `subprocess`. Use as
 `with` or `async with`; leaving the block discards everything
 outside the workspace, and `run` outside it raises `ConfigurationError`. Subclass `Sandbox` for
 a new backend.
