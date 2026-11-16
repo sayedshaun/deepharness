@@ -26,6 +26,12 @@ breaking change raises the minor version.
   discard everything outside the workspace when the block ends. Subclass `Sandbox` for another
   backend.
 
+### Fixed
+
+- `astream_events()` reports each `ToolFinished` as soon as that tool ends, instead of holding
+  every result in a turn until the slowest tool finished. The transcript still records results in
+  call order.
+
 ## 0.3.0 — 2026-11-05
 
 The release that makes an agent usable for long runs: tools that work in a directory, rules
