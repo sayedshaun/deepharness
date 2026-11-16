@@ -274,11 +274,14 @@ and fan-out between them.
 ## Running nodes in a sandbox
 
 The graph knows nothing about sandboxes: open one around the run, and every node that holds it —
-through an agent's `shell_tool(box)` or by calling `box.run()` itself — shares it. Whatever one
+through an agent's command tool or by calling `box.run()` itself — shares it. Whatever one
 node installs, the next can use, and all of it is discarded when the block ends.
 
 ```python
-from deepharness.tools import Docker, file_tools, shell_tool
+from deepharness.tools import Docker, Permissions
+
+# from the example tools: guide/example-tools.md
+from tools import edit_file, read_file, run_command_tool
 
 
 @dataclass
@@ -289,10 +292,12 @@ class State:
 
 
 async with Docker("python:3.12-slim", "./project") as box:
+    run_command = run_command_tool(box)
     # Contained, so the loop may run commands without pausing for approval.
     coder = Agent(
         llm,
-        tools=[*file_tools(box.workspace), shell_tool(box, requires_approval=False)],
+        tools=[read_file, edit_file, run_command],
+        permissions=Permissions(allow=[run_command, edit_file]),
     )
     graph = Graph(State)
 
