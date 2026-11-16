@@ -119,7 +119,7 @@ lifetime: open it with `with` (or `async with`), and everything a command leaves
 workspace, such as installed packages and caches, is thrown away when the block ends.
 
 ```python
-from deepharness.tools import Bubblewrap
+from deepharness.sandbox import Bubblewrap
 
 async with Bubblewrap("./project") as box:
     result = box.run("pip install -r requirements.txt && pytest -q", timeout=300)
