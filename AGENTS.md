@@ -25,7 +25,7 @@ graph/      → graph/node/edge definitions, executor (waves + merging)
 http.py     → retrying httpx wrapper, shared by providers/ and tools/
 prebuilt/   → ready-made workflows composed from agent/ and graph/
 providers/  → LLM interface, wire types, per-vendor clients
-tools/      → built-in tool implementations
+tools/      → tool primitives: @tool, Toolbox, Workspace, Sandbox, Permissions, MCP
 ```
 
 Avoid large files, circular dependencies, and tightly coupled components.
