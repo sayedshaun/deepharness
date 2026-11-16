@@ -21,7 +21,7 @@ from deepharness.errors import ProviderError
 | `deepharness.agent` | the loop's own types — `ContextPolicy`, `estimate_tokens`, the progress events, `StopReason`, `PendingHumanInput`, `ToolSpec`, `FINAL_TOOL` |
 | `deepharness.graph` | `NodeSpec`, `concat`, `merge_dicts` |
 | `deepharness.providers` | `LLM` and the wire types, content blocks (`Text`, `Image`, `Document`, `Thinking`), `ReasoningLevel`, and the wrappers `Caching`/`Fallback`/`RateLimited`/`Retrying`/`Wrapping` |
-| `deepharness.tools` | `Permissions`, `Rule`, `Workspace`, `Sandbox`, `Bubblewrap`, `Docker`, `NoSandbox`, `MCPServer`, `Transport` |
+| `deepharness.tools` | `Permissions`, `Rule`, `Workspace`, `Sandbox`, `Bubblewrap`, `Docker`, `MCPServer`, `Transport` |
 | `deepharness.prebuilt` | `DeepResearch`, `Finding`, `ResearchResult` and its events |
 | `deepharness.errors` | every exception; only `DeepHarnessError` is re-exported at the root |
 
@@ -259,13 +259,12 @@ root that is not an existing directory raises `ConfigurationError`.
 ```python
 Bubblewrap(workspace=".", *, writable=True, network=False, read_only=())
 Docker(image, workspace=".", *, writable=True, network=False, options=())
-NoSandbox(workspace=".")
 ```
 
 Where a command runs: the boundary a tool you write calls instead of `subprocess`. Use as
 `with` or `async with`; leaving the block discards everything
-outside the workspace, and `run` outside it raises `ConfigurationError` (except `NoSandbox`,
-which holds nothing). Subclass `Sandbox` for a new backend.
+outside the workspace, and `run` outside it raises `ConfigurationError`. Subclass `Sandbox` for
+a new backend.
 
 | Member | Signature | Description |
 | --- | --- | --- |
