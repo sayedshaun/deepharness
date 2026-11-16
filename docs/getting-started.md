@@ -94,8 +94,9 @@ async def summarize(state: State) -> State:
 - [Agents](guide/agents.md) — the think/act loop, progress events,
   [context management](guide/agents.md#context-management), budgets, and
   [resumable sessions](guide/agents.md#session-persistence)
-- [Tools](guide/tools.md) — writing a tool, the
-  [file and shell tools](guide/tools.md#built-in-working-in-a-directory),
+- [Tools](guide/tools.md) — writing a tool, [workspaces](guide/tools.md#workspace-confining-paths),
+  [sandboxes](guide/tools.md#sandboxes-bounding-what-a-command-can-reach),
+  [example tools](guide/example-tools.md) to copy,
   [permissions](guide/tools.md#permissions-deciding-per-call), and
   [MCP servers](guide/tools.md#tools-from-an-mcp-server)
 - [Providers](guide/providers.md) — Anthropic, OpenAI, Gemini, OpenAI-compatible gateways,
