@@ -120,8 +120,8 @@ This is not the same as [`Caching`](#caching), which skips the request entirely:
 makes a *new* request cheaper by reusing its prefix, and helps a conversation that keeps
 growing — exactly where a response cache cannot.
 
-`max_concurrency=` caps requests in flight for that provider. A graph wave or a `DeepResearch`
-fan-out otherwise opens as many connections as it has branches, which is the usual way a run
+`max_concurrency=` caps requests in flight for that provider. A graph wave or an
+`asyncio.gather` of agents otherwise opens as many connections as it has branches, which is the usual way a run
 rate-limits itself; the cap is held across retries and for a stream's whole body, because
 in-flight requests are what a rate limiter counts.
 
