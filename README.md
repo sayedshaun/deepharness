@@ -171,7 +171,6 @@ order is visible:
 ```python
 from deepharness import Agent, Anthropic, OpenAI
 from deepharness.providers import Caching, Fallback, RateLimited
-from deepharness.tools import file_tools
 
 llm = Caching(
     RateLimited(Fallback(OpenAI("gpt-4o-mini"), Anthropic("claude-sonnet-4-5")), rps=2)
