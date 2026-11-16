@@ -123,9 +123,52 @@ than editing the wrong place. `write_file` and `edit_file` are gated (`requires_
 out of the box.
 
 `shell_tool(root)` adds `run_command`, which runs through a shell — pipes and redirection are
-the point. It is gated by default and it is **not a sandbox**: the workspace bounds where the
-command starts, not what it can reach. Leave the gate on, or narrow it with `Permissions`
-below.
+the point. It is gated by default, and given a plain path it is **not sandboxed**: the
+workspace bounds where the command starts, not what it can reach. Leave the gate on, narrow it
+with `Permissions` below, or run it in a sandbox.
+
+## Sandboxes: bounding what a command can reach
+
+A `Sandbox` decides what `run_command` can reach. It is a resource with a lifetime: open it with
+`with` (or `async with`), hand it to `shell_tool`, and everything a command leaves outside the
+workspace — installed packages, caches — is thrown away when the block ends.
+
+```python
+from deepharness import Agent
+from deepharness.tools import Bubblewrap, file_tools, shell_tool
+
+async with Bubblewrap("./project") as box:
+    agent = Agent(llm, tools=[*file_tools(box.workspace), shell_tool(box)])
+    state = await agent.arun("Fix the failing tests")
+```
+
+The workspace is mounted at its own path inside the sandbox, so `file_tools(box.workspace)`
+works on the host and sees exactly what commands wrote.
+
+| | `Bubblewrap(workspace)` | `Docker(image, workspace)` |
+| --- | --- | --- |
+| Needs | `bwrap` on Linux | a Docker daemon and the image |
+| Host files | system directories read-only, the workspace, no home directories | the workspace only |
+| Environment | cleared, so this process's API keys are not visible | not inherited |
+| Lasts for the block | a scratch `/tmp` and `$HOME` | the container's whole filesystem |
+
+Both take `writable=False` to mount the workspace read-only and `network=True` to allow network
+access; both default to a writable workspace and no network. `Bubblewrap(read_only=[...])`
+mounts extra host paths read-only; `Docker(options=[...])` passes flags such as `--memory` to
+`docker run`. A Docker image needs `sh`, `tail` and `timeout`, which coreutils and busybox both
+provide. Docker runs commands as your uid and gid, so files it writes are owned by you.
+
+A sandbox is also what makes it reasonable to pass `requires_approval=False`: the gate exists
+because an unsandboxed command can reach anything, and inside a sandbox it cannot.
+
+Calling `run` outside the block raises `ConfigurationError` rather than quietly running
+unsandboxed. A plain path given to `shell_tool` is `NoSandbox`, which needs no block. A new
+backend — a cloud VM, say — subclasses `Sandbox` and implements `run(command, timeout)`, plus
+`start()` and `stop()` if it holds anything.
+
+!!! note
+    A snap-installed Docker cannot see the host's `/tmp`; a workspace there is mounted as an
+    empty directory.
 
 ## Permissions: deciding per call
 
