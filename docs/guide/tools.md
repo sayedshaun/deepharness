@@ -127,7 +127,10 @@ async with Bubblewrap("./project") as box:
 ```
 
 `run(command, timeout)` returns a `subprocess.CompletedProcess` whatever the exit code, and
-raises `subprocess.TimeoutExpired` once a command is killed. A tool that runs commands calls it
+raises `subprocess.TimeoutExpired` once a command is killed. Each of stdout and stderr keeps at
+most `max_output` bytes (a million by default, set on the sandbox), and output past that ends
+with `[output truncated: N more bytes]`, because a command can print more than your process can
+hold before the timeout arrives. A tool that runs commands calls it
 instead of `subprocess`; [the shell example](example-tools.md#a-shell) wraps it in a
 `run_command` tool. Nodes in a [graph](graph.md#running-nodes-in-a-sandbox) can call it directly.
 
@@ -137,21 +140,40 @@ The workspace is mounted at its own path inside the sandbox, so tools on the hos
 | | `Bubblewrap(workspace)` | `Docker(image, workspace)` |
 | --- | --- | --- |
 | Needs | `bwrap` on Linux | a Docker daemon and the image |
-| Host files | system directories read-only, the workspace, no home directories | the workspace only |
+| Host files | system directories (`/usr`, `/etc`, ...) read-only, the workspace, no home directories | the workspace only |
 | Environment | cleared, so this process's API keys are not visible | not inherited |
 | Lasts for the block | a scratch `/tmp` and `$HOME` | the container's whole filesystem |
+| Background processes | end with the command that started them | run until the block ends |
+| Limits | time only | time, plus whatever `options` sets |
 
 Both take `writable=False` to mount the workspace read-only and `network=True` to allow network
 access; both default to a writable workspace and no network. `Bubblewrap(read_only=[...])`
 mounts extra host paths read-only; `Docker(options=[...])` passes flags such as `--memory` to
 `docker run`. A Docker image needs `sh`, `tail` and `timeout`, which coreutils and busybox both
-provide. Docker runs commands as your uid and gid, so files it writes are owned by you.
+provide. Docker runs commands as your uid and gid with every capability dropped, so files it
+writes are owned by you.
+
+Neither keeps a shell's state between commands: each `run` is a fresh `sh -c`, so `cd` and
+`export` last only for that command. Bubblewrap sets no memory or process limit; when a command
+might exhaust either, use Docker with `options=["--memory=1g", "--pids-limit=256"]`, and add
+`--security-opt=no-new-privileges` where your Docker supports it (a snap-installed one does
+not). `options` is your configuration: never build it from what a model sent.
+
+What a sandbox cannot hide is the workspace itself. A `.env` or a key file in it is readable by
+every command, so keep secrets out of a workspace an agent works in. `network=True` gives the
+command the network as this machine has it, not a list of allowed hosts.
+
+`start()` checks that a command can actually run, so a host where `bwrap` cannot create
+namespaces (some distributions restrict them) or an image that cannot start fails there with
+`ConfigurationError`, never by running the command outside the sandbox. A workspace of `/` is
+refused, as is starting a sandbox that is already started.
 
 A sandbox is also what makes it reasonable to drop `requires_approval` from a command tool: the
 gate exists because an unsandboxed command can reach anything, and inside a sandbox it cannot.
 
 Calling `run` outside the block raises `ConfigurationError` rather than quietly running
-unsandboxed. A new backend, such as a cloud VM, subclasses `Sandbox` and implements
+unsandboxed. A sandbox isolates the commands sent through it, not the agent: the model calls,
+your other tools and MCP servers still run in your process. A new backend, such as a cloud VM, subclasses `Sandbox` and implements
 `run(command, timeout)`, plus `start()` and `stop()` if it holds anything.
 
 !!! note
