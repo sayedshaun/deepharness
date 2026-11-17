@@ -266,7 +266,16 @@ root that is not an existing directory raises `ConfigurationError`.
 ### `Sandbox`
 
 ```python
-Bubblewrap(workspace=".", *, writable=True, network=False, read_only=(), max_output=1_000_000)
+Bubblewrap(
+    workspace=".",
+    *,
+    writable=True,
+    network=False,
+    read_only=(),
+    max_output=1_000_000,
+    max_memory_mb=None,
+    max_processes=None,
+)
 ```
 
 From `deepharness.sandbox`. Where a command runs: the boundary a tool you write calls instead

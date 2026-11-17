@@ -25,7 +25,9 @@ breaking change raises the minor version.
   nodes directly. It makes the workspace the only writable host path (read-only with
   `writable=False`), keeps the network off unless `network=True`, caps each output stream at
   `max_output` bytes, checks on `start()` that a command can actually run, and discards
-  everything outside the workspace when the block ends. Subclass `Sandbox` for another backend.
+  everything outside the workspace when the block ends. `max_memory_mb` and `max_processes`
+  cap each command and everything it starts, through a systemd user scope. Subclass `Sandbox`
+  for another backend.
 - Observability without a dependency. `StepFinished(step, usage, duration)` follows each model
   call, and `ToolFinished` carries the call's `duration`. `Executor.astream_events()` reports
   `NodeStarted`, `NodeFinished(name, duration)` and a final `GraphFinished(state)`; `run()` is

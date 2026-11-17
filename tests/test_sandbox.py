@@ -37,14 +37,38 @@ needs_bwrap = pytest.mark.skipif(
 )
 
 
+def _limits_work() -> bool:
+    if not _bwrap_works():
+        return False
+    try:
+        with (
+            tempfile.TemporaryDirectory(dir=Path.cwd()) as root,
+            Bubblewrap(root, max_memory_mb=64, max_processes=16),
+        ):
+            return True
+    except ConfigurationError:
+        return False
+
+
+needs_limits = pytest.mark.skipif(
+    not _REQUIRED and not _limits_work(),
+    reason="systemd user scopes with memory and pids controllers unavailable",
+)
+
+
+def _fake(directory: Path, name: str, script: str) -> None:
+    directory.mkdir(exist_ok=True)
+    (directory / name).write_text(f"#!/bin/sh\n{script}\n")
+    (directory / name).chmod(0o755)
+
+
 def test_a_host_that_cannot_run_bwrap_fails_on_start(tmp_path, monkeypatch):
-    fake = tmp_path / "bin" / "bwrap"
-    fake.parent.mkdir()
-    fake.write_text(
-        "#!/bin/sh\necho 'setting up uid map: Permission denied' >&2\nexit 1\n"
+    _fake(
+        tmp_path / "bin",
+        "bwrap",
+        "echo 'setting up uid map: Permission denied' >&2; exit 1",
     )
-    fake.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{fake.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
     box = Bubblewrap(tmp_path)
 
     with pytest.raises(ConfigurationError, match="uid map"):
@@ -208,3 +232,66 @@ def test_leaving_the_block_discards_the_sandbox(workspace):
         sandbox.run("true", 10)
     with Bubblewrap(workspace) as fresh:
         assert fresh.run("cat ~/note", 10).returncode != 0
+
+
+def test_limits_need_systemd_run(tmp_path, monkeypatch):
+    _fake(tmp_path / "bin", "bwrap", 'exec "$@"')
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+
+    Bubblewrap(tmp_path)  # no limits, no systemd needed
+    with pytest.raises(ConfigurationError, match="systemd-run"):
+        Bubblewrap(tmp_path, max_processes=16)
+
+
+@pytest.mark.parametrize("limits", [{"max_memory_mb": 0}, {"max_processes": 0}])
+def test_limits_must_be_positive(tmp_path, monkeypatch, limits):
+    _fake(tmp_path / "bin", "bwrap", 'exec "$@"')
+    _fake(tmp_path / "bin", "systemd-run", 'exec "$@"')
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+
+    with pytest.raises(ConfigurationError, match="at least 1"):
+        Bubblewrap(tmp_path, **limits)
+
+
+def test_limits_that_are_not_applied_fail_on_start(tmp_path, monkeypatch):
+    # A systemd-run that runs the command without creating a limited cgroup.
+    _fake(tmp_path / "bin", "bwrap", 'exec "$@"')
+    _fake(
+        tmp_path / "bin",
+        "systemd-run",
+        'while [ "$1" != "--" ]; do shift; done; shift; exec "$@"',
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    box = Bubblewrap(tmp_path, max_memory_mb=64, max_processes=16)
+
+    with pytest.raises(ConfigurationError, match="could not apply"):
+        box.start()
+    with pytest.raises(ConfigurationError):
+        box.run("true", 10)
+
+
+@needs_limits
+def test_memory_beyond_the_limit_is_refused(workspace):
+    allocate = "python3 -c 'bytearray(300 * 1024 * 1024)'"
+    with Bubblewrap(workspace, max_memory_mb=64) as sandbox:
+        result = sandbox.run(f"{allocate}; echo exit=$?", 30)
+        assert result.stdout == "exit=137\n"  # killed, and the shell carried on
+        assert sandbox.run("echo fine", 10).stdout == "fine\n"
+
+
+@needs_limits
+def test_processes_beyond_the_limit_are_refused(workspace):
+    with Bubblewrap(workspace, max_processes=16) as sandbox:
+        result = sandbox.run("for i in $(seq 40); do sleep 2 & done; wait", 30)
+
+    assert result.returncode != 0
+    assert "fork" in result.stderr.lower()
+
+
+@needs_limits
+def test_a_limited_command_is_still_killed_on_timeout(workspace):
+    with (
+        Bubblewrap(workspace, max_memory_mb=64, max_processes=16) as sandbox,
+        pytest.raises(subprocess.TimeoutExpired),
+    ):
+        sandbox.run("sleep 30", 1)
