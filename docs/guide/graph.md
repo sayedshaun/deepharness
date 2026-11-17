@@ -306,7 +306,7 @@ node installs, the next can use, and all of it is discarded when the block ends.
 from deepharness.tools import Permissions
 
 # the example tools (guide/example-tools.md), with the sandboxed run_command
-# and box = Docker("python:3.12-slim", workspace)
+# and box = Bubblewrap(workspace)
 from tools import box, edit_file, read_file, run_command
 
 
