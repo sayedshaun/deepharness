@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ..errors import ConfigurationError
 from ..tools.workspace import Workspace
-from .base import Sandbox, run_process
+from .base import MAX_OUTPUT, Sandbox, run_process
 
 _SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc")
 _PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -23,7 +23,8 @@ class Bubblewrap(Sandbox):
     `writable=False`, and home directories not at all. The environment is
     cleared, so API keys held by this process are not visible to the command.
     `/tmp` and `$HOME` are a scratch directory that lives as long as the
-    sandbox does.
+    sandbox does. Each command gets its own process namespace, so nothing it
+    starts outlives it. Only time is limited, not memory or processes.
     """
 
     def __init__(
@@ -33,8 +34,9 @@ class Bubblewrap(Sandbox):
         writable: bool = True,
         network: bool = False,
         read_only: Sequence[str | Path] = (),
+        max_output: int = MAX_OUTPUT,
     ):
-        super().__init__(workspace)
+        super().__init__(workspace, max_output=max_output)
         if shutil.which("bwrap") is None:
             raise ConfigurationError("Bubblewrap needs the `bwrap` executable on PATH")
         self._writable = writable
@@ -43,7 +45,17 @@ class Bubblewrap(Sandbox):
         self._scratch: Path | None = None
 
     def start(self) -> None:
+        if self._scratch is not None:
+            raise ConfigurationError("this Bubblewrap is already started")
         self._scratch = Path(tempfile.mkdtemp(prefix="deepharness-"))
+        # Hosts that restrict user namespaces fail inside bwrap, which would
+        # otherwise look like every command failing.
+        probe = self.run("true", 30)
+        if probe.returncode != 0:
+            self.stop()
+            raise ConfigurationError(
+                f"bwrap cannot create a sandbox on this host: {probe.stderr.strip()}"
+            )
 
     def stop(self) -> None:
         if self._scratch is not None:
@@ -66,4 +78,4 @@ class Bubblewrap(Sandbox):
         argv += ["--die-with-parent", "--new-session", "--clearenv"]
         argv += ["--setenv", "PATH", _PATH, "--setenv", "HOME", "/tmp"]
         argv += ["sh", "-c", command]
-        return run_process(argv, self.workspace.root, timeout)
+        return run_process(argv, self.workspace.root, timeout, self._max_output)

@@ -146,8 +146,8 @@ A complete set of [example tools](https://sayedshaun.github.io/deepharness/guide
 to copy, and a walkthrough covering approvals, context, sessions, and a sixty-line script that
 runs, are in [Building a coding agent](https://sayedshaun.github.io/deepharness/guide/coding-agent/).
 
-Every path is resolved inside the workspace root, commands in a sandbox reach only the
-workspace with no network and none of your environment variables, `deny` beats `allow` beats `ask`, and a run
+Every path is resolved inside the workspace root, commands in a sandbox can write only to the
+workspace and see no home directory, no network and none of your environment variables, `deny` beats `allow` beats `ask`, and a run
 that needs a human stops with `stop_reason == "paused"` — resumable later, in another process,
 because `state.to_dict()`/`AgentState.from_dict()` round-trip the whole state, pending approval
 included.

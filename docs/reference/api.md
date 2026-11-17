@@ -22,7 +22,7 @@ from deepharness.errors import ProviderError
 | `deepharness.graph` | `NodeSpec`, `concat`, `merge_dicts` |
 | `deepharness.providers` | `LLM` and the wire types, content blocks (`Text`, `Image`, `Document`, `Thinking`), `ReasoningLevel`, and the wrappers `Caching`/`Fallback`/`RateLimited`/`Retrying`/`Wrapping` |
 | `deepharness.tools` | `Permissions`, `Rule`, `Workspace`, `MCPServer`, `Transport` |
-| `deepharness.sandbox` | `Sandbox`, `Bubblewrap`, `Docker` |
+| `deepharness.sandbox` | `Sandbox`, `Bubblewrap` |
 | `deepharness.errors` | every exception; only `DeepHarnessError` is re-exported at the root |
 
 The root is kept small on purpose: each name there is a promise about stability, and a flat
@@ -266,8 +266,7 @@ root that is not an existing directory raises `ConfigurationError`.
 ### `Sandbox`
 
 ```python
-Bubblewrap(workspace=".", *, writable=True, network=False, read_only=())
-Docker(image, workspace=".", *, writable=True, network=False, options=())
+Bubblewrap(workspace=".", *, writable=True, network=False, read_only=(), max_output=1_000_000)
 ```
 
 From `deepharness.sandbox`. Where a command runs: the boundary a tool you write calls instead
@@ -279,7 +278,7 @@ a new backend.
 | Member | Signature | Description |
 | --- | --- | --- |
 | `workspace` | `Workspace` | The directory mounted into the sandbox at its own path. |
-| `run` | `def run(command, timeout) -> CompletedProcess[str]` | Run one command; raises `subprocess.TimeoutExpired` once it is killed. Abstract. |
+| `run` | `def run(command, timeout) -> CompletedProcess[str]` | Run one command; raises `subprocess.TimeoutExpired` once it is killed. Each stream keeps at most `max_output` bytes. Abstract. |
 | `start` / `stop` | `def start() -> None` | Acquire and release what the sandbox holds; called by `with`. No-ops by default. |
 
 ### `MCPServer` / `MCPTool`

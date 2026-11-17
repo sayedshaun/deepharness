@@ -163,19 +163,19 @@ Each block starts clean, and leaving it discards whatever commands left outside 
 A call made outside any block raises `ConfigurationError`, which reaches the model as an error
 result, so a command never quietly runs unsandboxed.
 
-This version drops `requires_approval`: inside `Bubblewrap` or `Docker` a command can reach only
-the workspace, so the gate is no longer guarding against much.
+This version drops `requires_approval`: inside `Bubblewrap` a command can write only to the
+workspace, so the gate is no longer guarding against much.
 
 ### Switching between the two
 
-If the same agent should run sandboxed in one place and unconfined in another, say Docker in CI
-and your own machine during development, write the unconfined case as a `Sandbox` too. Then only
+If the same agent should run sandboxed in one place and unconfined in another, say sandboxed in
+CI and unconfined on your own machine during development, write the unconfined case as a `Sandbox` too. Then only
 the line that creates `box` changes:
 
 ```python
 import os
 
-from deepharness.sandbox import Docker, Sandbox
+from deepharness.sandbox import Bubblewrap, Sandbox
 
 
 class Unconfined(Sandbox):
@@ -192,11 +192,7 @@ class Unconfined(Sandbox):
         )
 
 
-box = (
-    Docker("python:3.12-slim", workspace)
-    if os.environ.get("CI")
-    else Unconfined(workspace)
-)
+box = Bubblewrap(workspace) if os.environ.get("CI") else Unconfined(workspace)
 ```
 
 ## Web search

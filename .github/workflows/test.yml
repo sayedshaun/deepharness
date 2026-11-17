@@ -32,3 +32,24 @@ jobs:
       - run: python -m ruff check .
 
       - run: python -m pytest -q
+
+  sandbox:
+    # The sandbox tests skip where bwrap is missing; here they must run.
+    runs-on: ubuntu-latest
+    env:
+      DEEPHARNESS_REQUIRE_SANDBOXES: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      # Ubuntu 24.04 restricts the unprivileged user namespaces bwrap is built on.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - run: pip install -e ".[dev]"
+
+      - run: python -m pytest -q -rs tests/test_sandbox.py
