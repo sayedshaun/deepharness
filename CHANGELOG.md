@@ -7,6 +7,10 @@ breaking change raises the minor version.
 
 ### Breaking
 
+- An approval pause no longer carries made-up wording: `PendingHumanInput.question` is empty for
+  a `requires_approval` call, which is already described by `name` and `arguments`, and now
+  defaults to `""`. A rejected call's result is "Not run: this call was rejected." rather than
+  "Denied by the user.", since a policy or another model may be what rejected it.
 - `deepharness.prebuilt` is removed, and with it `DeepResearch`, `ResearchResult`, `Finding`
   and the research events. Its prompts and limits were decisions about an application, and the
   shape is three agents in a three-node graph: [Deep research](docs/guide/research.md) now has
