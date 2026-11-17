@@ -65,7 +65,7 @@ state = await agent.arun("Add a docstring to Executor.run")
 
 print(state.stop_reason)  # "paused"
 print(state.paused[0].name)  # "edit_file"
-print(state.paused[0].question)  # Run edit_file with {'path': ..., 'old': ...}?
+print(state.paused[0].arguments)  # {'path': ..., 'old': ..., 'new': ...}
 ```
 
 Nothing else in that turn ran either. A turn half-applied while a human is deciding would be
@@ -90,7 +90,7 @@ async def drive(agent: Agent, prompt: str) -> AgentState:
     state = await agent.arun(prompt)
     while state.stop_reason == "paused":
         for call in state.paused:
-            print(f"\n{call.question}")
+            print(f"\nRun {call.name} with {call.arguments}?")
             allowed = input("[y/N] ").strip().lower() == "y"
             state.approve(call.call_id) if allowed else state.reject(call.call_id)
         state = await agent.arun(state)
@@ -271,7 +271,7 @@ async def drive(agent: Agent, state: AgentState) -> AgentState:
     state = await agent.arun(state)
     while state.stop_reason == "paused":
         for call in state.paused:
-            print(f"\n{call.question}")
+            print(f"\nRun {call.name} with {call.arguments}?")
             if input("[y/N] ").strip().lower() == "y":
                 state.approve(call.call_id)
             else:
