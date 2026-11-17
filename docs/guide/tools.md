@@ -137,6 +137,25 @@ instead of `subprocess`; [the shell example](example-tools.md#a-shell) wraps it 
 The workspace is mounted at its own path inside the sandbox, so tools on the host using
 `box.workspace` see exactly what commands wrote.
 
+### What runs where
+
+A sandbox contains the commands sent through `box.run()`, and nothing else. The agent itself
+runs in your Python process, inside the `with` block or not:
+
+| Runs in your process, unsandboxed | Runs in the sandbox |
+| --- | --- |
+| The agent loop, its history, events and `on_event` | Each command passed to `box.run()` |
+| Model calls, with your API keys | Everything that command starts |
+| Your `@tool` functions, including file tools | |
+| MCP servers, and graph nodes that don't call `box.run()` | |
+
+`async with box:` doesn't move the agent anywhere. It creates the sandbox's scratch directory,
+checks that `bwrap` works, and removes the directory when the block ends; an `arun()` inside the
+block runs exactly where it would outside it. So a tool that reads files is only as safe as its
+own code, which is what `Workspace.resolve()` is for, and a tool that returns `os.environ`
+hands your API keys to the model. Running the whole agent isolated would need a separate worker
+process with a protocol back to yours; deepharness doesn't do that.
+
 `Bubblewrap` is the backend deepharness ships: Linux namespaces through the `bwrap`
 executable, with no daemon and no image.
 
@@ -169,8 +188,7 @@ A sandbox is also what makes it reasonable to drop `requires_approval` from a co
 gate exists because an unsandboxed command can reach anything, and inside a sandbox it cannot.
 
 Calling `run` outside the block raises `ConfigurationError` rather than quietly running
-unsandboxed. A sandbox isolates the commands sent through it, not the agent: the model calls,
-your other tools and MCP servers still run in your process. A new backend, such as a cloud VM, subclasses `Sandbox` and implements
+unsandboxed. A new backend, such as a cloud VM, subclasses `Sandbox` and implements
 `run(command, timeout)`, plus `start()` and `stop()` if it holds anything.
 
 ## Permissions: deciding per call
