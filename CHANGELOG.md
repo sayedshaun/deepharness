@@ -20,13 +20,12 @@ breaking change raises the minor version.
 
 ### Added
 
-- `deepharness.sandbox`, for running commands: `Bubblewrap` (Linux namespaces) and `Docker`
-  (one container per sandbox), used as `with` or `async with`, with `box.run(command, timeout)`
-  called by the tools you write and by graph nodes directly. Both make the workspace the only
-  writable host path (read-only with `writable=False`), keep the network off unless
-  `network=True`, cap each output stream at `max_output` bytes, check on `start()` that a
-  command can actually run, and discard everything outside the workspace when the block ends.
-  Subclass `Sandbox` for another backend.
+- `deepharness.sandbox`, for running commands: `Bubblewrap` (Linux namespaces), used as `with`
+  or `async with`, with `box.run(command, timeout)` called by the tools you write and by graph
+  nodes directly. It makes the workspace the only writable host path (read-only with
+  `writable=False`), keeps the network off unless `network=True`, caps each output stream at
+  `max_output` bytes, checks on `start()` that a command can actually run, and discards
+  everything outside the workspace when the block ends. Subclass `Sandbox` for another backend.
 
 - Observability without a dependency. `StepFinished(step, usage, duration)` follows each model
   call, and `ToolFinished` carries the call's `duration`. `Executor.astream_events()` reports
