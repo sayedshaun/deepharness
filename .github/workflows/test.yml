@@ -45,10 +45,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap dbus-user-session
 
       # Ubuntu 24.04 restricts the unprivileged user namespaces bwrap is built on.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Memory and process limits run each command in a systemd user scope, so the runner
+      # needs a user manager, which a CI job doesn't get without logging in.
+      - run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+
+      - run: timeout 60 sh -c 'until systemctl --user is-system-running | grep -qE "running|degraded"; do sleep 1; done'
 
       - run: pip install -e ".[dev]"
 
