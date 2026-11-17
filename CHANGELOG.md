@@ -26,8 +26,19 @@ breaking change raises the minor version.
   (read-only with `writable=False`), keep the network off unless `network=True`, and discard
   everything outside the workspace when the block ends. Subclass `Sandbox` for another backend.
 
+- Observability without a dependency. `StepFinished(step, usage, duration)` follows each model
+  call, and `ToolFinished` carries the call's `duration`. `Executor.astream_events()` reports
+  `NodeStarted`, `NodeFinished(name, duration)` and a final `GraphFinished(state)`; `run()` is
+  that stream drained. HTTP retries are logged as warnings on the `deepharness` logger, which is
+  silent until the application configures logging. See the new observability guide.
+- `Agent(on_event=fn)` and `Graph.build(on_event=fn)` call `fn` with every event of a run, so
+  `arun()` and `run()` can be observed without iterating a stream. `fn` may be async, except
+  under the agent's sync `run()`.
+
 ### Fixed
 
+- A graph node that raises now cancels the other nodes in its wave instead of leaving them
+  running with no one to read their results.
 - `astream_events()` reports each `ToolFinished` as soon as that tool ends, instead of holding
   every result in a turn until the slowest tool finished. The transcript still records results in
   call order.

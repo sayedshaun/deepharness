@@ -102,7 +102,11 @@ async for event in agent.astream_events("What is 17 * 23?"):
 ```
 
 Most of a long run's wall clock goes on tool calls the model never narrates, so text alone
-makes an agent look stalled. `StepStarted.step` is 1-based and capped by `Budget.steps`;
+makes an agent look stalled. `StepStarted.step` is 1-based and capped by `Budget.steps`, and
+each step ends with a `StepFinished(step, usage, duration)` once the model's turn is complete,
+before any tool it asked for runs. `ToolFinished.duration` is that call's time in seconds. See
+[observability](observability.md) for turning these into summaries or traces; pass
+`Agent(on_event=...)` to receive the same events from a plain `arun()` or `run()`.
 `ToolFinished.result` is the text the model will read — already truncated by the
 [context policy](#context-management), so what you display is what the model saw. A tool that
 raised sets `failed`, and the run still continues, since the error goes back to the model as

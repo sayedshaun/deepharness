@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Generator, Iterable, Iterator
+import inspect
+import time
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+)
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,7 +31,7 @@ from ..tools.permissions import Permissions
 from ..tools.toolbox import Ctx, Toolbox, ToolSpec
 from . import turn
 from .context import ContextPolicy
-from .events import StepStarted, ToolFinished, ToolStarted
+from .events import StepFinished, StepStarted, ToolFinished, ToolStarted
 from .output import FINAL_TOOL, coerce, final_tool_schema, find_final
 from .state import (
     AgentState,
@@ -34,7 +43,13 @@ from .state import (
 )
 
 AgentEvent = (
-    TextDelta | ThinkingDelta | StepStarted | ToolStarted | ToolFinished | Finished
+    TextDelta
+    | ThinkingDelta
+    | StepStarted
+    | StepFinished
+    | ToolStarted
+    | ToolFinished
+    | Finished
 )
 """What streaming a run emits: the run's progress, then the final state.
 
@@ -42,6 +57,10 @@ Prose arrives as TextDelta, reasoning as ThinkingDelta, and the rest is what the
 loop is doing between those - a step beginning, a tool starting and finishing -
 ending with the one Finished that carries the AgentState. A caller interested in
 text alone wants astream() and never sees these."""
+
+EventHook = Callable[[AgentEvent], Awaitable[None] | None]
+"""Called with every event a run emits, so a run driven by arun() or run() can
+be observed without iterating a stream. May be async under arun()."""
 
 
 @dataclass(slots=True)
@@ -105,6 +124,7 @@ class Agent:
         "_final_schema",
         "_model",
         "_name",
+        "_on_event",
         "_output",
         "_permissions",
         "_system",
@@ -123,6 +143,7 @@ class Agent:
         context: ContextPolicy | None = None,
         permissions: Permissions | None = None,
         output: type | None = None,
+        on_event: EventHook | None = None,
     ):
         self._model = model
         self._tools = tools if isinstance(tools, Toolbox) else Toolbox(tools)
@@ -135,6 +156,7 @@ class Agent:
         self._output = output
         self._final_schema = final_tool_schema(output) if output is not None else None
         self._total_usage = TokenUsage(0, 0, 0)
+        self._on_event = on_event
 
     # Read-only views: an agent's configuration is settled at construction, and
     # total_usage is live state no caller should be able to reset or inflate.
@@ -377,8 +399,33 @@ class Agent:
         The only async driver: arun() consumes this and keeps the last event, so
         the loop's mechanics - budget, approvals, tool dispatch - exist once
         rather than once per public method. Providers that cannot really stream
-        still work here; their turn simply arrives as a single delta.
+        still work here; their turn simply arrives as a single delta. Each event
+        goes to on_event, when one was given, before the caller sees it.
         """
+        async for event in self._events(state, deps):
+            if self._on_event is not None:
+                notified = self._on_event(event)
+                if inspect.isawaitable(notified):
+                    await notified
+            yield event
+
+    def stream_events(
+        self, state: Any = None, *, deps: Any = None
+    ) -> Iterator[AgentEvent]:
+        """Synchronous counterpart to astream_events()."""
+        for event in self._events_sync(state, deps):
+            if self._on_event is not None:
+                notified = self._on_event(event)
+                if inspect.isawaitable(notified):
+                    if inspect.iscoroutine(notified):
+                        notified.close()  # never awaited; silence the warning
+                    raise ConfigurationError(
+                        "the on_event callback is async; run() and stream() need a "
+                        "plain one"
+                    )
+            yield event
+
+    async def _events(self, state: Any, deps: Any) -> AsyncIterator[AgentEvent]:
         state = AgentState.of(state)
         if self._model is None:
             yield Finished(self._passthrough(state))
@@ -395,6 +442,7 @@ class Agent:
                 if isinstance(request, _Ask):
                     step += 1
                     yield StepStarted(step)
+                    started = time.monotonic()
                     async for event in self._model.astream_events(
                         self._context.prune(request.messages), tools=schemas
                     ):
@@ -402,6 +450,7 @@ class Agent:
                             yield event
                         else:
                             outcome = event.response
+                    yield StepFinished(step, outcome.usage, time.monotonic() - started)
                 elif any(request.ask):
                     # A call the toolbox asks about runs in the model's order,
                     # one at a time: gathering would run the calls after it
@@ -409,11 +458,12 @@ class Agent:
                     results: list[Any] = []
                     for call, ask in zip(request.calls, request.ask, strict=True):
                         yield ToolStarted(call.name, call.arguments, call.id)
-                        result = await self._call_tool(
-                            call.name, call.arguments, ctx, ask
+                        result, took = await _timed(
+                            self._call_tool(call.name, call.arguments, ctx, ask)
                         )
                         results.append(result)
-                        if (finished := self._finished(call, result)) is not None:
+                        finished = self._finished(call, result, took)
+                        if finished is not None:
                             yield finished
                     outcome = results
                 else:
@@ -423,18 +473,16 @@ class Agent:
                     # but reported in completion order, so a fast tool is not
                     # shown as running until the slowest one in its turn ends.
                     outcome = [None] * len(request.calls)
-                    async for index, result in self._dispatch(request.calls, ctx):
+                    dispatched = self._dispatch(request.calls, ctx)
+                    async for index, result, took in dispatched:
                         outcome[index] = result
-                        call = request.calls[index]
-                        if (finished := self._finished(call, result)) is not None:
+                        finished = self._finished(request.calls[index], result, took)
+                        if finished is not None:
                             yield finished
         except StopIteration as done:
             yield Finished(done.value)
 
-    def stream_events(
-        self, state: Any = None, *, deps: Any = None
-    ) -> Iterator[AgentEvent]:
-        """Synchronous counterpart to astream_events()."""
+    def _events_sync(self, state: Any, deps: Any) -> Iterator[AgentEvent]:
         state = AgentState.of(state)
         if self._model is None:
             yield Finished(self._passthrough(state))
@@ -451,6 +499,7 @@ class Agent:
                 if isinstance(request, _Ask):
                     step += 1
                     yield StepStarted(step)
+                    started = time.monotonic()
                     for event in self._model.stream_events(
                         self._context.prune(request.messages), tools=schemas
                     ):
@@ -458,15 +507,19 @@ class Agent:
                             yield event
                         else:
                             outcome = event.response
+                    yield StepFinished(step, outcome.usage, time.monotonic() - started)
                 else:
                     results: list[Any] = []
                     for call, ask in zip(request.calls, request.ask, strict=True):
                         yield ToolStarted(call.name, call.arguments, call.id)
+                        started = time.monotonic()
                         result = self._call_tool_sync(
                             call.name, call.arguments, ctx, ask
                         )
+                        took = time.monotonic() - started
                         results.append(result)
-                        if (finished := self._finished(call, result)) is not None:
+                        finished = self._finished(call, result, took)
+                        if finished is not None:
                             yield finished
                     outcome = results
         except StopIteration as done:
@@ -488,10 +541,12 @@ class Agent:
 
     async def _dispatch(
         self, calls: list[Any], ctx: Ctx
-    ) -> AsyncIterator[tuple[int, Any]]:
-        """Run unasked calls concurrently, yielding (position, result) as each ends."""
+    ) -> AsyncIterator[tuple[int, Any, float]]:
+        """Run unasked calls concurrently, yielding (position, result, seconds) as each ends."""
         tasks = [
-            asyncio.create_task(self._call_tool(call.name, call.arguments, ctx, False))
+            asyncio.create_task(
+                _timed(self._call_tool(call.name, call.arguments, ctx, False))
+            )
             for call in calls
         ]
         position = {task: index for index, task in enumerate(tasks)}
@@ -502,14 +557,15 @@ class Agent:
                     pending, return_when=asyncio.FIRST_COMPLETED
                 )
                 for task in sorted(done, key=position.__getitem__):
-                    yield position[task], task.result()
+                    result, took = task.result()
+                    yield position[task], result, took
         finally:
             # A ConfigurationError, or a caller that stops listening, leaves
             # siblings running; nothing will read their results.
             for task in tasks:
                 task.cancel()
 
-    def _finished(self, call: Any, result: Any) -> ToolFinished | None:
+    def _finished(self, call: Any, result: Any, duration: float) -> ToolFinished | None:
         """How one dispatched call ended, or None if it is not over.
 
         A tool that asked a human has produced no result yet - the run is about
@@ -519,7 +575,7 @@ class Agent:
         if isinstance(result, HumanInputRequired):
             return None
         content, failed = turn.render(result, limit=self._context.tool_result_chars)
-        return ToolFinished(call.name, content, failed, call.id)
+        return ToolFinished(call.name, content, failed, call.id, duration)
 
     async def _call_tool(
         self, name: str, arguments: dict[str, Any], ctx: Ctx, ask: bool
@@ -542,6 +598,13 @@ class Agent:
             raise
         except Exception as exc:  # noqa: BLE001 - see turn.record_results
             return exc
+
+
+async def _timed(awaitable: Any) -> tuple[Any, float]:
+    """An awaitable's result, and how many seconds it took."""
+    started = time.monotonic()
+    result = await awaitable
+    return result, time.monotonic() - started
 
 
 def _check_rules(tools: Toolbox, permissions: Permissions | None) -> None:

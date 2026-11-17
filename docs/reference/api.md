@@ -47,6 +47,7 @@ Agent(
     context: ContextPolicy | None = None,
     permissions: Permissions | None = None,
     output: type | None = None,
+    on_event: EventHook | None = None,
 )
 ```
 
@@ -66,6 +67,7 @@ calls, repeat until the model stops calling tools or the budget's step limit is 
 | `permissions` | `Permissions \| None` | Per-call policy; `None` leaves each call to the tool's own `requires_approval`. Read-only. |
 | `tools` | `Toolbox` | Always a `Toolbox` — an iterable passed as `tools=` is wrapped in one. Read-only. |
 | `output` | `type \| None` | A dataclass; when set, `state.output` is a validated instance of it. |
+| `on_event` | `Callable[[AgentEvent], Awaitable[None] \| None] \| None` | Called with every event of every run, before the caller sees it, so `arun()`/`run()` can be observed. May be async under `arun()`; a sync `run()` raises `ConfigurationError` for an async one. Its exceptions propagate. |
 
 ### `AgentState`
 
@@ -158,7 +160,13 @@ a tokenizer — a real count would mean a per-vendor dependency.
 
 ```python
 AgentEvent = (
-    TextDelta | ThinkingDelta | StepStarted | ToolStarted | ToolFinished | Finished
+    TextDelta
+    | ThinkingDelta
+    | StepStarted
+    | StepFinished
+    | ToolStarted
+    | ToolFinished
+    | Finished
 )
 ```
 
@@ -167,8 +175,9 @@ What `astream_events()`/`stream_events()` emit.
 | Event | Fields | Emitted |
 | --- | --- | --- |
 | `StepStarted` | `step: int` | Before each model call; 1-based, capped by `Budget.steps`. |
+| `StepFinished` | `step: int`, `usage: TokenUsage \| None`, `duration: float` | Once the model's turn ends, before its tools run. `duration` is seconds and excluded from equality. |
 | `ToolStarted` | `name: str`, `arguments: dict`, `call_id: str \| None` | Before a tool runs, with the arguments the model sent. |
-| `ToolFinished` | `name: str`, `result: str`, `failed: bool`, `call_id: str \| None` | After a tool returns or raises. `result` is the (truncated) text the model will read. Not emitted for a tool that asked a human — it has no result yet. |
+| `ToolFinished` | `name: str`, `result: str`, `failed: bool`, `call_id: str \| None`, `duration: float` | After a tool returns or raises, as each ends. `result` is the (truncated) text the model will read. Not emitted for a tool that asked a human — it has no result yet. |
 | `TextDelta` | `text: str` | As the model's prose arrives. |
 | `ThinkingDelta` | `text: str` | As the model's reasoning arrives, kept apart from the answer. |
 | `Finished` | `state: AgentState` | Once, last, carrying the run's result. |
@@ -342,12 +351,13 @@ Graph(state_type: type)
 | --- | --- | --- |
 | `add` | `def add(*, name: str \| None = None, start: bool = False, end: bool = False)` | Decorator that registers a function as a node. |
 | `connect` | `def connect(source: Callable \| str, target: Callable \| str, *, condition: Callable[[Any], bool] \| None = None, loop: bool = False)` | Declares an edge, optionally conditional. `loop=True` marks a back-edge, re-running the loop head and everything downstream of it. |
-| `build` | `def build() -> Executor` | Validates the graph (has a start node, fully reachable, no cycle whose back-edge is unmarked) and returns an `Executor`. |
+| `build` | `def build(*, on_event: GraphEventHook \| None = None) -> Executor` | `on_event` is called with every `GraphEvent` of every run, so `run()` can be observed; it may be async. Validates the graph (has a start node, fully reachable, no cycle whose back-edge is unmarked) and returns an `Executor`. |
 
 ### `Executor`
 
 ```python
 async def run(state: Any = None, *, max_steps: int = 50) -> Any
+async def astream_events(state: Any = None, *, max_steps: int = 50) -> AsyncIterator[GraphEvent]
 def diagram() -> str
 ```
 
@@ -360,6 +370,11 @@ satisfied. A field written by two or more concurrent branches is combined by its
 Taking a `loop=True` edge re-runs the loop head and everything downstream of it; exceeding
 `max_steps` raises `StepLimitExceeded`. Returned by `Graph.build()` — not constructed
 directly.
+
+`astream_events()` runs the graph the same way, yielding `NodeStarted(name)` for each node in
+a wave, then `NodeFinished(name, duration)` as each one ends, and finally
+`GraphFinished(state)`. `run()` is that stream drained down to the final state. A node that
+raises cancels the others in its wave. The events are importable from `deepharness.graph`.
 
 `diagram()` returns a box-drawing picture of the graph as text — layers top to bottom by
 wave, `═` for start and end nodes, `▽` for a conditional edge, and back-edges routed up the

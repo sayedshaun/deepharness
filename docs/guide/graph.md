@@ -183,6 +183,30 @@ would have to cross that node's box, which would read as an edge that does not e
 than draw a lie it falls back to `(not drawn: no clear margin)` in the notes. And a wide wave
 produces a wide drawing — there is no wrapping or truncation to fit a terminal.
 
+## Watching a run
+
+`executor.run()` is silent until it returns. `astream_events()` runs the graph the same way and
+reports each node as it starts and ends:
+
+```python
+from deepharness.graph import GraphFinished, NodeFinished, NodeStarted
+
+async for event in executor.astream_events():
+    match event:
+        case NodeStarted(name):
+            print(f"▶ {name}")
+        case NodeFinished(name, duration):
+            print(f"✓ {name} ({duration:.1f}s)")
+        case GraphFinished(state):
+            result = state
+```
+
+Every node in a wave starts before any finishes, and each `NodeFinished` arrives when that
+node ends, so a slow branch is visible as the one still running. If a node raises, the others
+in its wave are cancelled and the stream raises what `run()` would. To observe a plain
+`run()` instead, pass a callable to `graph.build(on_event=...)`; it receives the same events.
+See [observability](observability.md) for turning these into traces.
+
 ## Validation
 
 `graph.build()` fails fast on structural mistakes, before anything runs:

@@ -478,3 +478,100 @@ async def test_run_still_rejects_a_state_of_the_wrong_type():
 
     with pytest.raises(ConfigurationError, match="runs on State"):
         await graph.build().run(Other())
+
+
+async def test_astream_events_reports_each_node_then_the_final_state():
+    from deepharness.graph import GraphFinished, NodeFinished, NodeStarted
+
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    def first(state: State) -> State:
+        state.result_a = "a"
+        return state
+
+    @graph.add(end=True)
+    def second(state: State) -> State:
+        state.combined = state.result_a + "b"
+        return state
+
+    graph.connect(first, second)
+
+    events = [e async for e in graph.build().astream_events()]
+
+    assert events[:-1] == [
+        NodeStarted("first"),
+        NodeFinished("first"),
+        NodeStarted("second"),
+        NodeFinished("second"),
+    ]
+    assert isinstance(events[-1], GraphFinished)
+    assert events[-1].state.combined == "ab"
+
+
+async def test_a_wave_reports_each_node_as_it_finishes_with_its_duration():
+    from deepharness.graph import NodeFinished, NodeStarted
+
+    graph = Graph(State)
+
+    @graph.add(start=True)
+    async def slow(state: State) -> State:
+        await asyncio.sleep(0.05)
+        state.result_a = "slow"
+        return state
+
+    @graph.add(start=True)
+    async def fast(state: State) -> State:
+        state.result_b = "fast"
+        return state
+
+    events = [e async for e in graph.build().astream_events()]
+
+    assert events[:2] == [NodeStarted("slow"), NodeStarted("fast")]
+    finished = [e for e in events if isinstance(e, NodeFinished)]
+    assert [e.name for e in finished] == ["fast", "slow"]
+    assert finished[1].duration >= 0.05
+    assert (events[-1].state.result_a, events[-1].state.result_b) == ("slow", "fast")
+
+
+async def test_a_failing_node_cancels_its_siblings():
+    graph = Graph(State)
+    finished_sibling = []
+
+    @graph.add(start=True)
+    async def boom(state: State) -> State:
+        raise ValueError("no")
+
+    @graph.add(start=True)
+    async def sibling(state: State) -> State:
+        await asyncio.sleep(0.2)
+        finished_sibling.append(True)
+        return state
+
+    with pytest.raises(ExecutionError):
+        await graph.build().run()
+    await asyncio.sleep(0.3)
+
+    assert finished_sibling == []
+
+
+async def test_build_on_event_observes_a_plain_run():
+    from deepharness.graph import GraphFinished, NodeFinished, NodeStarted
+
+    graph = Graph(State)
+
+    @graph.add(start=True, end=True)
+    def only(state: State) -> State:
+        state.combined = "done"
+        return state
+
+    seen = []
+
+    async def record(event):
+        seen.append(event)
+
+    result = await graph.build(on_event=record).run()
+
+    assert seen[:2] == [NodeStarted("only"), NodeFinished("only")]
+    assert isinstance(seen[-1], GraphFinished)
+    assert seen[-1].state is result

@@ -4,6 +4,8 @@ import asyncio
 import copy
 import dataclasses
 import inspect
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from ..errors import (
@@ -14,9 +16,14 @@ from ..errors import (
 )
 from .builder import Condition, NodeSpec
 from .diagram import to_text
+from .events import GraphEvent, GraphFinished, NodeFinished, NodeStarted
 
 Loop = tuple[str, str, Condition | None, frozenset[str]]
 """(source, target, condition, body) - see Graph.connect(loop=True)."""
+
+GraphEventHook = Callable[[GraphEvent], Awaitable[None] | None]
+"""Called with every event a run emits, so run() can be observed without
+iterating astream_events(). May be async."""
 
 
 class Executor:
@@ -32,7 +39,7 @@ class Executor:
     so the graph can iterate. max_steps bounds that.
     """
 
-    __slots__ = ("_loops", "_nodes", "_predecessors", "_state_type")
+    __slots__ = ("_loops", "_nodes", "_on_event", "_predecessors", "_state_type")
 
     def __init__(
         self,
@@ -40,11 +47,13 @@ class Executor:
         predecessors: dict[str, list[tuple[str, Condition | None]]],
         loops: list[Loop] | None = None,
         state_type: type | None = None,
+        on_event: GraphEventHook | None = None,
     ):
         self._nodes = nodes
         self._predecessors = predecessors
         self._loops = loops or []
         self._state_type = state_type
+        self._on_event = on_event
 
     def diagram(self) -> str:
         """A box-drawing picture of the graph, laid out top to bottom by wave.
@@ -63,6 +72,29 @@ class Executor:
         otherwise surfaces as an AttributeError from whichever node happened to
         touch a missing field first.
         """
+        async for event in self.astream_events(state, max_steps=max_steps):
+            if isinstance(event, GraphFinished):
+                return event.state
+        raise AssertionError("unreachable: astream_events always ends finished")
+
+    async def astream_events(
+        self, state: Any = None, *, max_steps: int = 50
+    ) -> AsyncIterator[GraphEvent]:
+        """Run the graph like run(), reporting each node as it starts and ends.
+
+        The only driver: run() consumes this and keeps the final state, so the
+        scheduling exists once. Ends with one GraphFinished carrying the state,
+        or raises what run() would. Each event goes to on_event, when one was
+        given, before the caller sees it.
+        """
+        async for event in self._events(state, max_steps):
+            if self._on_event is not None:
+                notified = self._on_event(event)
+                if inspect.isawaitable(notified):
+                    await notified
+            yield event
+
+    async def _events(self, state: Any, max_steps: int) -> AsyncIterator[GraphEvent]:
         if state is None:
             if self._state_type is None:
                 raise ConfigurationError(
@@ -81,15 +113,18 @@ class Executor:
 
         for _ in range(max_steps):
             if not ready:
-                return current
+                yield GraphFinished(current)
+                return
 
             snapshot = copy.deepcopy(current)
-            results = await asyncio.gather(
-                *(
-                    _run_node(name, self._nodes[name].func, copy.deepcopy(snapshot))
-                    for name in ready
-                )
-            )
+            for name in ready:
+                yield NodeStarted(name)
+            # Merged in wave order, so a reducer sees branches in a stable order,
+            # but reported in completion order, as each node actually ends.
+            results: list[Any] = [None] * len(ready)
+            async for index, result, took in self._run_wave(ready, snapshot):
+                results[index] = result
+                yield NodeFinished(ready[index], took)
 
             _merge(current, snapshot, results)
             finished.update(ready)
@@ -102,6 +137,31 @@ class Executor:
             ready += [name for name in reentered if name not in ready]
 
         raise StepLimitExceeded(max_steps, state=current)
+
+    async def _run_wave(
+        self, names: list[str], snapshot: Any
+    ) -> AsyncIterator[tuple[int, Any, float]]:
+        """Run one wave's nodes concurrently, yielding (position, state, seconds)."""
+        tasks = [
+            asyncio.create_task(
+                _timed_node(name, self._nodes[name].func, copy.deepcopy(snapshot))
+            )
+            for name in names
+        ]
+        position = {task: index for index, task in enumerate(tasks)}
+        try:
+            pending = set(tasks)
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in sorted(done, key=position.__getitem__):
+                    result, took = task.result()
+                    yield position[task], result, took
+        finally:
+            # A failed node ends the run, so its siblings' work has no reader.
+            for task in tasks:
+                task.cancel()
 
     def _reenter_loops(
         self, just_ran: set[str], finished: set[str], state: Any
@@ -151,6 +211,12 @@ class Executor:
                     changed = True
 
         return ready
+
+
+async def _timed_node(name: str, func: Any, state: Any) -> tuple[Any, float]:
+    started = time.monotonic()
+    result = await _run_node(name, func, state)
+    return result, time.monotonic() - started
 
 
 async def _run_node(name: str, func: Any, state: Any) -> Any:

@@ -11,12 +11,29 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..providers.base import TokenUsage
+
 
 @dataclass(slots=True)
 class StepStarted:
     """A think/act turn is about to ask the model. 1-based, capped by Budget.steps."""
 
     step: int
+
+
+@dataclass(slots=True)
+class StepFinished:
+    """The model's turn for a step is complete: what it cost and how long it took.
+
+    Emitted once the turn's stream ends, before any tool it asked for runs, so
+    `duration` is the model call alone. `usage` is None when the provider did
+    not report one. `duration` is in seconds and left out of equality: it is a
+    measurement of this run, not part of what happened.
+    """
+
+    step: int
+    usage: TokenUsage | None = None
+    duration: float = field(default=0.0, compare=False)
 
 
 @dataclass(slots=True)
@@ -37,10 +54,12 @@ class ToolFinished:
     than a fuller version that makes the model's next turn look unfounded.
 
     A tool that raised sets `failed`; the run continues either way, since the
-    error is handed back to the model as that call's result.
+    error is handed back to the model as that call's result. `duration` is the
+    call's wall-clock time in seconds, left out of equality like StepFinished's.
     """
 
     name: str
     result: str
     failed: bool = False
     call_id: str | None = None
+    duration: float = field(default=0.0, compare=False)
