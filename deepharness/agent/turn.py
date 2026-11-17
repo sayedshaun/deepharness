@@ -130,10 +130,7 @@ def rule(
                 arguments = dict(call.arguments)
                 paused.append(
                     PendingHumanInput(
-                        call_id=call.id,
-                        name=call.name,
-                        question=f"Run {call.name} with {arguments}?",
-                        arguments=arguments,
+                        call_id=call.id, name=call.name, arguments=arguments
                     )
                 )
             case _:
@@ -157,6 +154,10 @@ DENIED = "Denied by policy: this call is not permitted."
 
 NOT_RUN = "Not run: the turn stopped for approval of another call."
 """The turn paused on a gated call, so this one was left unrun."""
+
+REJECTED = "Not run: this call was rejected."
+"""A paused call was rejected. Who rejected it - a person, a policy, another
+model - is the caller's to know, so the model is only told what happened."""
 
 
 def record_unrun(messages: list[dict[str, Any]], calls: list[Any], note: str) -> None:
@@ -191,7 +192,7 @@ def settle(
         if not pending.approved:
             messages.append(
                 Message.tool(
-                    "Denied by the user.",
+                    REJECTED,
                     name=pending.name,
                     call_id=pending.call_id,
                 ).to_dict()

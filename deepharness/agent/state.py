@@ -153,7 +153,11 @@ class PendingHumanInput:
 
     call_id: str | None
     name: str
-    question: str
+    question: str = ""
+    """What a tool that raised HumanInputRequired asked. Empty for an approval
+    pause: the call itself is in name and arguments, and how to put it to a
+    person is the application's choice."""
+
     arguments: dict[str, Any] | None = None
     """Present only for an approval pause: the call to run once approved."""
 
