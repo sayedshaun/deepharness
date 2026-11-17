@@ -15,17 +15,19 @@ commands wrote.
 from __future__ import annotations
 
 import asyncio
+import io
 import subprocess
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Self
+from typing import Self
 
 from ..errors import ConfigurationError
 from ..tools.workspace import Workspace
 
 MAX_OUTPUT = 1_000_000
+_CHUNK = 64 * 1024  # Linux's default pipe buffer: one read usually empties it
 
 
 class Sandbox(ABC):
@@ -101,7 +103,8 @@ def run_process(
     with subprocess.Popen(
         argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     ) as process:
-        assert process.stdout is not None and process.stderr is not None
+        assert isinstance(process.stdout, io.BufferedReader)
+        assert isinstance(process.stderr, io.BufferedReader)
         stdout = _Capture(process.stdout, max_output)
         stderr = _Capture(process.stderr, max_output)
         try:
@@ -121,7 +124,7 @@ def run_process(
 class _Capture:
     """Reads a pipe on its own thread, keeping the first `limit` bytes."""
 
-    def __init__(self, stream: IO[bytes], limit: int):
+    def __init__(self, stream: io.BufferedReader, limit: int):
         self._kept = bytearray()
         self._dropped = 0
         self._thread = threading.Thread(
@@ -129,8 +132,8 @@ class _Capture:
         )
         self._thread.start()
 
-    def _read(self, stream: IO[bytes], limit: int) -> None:
-        while chunk := stream.read1(65536):  # type: ignore[attr-defined]
+    def _read(self, stream: io.BufferedReader, limit: int) -> None:
+        while chunk := stream.read1(_CHUNK):
             room = max(limit - len(self._kept), 0)
             self._kept += chunk[:room]
             self._dropped += len(chunk) - min(room, len(chunk))
