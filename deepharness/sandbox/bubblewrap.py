@@ -24,8 +24,7 @@ class Bubblewrap(Sandbox):
     cleared, so API keys held by this process are not visible to the command.
     `/tmp` and `$HOME` are a scratch directory that lives as long as the
     sandbox does. Each command gets its own process namespace, so nothing it
-    starts outlives it. There is no memory or process limit; use `Docker` with
-    `options` where you need one.
+    starts outlives it. Only time is limited, not memory or processes.
     """
 
     def __init__(
