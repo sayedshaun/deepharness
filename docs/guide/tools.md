@@ -147,7 +147,7 @@ executable, with no daemon and no image.
 | Environment | cleared, so this process's API keys are not visible |
 | Lasts for the block | a scratch `/tmp` and `$HOME` |
 | Background processes | end with the command that started them |
-| Limits | time only, not memory or processes |
+| Limits | time; memory and processes when you set them |
 
 `writable=False` mounts the workspace read-only and `network=True` allows network access; the
 defaults are a writable workspace and no network. `read_only=[...]` mounts extra host paths
@@ -155,6 +155,27 @@ read-only.
 
 No shell state carries between commands: each `run` is a fresh `sh -c`, so `cd` and `export`
 last only for that command.
+
+### Memory and process limits
+
+A timeout alone lets a command fill memory or fork without end until it fires. Set
+`max_memory_mb` and `max_processes` to cap each command, together with everything it starts:
+
+```python
+box = Bubblewrap("./project", max_memory_mb=2048, max_processes=256)
+```
+
+A process that goes past the memory limit is killed, as it would be on a machine that ran out
+of memory; the command sees it as `Killed` with exit code 137, and the rest of the command
+carries on. Past the process limit, starting another process fails, usually as
+`Cannot fork`. `max_processes` counts threads too, so leave room for a test runner or a
+compiler that uses many.
+
+The limits come from a cgroup that systemd creates for each command, so they need
+`systemd-run` and a systemd user session: true on most Linux desktops and servers you log in
+to, often not in a container or a CI job. `start()` reads the limits back from the cgroup and
+raises `ConfigurationError` if they are missing, so a sandbox never runs without a limit you
+asked for.
 
 What a sandbox cannot hide is the workspace itself. A `.env` or a key file in it is readable by
 every command, so keep secrets out of a workspace an agent works in. `network=True` gives the
