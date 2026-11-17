@@ -16,12 +16,16 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import IO, Self
 
+from ..errors import ConfigurationError
 from ..tools.workspace import Workspace
+
+MAX_OUTPUT = 1_000_000
 
 
 class Sandbox(ABC):
@@ -29,12 +33,24 @@ class Sandbox(ABC):
 
     `run` follows the stdlib's contract: a CompletedProcess whatever the exit
     code, and `subprocess.TimeoutExpired` once the command has been killed.
+    Each of stdout and stderr keeps at most `max_output` bytes: a command can
+    print far more than this process can hold before its timeout comes.
     """
 
-    def __init__(self, workspace: Workspace | str | Path = "."):
+    def __init__(
+        self,
+        workspace: Workspace | str | Path = ".",
+        *,
+        max_output: int = MAX_OUTPUT,
+    ):
         self._workspace = (
             workspace if isinstance(workspace, Workspace) else Workspace(workspace)
         )
+        if self._workspace.root == Path("/"):
+            raise ConfigurationError("a sandbox's workspace cannot be /")
+        if max_output < 1:
+            raise ConfigurationError("max_output must be at least 1")
+        self._max_output = max_output
 
     @property
     def workspace(self) -> Workspace:
@@ -75,13 +91,55 @@ class Sandbox(ABC):
 
 
 def run_process(
-    argv: list[str], cwd: Path, timeout: int
+    argv: list[str], cwd: Path, timeout: float, max_output: int
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        argv,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,  # a failing command is a result, not an exception
+    """`subprocess.run` with each stream capped at `max_output` bytes.
+
+    Past the cap a stream is still read and thrown away, so the command never
+    blocks on a full pipe, and the text ends with a note of how much was cut.
+    """
+    with subprocess.Popen(
+        argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    ) as process:
+        assert process.stdout is not None and process.stderr is not None
+        stdout = _Capture(process.stdout, max_output)
+        stderr = _Capture(process.stderr, max_output)
+        try:
+            process.wait(timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            stdout.join()
+            stderr.join()
+    return subprocess.CompletedProcess(
+        argv, process.returncode, stdout.text(), stderr.text()
     )
+
+
+class _Capture:
+    """Reads a pipe on its own thread, keeping the first `limit` bytes."""
+
+    def __init__(self, stream: IO[bytes], limit: int):
+        self._kept = bytearray()
+        self._dropped = 0
+        self._thread = threading.Thread(
+            target=self._read, args=(stream, limit), daemon=True
+        )
+        self._thread.start()
+
+    def _read(self, stream: IO[bytes], limit: int) -> None:
+        while chunk := stream.read1(65536):  # type: ignore[attr-defined]
+            room = max(limit - len(self._kept), 0)
+            self._kept += chunk[:room]
+            self._dropped += len(chunk) - min(room, len(chunk))
+
+    def join(self) -> None:
+        self._thread.join()
+
+    def text(self) -> str:
+        text = self._kept.decode("utf-8", errors="replace")
+        if self._dropped:
+            text += f"\n[output truncated: {self._dropped} more bytes]"
+        return text
