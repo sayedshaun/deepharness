@@ -7,6 +7,5 @@ so adding one (a cloud VM, say) touches nothing else.
 
 from .base import Sandbox
 from .bubblewrap import Bubblewrap
-from .docker import Docker
 
-__all__ = ["Bubblewrap", "Docker", "Sandbox"]
+__all__ = ["Bubblewrap", "Sandbox"]
