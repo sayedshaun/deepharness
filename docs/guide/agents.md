@@ -265,11 +265,13 @@ def wire_transfer(amount_usd: int, to: str) -> str:
 agent = Agent(llm, tools=[wire_transfer])
 state = await agent.arun("Pay the Acme invoice")
 print(state.stop_reason)  # "paused"
-print(state.paused[0].question)  # Run wire_transfer with {'amount_usd': 50000, ...}?
+print(
+    state.paused[0].name, state.paused[0].arguments
+)  # wire_transfer {'amount_usd': 50000, ...}
 
 state = await agent.arun(state.approve())  # runs it now, with the model's arguments
 # or
-state = await agent.arun(state.reject())  # records "Denied by the user." instead
+state = await agent.arun(state.reject())  # records that the call was rejected instead
 ```
 
 `approve()`/`reject()` return the state, so a resume is one line. With no `call_id` they resolve

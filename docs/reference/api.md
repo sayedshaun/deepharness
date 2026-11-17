@@ -100,15 +100,17 @@ when nothing matches.
 PendingHumanInput(
     call_id: str | None,
     name: str,
-    question: str,
+    question: str = "",
     arguments: dict | None = None,
     approved: bool | None = None,
 )
 ```
 
 One paused call. `needs_approval` is `True` when it came from a `requires_approval` tool — those
-have not run yet and carry the `arguments` to run with. Otherwise the pause came from a tool
-raising `HumanInputRequired`, and the human's answer becomes that call's result.
+have not run yet and carry the `arguments` to run with, and `question` is empty: how to put the
+call to a person is yours to word. Otherwise the pause came from a tool raising
+`HumanInputRequired`, `question` is what it asked, and the human's answer becomes that call's
+result.
 
 ### `Budget`
 

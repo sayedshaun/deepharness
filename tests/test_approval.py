@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import pytest
 
 from deepharness.agent import Agent, Toolbox, tool
+from deepharness.agent.turn import REJECTED
 from deepharness.errors import ConfigurationError, ToolDenied
 from deepharness.graph import Graph
 from deepharness.providers.base import CompletionResponse, ToolCall
@@ -88,10 +89,7 @@ async def test_rejecting_tells_the_model_instead_of_running():
 
     assert SENT == []
     assert state.output == "Understood, cancelled."
-    assert any(
-        m["role"] == "tool" and m["content"] == "Denied by the user."
-        for m in state.messages
-    )
+    assert any(m["role"] == "tool" and m["content"] == REJECTED for m in state.messages)
 
 
 async def test_the_arguments_the_model_sent_are_the_ones_that_run():
@@ -146,7 +144,7 @@ async def test_one_call_can_be_approved_by_id_and_another_rejected():
     state = await agent.arun(state)
 
     assert SENT == [1]
-    assert any(m["content"] == "Denied by the user." for m in state.messages)
+    assert any(m["content"] == REJECTED for m in state.messages)
     assert any(m["content"] == "sent $1" for m in state.messages)
 
 

@@ -99,7 +99,6 @@ def test_a_run_paused_on_an_approval_resumes_from_stored_data():
         PendingHumanInput(
             call_id="1",
             name="deploy",
-            question="Run deploy with {'target': 'prod'}?",
             arguments={"target": "prod"},
         )
     ]

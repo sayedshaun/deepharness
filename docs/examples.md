@@ -150,13 +150,15 @@ def wire_transfer(amount_usd: int, to: str) -> str:
 agent = Agent(llm, tools=[wire_transfer])
 state = await agent.arun("Pay the Acme invoice")
 print(state.stop_reason)  # "paused"
-print(state.paused[0].question)  # Run wire_transfer with {'amount_usd': 50000, ...}?
+print(
+    state.paused[0].name, state.paused[0].arguments
+)  # wire_transfer {'amount_usd': 50000, ...}
 
 state = await agent.arun(state.approve())  # now it runs
 ```
 
-`reject()` instead of `approve()` records "Denied by the user." as the result, so the model can
-say so rather than retrying. The gate is on the tool, not in the prompt, so a model cannot skip
+`reject()` instead of `approve()` records that the call was rejected as its result, so the model
+can say so rather than retrying. The gate is on the tool, not in the prompt, so a model cannot skip
 it by not asking. The pause is an ordinary returned state, not an exception, so it can be
 persisted and resumed in another process.
 
