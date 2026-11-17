@@ -7,6 +7,22 @@
 - Make the smallest change necessary.
 - Avoid unrelated refactoring.
 
+## Scope
+
+deepharness is a library: it ships the primitives and hooks agents are built from. It does not
+ship the applications built with it, or the infrastructure they run on. Do not implement either.
+
+- **Application-level work** decides something about a particular agent or product: prompt
+  text, canned messages, ready-made tools or agents, user interfaces and terminal IO, where data
+  is stored. Show these as copyable examples in the docs instead.
+- **Infrastructure-level work** runs, supervises or connects processes and services: worker
+  runtimes, process orchestration, IPC protocols, deployment, containers and VMs, network
+  gateways, secret management. Document how to combine the library with such infrastructure
+  instead.
+
+When a feature only works with one of these, add the smallest hook that lets the caller supply
+it, and stop there.
+
 ## Dependencies
 
 Runtime dependencies are strictly limited to:
@@ -156,6 +172,7 @@ Do not scatter raw HTTP calls throughout the application. Reuse clients where ap
 - Global mutable state
 - Premature abstractions
 - Third-party validation libraries; dataclasses plus explicit parsing instead
+- Application-level or infrastructure-level work (see Scope)
 
 ## Golden Rule
 
