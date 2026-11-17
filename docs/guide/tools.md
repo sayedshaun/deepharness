@@ -154,7 +154,8 @@ checks that `bwrap` works, and removes the directory when the block ends; an `ar
 block runs exactly where it would outside it. So a tool that reads files is only as safe as its
 own code, which is what `Workspace.resolve()` is for, and a tool that returns `os.environ`
 hands your API keys to the model. Running the whole agent isolated would need a separate worker
-process with a protocol back to yours; deepharness doesn't do that.
+process with a protocol back to yours; deepharness doesn't do that. The
+[threat model](threat-model.md) covers what else stays yours to handle.
 
 `Bubblewrap` is the backend deepharness ships: Linux namespaces through the `bwrap`
 executable, with no daemon and no image.

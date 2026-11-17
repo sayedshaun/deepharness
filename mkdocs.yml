@@ -79,6 +79,7 @@ nav:
       - Providers: guide/providers.md
       - Observability: guide/observability.md
       - Deep research: guide/research.md
+      - Threat model: guide/threat-model.md
   - Examples: examples.md
   - API reference: reference/api.md
 
